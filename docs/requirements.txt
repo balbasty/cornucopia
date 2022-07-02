@@ -1,4 +1,4 @@
 jinja2==3.0.3
-mkdocs
-mkdocs-apidoc
-mkdocs-gitbook
+sphinx
+sphinx-book-theme
+myst-parser
