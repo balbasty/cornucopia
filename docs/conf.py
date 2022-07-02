@@ -36,6 +36,7 @@ extensions = [
 ]
 
 autoapi_dirs = ['../cornucopia']
+source_suffix = ['.rst', '.md']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
