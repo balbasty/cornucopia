@@ -21,8 +21,10 @@ class ContrastTransform(Transform):
 
         Parameters
         ----------
-        nk : int, Number of classes
-        keep_background : bool, Do not change background mean/cov
+        nk : int
+            Number of classes
+        keep_background : bool
+            Do not change background mean/cov
         """
         super().__init__(shared=shared)
         self.keep_background = keep_background

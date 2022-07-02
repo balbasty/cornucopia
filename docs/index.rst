@@ -1,6 +1,3 @@
-Welcome to cornucopia's documentation!
-======================================
-
 .. mdinclude:: ../README.md
 
 .. toctree::

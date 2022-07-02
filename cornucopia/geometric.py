@@ -24,11 +24,16 @@ class ElasticTransform(Transform):
 
         Parameters
         ----------
-        dmax : [list of] float, Max displacement per dimension
-        unit : {'fov', 'vox'}, Unit of `dmax`.
-        shape : [list of] int, Number of spline control points
-        bound : {zeros, border, reflection}, Padding mode
-        shared : bool, Apply same transform to all images/channels
+        dmax : [list of] float
+            Max displacement per dimension
+        unit : {'fov', 'vox'}
+            Unit of `dmax`.
+        shape : [list of] int
+            Number of spline control points
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
         """
         super().__init__(shared=shared)
         if unit not in ('fov', 'vox'):
@@ -78,11 +83,16 @@ class RandomElasticTransform(RandomizedTransform):
 
         Parameters
         ----------
-        dmax : Sampler or float, Sampler or Upper bound for maximum displacement
-        shape : Sampler or int, Sampler or Upper bounds for number of control points
-        unit : {'fov', 'vox'}, Unit of `dmax`
-        bound : {zeros, border, reflection}, Padding mode
-        shared : bool, Apply same transform to all images/channels
+        dmax : Sampler or float
+            Sampler or Upper bound for maximum displacement
+        shape : Sampler or int
+            Sampler or Upper bounds for number of control points
+        unit : {'fov', 'vox'}
+            Unit of `dmax`
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
         """
         if not isinstance(dmax, Sampler):
             dmax = (0, dmax)
@@ -116,13 +126,20 @@ class AffineTransform(Transform):
 
         Parameters
         ----------
-        translations : [list of] float, Translation (per X/Y/Z)
-        rotations : [list of] float, Rotations (about Z/Y/X), in deg
-        shears : [list of] float, Translation (about Z/Y/Z)
-        zooms : [list of] float, Zoom about 1 (per X/Y/Z)
-        unit : {'fov', 'vox'}, Unit of `translations`.
-        bound : {zeros, border, reflection}, Padding mode
-        shared : bool, Apply same transform to all images/channels
+        translations : [list of] float
+            Translation (per X/Y/Z)
+        rotations : [list of] float
+            Rotations (about Z/Y/X), in deg
+        shears : [list of] float
+            Translation (about Z/Y/Z)
+        zooms : [list of] float
+            Zoom about 1 (per X/Y/Z)
+        unit : {'fov', 'vox'}
+            Unit of `translations`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
         """
         super().__init__(shared=shared)
         if unit not in ('fov', 'vox'):
@@ -238,9 +255,12 @@ class RandomAffineTransform(RandomizedTransform):
             Sampler or Upper bound for shears (about Z/Y/Z)
         zooms : Sampler or [list of] float
             Sampler or Upper bound for zooms about 1 (per X/Y/Z)
-        unit : {'fov', 'vox'}, Unit of `translations`.
-        bound : {zeros, border, reflection}, Padding mode
-        shared : bool, Apply same transform to all images/channels
+        unit : {'fov', 'vox'}
+            Unit of `translations`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
         """
         def to_range(vmax):
             if not isinstance(vmax, Sampler):
@@ -282,7 +302,6 @@ class MakeAffinePair(Transform):
     This Transform returns a tuple: (transformed_input, true_transform),
     where transformed_input has the same layout as the input and
     true_transform is a dictionary with keys 'flow' and 'affine'.
-
     """
 
     def __init__(self, transform=None):

@@ -19,8 +19,10 @@ class MultFieldTransform(Transform):
 
         Parameters
         ----------
-        shape : [list of] int, Number of spline control points
-        shared : bool, Apply the same field to all channels
+        shape : [list of] int
+            Number of spline control points
+        shared : bool
+            Apply the same field to all channels
         """
         super().__init__(shared=shared)
         self.shape = shape
@@ -46,8 +48,10 @@ class GlobalMultTransform(Transform):
 
         Parameters
         ----------
-        value : float, Multiplicative value
-        shared : bool, Apply the same field to all channels
+        value : float
+            Multiplicative value
+        shared : bool
+            Apply the same field to all channels
         """
         super().__init__(shared=shared)
         self.value = value
@@ -66,8 +70,10 @@ class RandomGlobalMultTransform(RandomizedTransform):
 
         Parameters
         ----------
-        value : Sampler or [pair of] float, Max multiplicative value
-        shared : bool, Apply same transform to all images/channels
+        value : Sampler or [pair of] float
+            Max multiplicative value
+        shared : bool
+            Apply same transform to all images/channels
         """
         def to_range(value):
             if not isinstance(value, Sampler):
@@ -89,8 +95,10 @@ class GlobalAdditiveTransform(Transform):
 
         Parameters
         ----------
-        value : float, Additive value
-        shared : bool, Apply the same field to all channels
+        value : float
+            Additive value
+        shared : bool
+            Apply the same field to all channels
         """
         super().__init__(shared=shared)
         self.value = value
@@ -109,8 +117,10 @@ class RandomGlobalAdditiveTransform(RandomizedTransform):
 
         Parameters
         ----------
-        value : Sampler or [pair of] float, Max Additive value
-        shared : bool, Apply same transform to all images/channels
+        value : Sampler or [pair of] float
+            Max Additive value
+        shared : bool
+            Apply same transform to all images/channels
         """
         def to_range(value):
             if not isinstance(value, Sampler):
@@ -137,10 +147,14 @@ class GammaTransform(Transform):
 
         Parameters
         ----------
-        gamma : float, Exponent of the Gamma transform
-        vmin : float, Value to use as the minimum (default: x.min())
-        vmax : float, Value to use as the maximum (default: x.max())
-        shared : bool, Use the same vmin/vmax for all channels
+        gamma : float
+            Exponent of the Gamma transform
+        vmin : float
+            Value to use as the minimum (default: x.min())
+        vmax : float
+            Value to use as the maximum (default: x.max())
+        shared : bool
+            Use the same vmin/vmax for all channels
         """
         super().__init__(shared=shared)
         self.gamma = gamma
@@ -188,11 +202,16 @@ class QuantileTransform(Transform):
 
         Parameters
         ----------
-        pmin : (0..1), lower quantile
-        pmax : (0..1), upper quantile
-        vmin : float, lower target value
-        vmax : float, upper target value
-        clamp : bool, Clamp values outside (vmin, vmax)
+        pmin : (0..1)
+            Lower quantile
+        pmax : (0..1)
+            Upper quantile
+        vmin : float
+            Lower target value
+        vmax : float
+            Upper target value
+        clamp : bool
+            Clamp values outside (vmin, vmax)
         """
         super().__init__(shared=shared)
         self.pmin = pmin

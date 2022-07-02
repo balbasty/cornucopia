@@ -20,7 +20,8 @@ class OneHotTransform(Transform):
         keep_background : bool
             If True, the first one-hot class is the background class,
             and the one hot tensor sums to one.
-        dtype : torch.dtype, Use a different dtype for the one-hot
+        dtype : torch.dtype
+            Use a different dtype for the one-hot
         """
         super().__init__()
         self.label_map = label_map

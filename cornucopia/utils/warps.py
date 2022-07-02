@@ -108,8 +108,10 @@ def affine_flow(affine, shape):
 
     Parameters
     ----------
-    affine : ([B], D+1, D+1) tensor, Affine matrix
-    shape : (D,) list[int], Lattice size
+    affine : ([B], D+1, D+1) tensor
+        Affine matrix
+    shape : (D,) list[int]
+        Lattice size
 
     Returns
     -------
@@ -192,8 +194,8 @@ def apply_flow(image, flow, has_identity=False, **kwargs):
         Note that the order of the last dimension is inverse of what's
         usually expected in torch's grid_sample.
     has_identity : bool, default=False
-        If False, `flow` is contains relative displacement.
-        If False, `flow` contains absolute coordinates.
+        - If False, `flow` is contains relative displacement.
+        - If True, `flow` contains absolute coordinates.
 
     Returns
     -------
@@ -229,9 +231,9 @@ def downsample(image, factor=None, shape=None, anchor='center'):
 
     Parameters
     ----------
-    image : (B, C, *shape_in)
+    image : (B, C, *shape_in) tensor
     factor OR shape : int or list[int]
-    anchor : {'center', 'edge'}
+    anchor : {'center', 'edge'} tensor
 
     Returns
     -------
@@ -260,13 +262,13 @@ def upsample(image, factor=None, shape=None, anchor='center'):
 
     Parameters
     ----------
-    image : (B, C, *shape_in)
+    image : (B, C, *shape_in) tensor
     factor OR shape : int or list[int]
     anchor : {'center', 'edge'}
 
     Returns
     -------
-    image : (B, C, *shape_out)
+    image : (B, C, *shape_out) tensor
 
     """
     if shape and factor:
@@ -287,13 +289,13 @@ def downsample_flow(flow, factor=None, shape=None, anchor='center'):
 
     Parameters
     ----------
-    flow : (B, *shape_in, D)
+    flow : (B, *shape_in, D) tensor
     factor OR shape : int or list[int]
     anchor : {'center', 'edge'}
 
     Returns
     -------
-    flow : (B, *shape_out, D)
+    flow : (B, *shape_out, D) tensor
 
     """
     shape_in = flow.shape[1:-1]
@@ -326,13 +328,13 @@ def upsample_flow(flow, factor=None, shape=None, anchor='center'):
 
     Parameters
     ----------
-    flow : (B, *shape_in, D)
+    flow : (B, *shape_in, D) tensor
     factor OR shape : int or list[int]
     anchor : {'center', 'edge'}
 
     Returns
     -------
-    flow : (B, *shape_out, D)
+    flow : (B, *shape_out, D) tensor
 
     """
     shape_in = flow.shape[1:-1]
@@ -364,14 +366,14 @@ def downsample_convlike(image, kernel_size, stride, padding=0):
 
     Parameters
     ----------
-    image : (B, C, *shape_in)
+    image : (B, C, *shape_in) tensor
     kernel_size : int or list[int]
     stride : int or list[int]
     padding : int or list[int]
 
     Returns
     -------
-    image : (B, C, *shape_out)
+    image : (B, C, *shape_out) tensor
 
     """
     shape_in = image.shape[2:]
@@ -400,7 +402,7 @@ def downsample_flow_convlike(flow, kernel_size, stride, padding=0):
 
     Parameters
     ----------
-    flow : (B, *shape_in, D)
+    flow : (B, *shape_in, D) tensor
         Input image
     kernel_size : int or list[int]
         Kernel size of the equivalent convolution
@@ -409,7 +411,7 @@ def downsample_flow_convlike(flow, kernel_size, stride, padding=0):
 
     Returns
     -------
-    flow : (B, *shape_out, D)
+    flow : (B, *shape_out, D) tensor
 
     """
     # downsample flow
@@ -431,14 +433,14 @@ def upsample_convlike(image, kernel_size, stride, padding=0, shape=None):
 
     Parameters
     ----------
-    image : (B, C, *shape_in)
+    image : (B, C, *shape_in) tensor
     kernel_size : int or list[int]
     stride : int or list[int]
     shape : int or list[int]
 
     Returns
     -------
-    image : (B, C, *shape_out)
+    image : (B, C, *shape_out) tensor
 
     """
     shape_in = image.shape[2:]
@@ -470,7 +472,7 @@ def upsample_flow_convlike(flow, kernel_size, stride, padding=0, shape=None):
 
     Parameters
     ----------
-    flow : (B, *shape_in, D)
+    flow : (B, *shape_in, D) tensor
         Input image
     kernel_size : int or list[int]
         Kernel size of the equivalent convolution
@@ -479,7 +481,7 @@ def upsample_flow_convlike(flow, kernel_size, stride, padding=0, shape=None):
 
     Returns
     -------
-    flow : (B, *shape_out, D)
+    flow : (B, *shape_out, D) tensor
 
     """
     # upsample flow
@@ -501,13 +503,13 @@ def compose_flows(flow_left, flow_right, has_identity=False):
 
     Parameters
     ----------
-    flow_left : (B, *shape, D)
-    flow_right : (B, *shape, D)
+    flow_left : (B, *shape, D) tensor
+    flow_right : (B, *shape, D) tensor
     has_identity : bool, default=False
 
     Returns
     -------
-    flow : (B, *shape, D)
+    flow : (B, *shape, D) tensor
 
     """
     if has_identity:
@@ -525,12 +527,12 @@ def bracket(vel_left, vel_right):
 
     Parameters
     ----------
-    vel_left : (B, *shape, D)
-    vel_right : (B, *shape, D)
+    vel_left : (B, *shape, D) tensor
+    vel_right : (B, *shape, D) tensor
 
     Returns
     -------
-    bkt : (B, *shape, D)
+    bkt : (B, *shape, D) tensor
 
     """
     return (compose_flows(vel_left, vel_right) -
@@ -542,14 +544,14 @@ def exp_velocity(vel, steps=8):
 
     Parameters
     ----------
-    vel : (B, *shape, D)
+    vel : (B, *shape, D) tensor
         Stationary velocity
     steps : int, default=8
         Number of scaling and squaring steps
 
     Returns
     -------
-    flow : (B, *shape, D)
+    flow : (B, *shape, D) tensor
         Displacement field
 
     """
@@ -567,14 +569,14 @@ def compose_velocities(vel_left, vel_right, order=2):
 
     Parameters
     ----------
-    vel_left : (B, *shape, D)
-    vel_right : (B, *shape, D)
+    vel_left : (B, *shape, D) tensor
+    vel_right : (B, *shape, D) tensor
     order : 1..4, default=2
         Truncation order.
 
     Returns
     -------
-    vel : (B, *shape, D)
+    vel : (B, *shape, D) tensor
 
     """
     vel = vel_left + vel_right

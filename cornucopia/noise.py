@@ -13,8 +13,10 @@ class GaussianNoiseTransform(Transform):
 
         Parameters
         ----------
-        sigma : float, Standard deviation
-        shared : bool, Add the exact same values to all channels/images
+        sigma : float
+            Standard deviation
+        shared : bool
+            Add the exact same values to all channels/images
         """
         super().__init__(shared=shared)
         self.sigma = sigma
@@ -37,9 +39,12 @@ class ChiNoiseTransform(Transform):
 
         Parameters
         ----------
-        sigma : float, Standard deviation
-        nb_channels : int, Number of independent channels
-        shared : bool, Add the exact same values to all channels/images
+        sigma : float
+            Standard deviation
+        nb_channels : int
+            Number of independent channels
+        shared : bool
+            Add the exact same values to all channels/images
         """
         super().__init__(shared=shared)
         self.sigma = sigma
