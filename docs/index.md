@@ -7,3 +7,7 @@ mostly targetted at (medical) imaging. `cornucopia` is written using a PyTorch b
 expected to backpropagate through its layers, it can be used within any dataloader pipeline, independent of the downstream learning framework
 (pytorch, tensorflow, jax, ...).
 
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
