@@ -35,7 +35,6 @@ extensions = [
     'autoapi.extension',
 ]
 
-autoapi_dirs = ['../cornucopia']
 source_suffix = ['.rst', '.md']
 
 # Add any paths that contain templates here, relative to this directory.
@@ -46,6 +45,22 @@ templates_path = ['_templates']
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+
+# -- AutoAPI ------------------------------------------------------------------
+
+autoapi_dirs = ['../cornucopia']
+
+autoapi_options = [
+    'members', 
+    'undoc-members', 
+#    'private-members', 
+    'show-inheritance', 
+    'show-module-summary', 
+#    'special-members', 
+    'imported-members',
+]
+
+autoapi_python_class_content = 'both'
 
 # -- Options for HTML output -------------------------------------------------
 
