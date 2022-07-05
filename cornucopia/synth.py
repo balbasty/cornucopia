@@ -36,7 +36,17 @@ __all__ = ['SynthTransform']
 
 
 class SynthTransform(SequentialTransform):
-    """Synthesize a contrast and imaging artefacts from a label map"""
+    """Synthesize a contrast and imaging artefacts from a label map
+
+    References
+    ----------
+    ..[1] "SynthSeg: Domain Randomisation for Segmentation of Brain
+           MRI Scans of any Contrast and Resolution"
+          Benjamin Billot, Douglas N. Greve, Oula Puonti, Axel Thielscher,
+          Koen Van Leemput, Bruce Fischl, Adrian V. Dalca, Juan Eugenio Iglesias
+          2021
+          https://arxiv.org/abs/2107.09559
+    """
 
     def __init__(self,
                  gmm_fwhm=10,
@@ -63,3 +73,17 @@ class SynthTransform(SequentialTransform):
         lowres = SwitchTransform([lowres2d, lowres3d])
 
         super().__init__([gmm, bias, gamma, smooth, lowres])
+
+
+class SynthPipeline(SequentialTransform):
+
+    def __init__(self):
+        super().__init__([])
+
+    def forward(self, x):
+        seg = self.load(x)
+        seg = self.deform(seg)
+        img = self.synth(seg)
+        return img, seg
+
+

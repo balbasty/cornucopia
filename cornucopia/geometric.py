@@ -12,8 +12,10 @@ from .utils import warps
 from .utils.py import ensure_list
 
 
-__all__ = ['ElasticTransform', 'RandomElasticTransform', 'AffineTransform',
-           'RandomAffineTransform', 'MakeAffinePair']
+__all__ = ['ElasticTransform', 'RandomElasticTransform',
+           'AffineTransform', 'RandomAffineTransform',
+           'AffineElasticTransform', 'RandomAffineElasticTransform',
+           'MakeAffinePair']
 
 
 class ElasticTransform(Transform):
@@ -56,7 +58,22 @@ class ElasticTransform(Transform):
         self.shape = shape
         self.steps = steps
 
-    def get_parameters(self, x):
+    def get_parameters(self, x, fullsize=True):
+        """
+
+        Parameters
+        ----------
+        x : (C, *shape) tensor
+        fullsize : bool
+
+        Returns
+        -------
+        warp : (C, D, *shape) tensor, if `fullsize`
+            Dense, exponentiated warp
+        control : (C, D, *self.shape)
+            Spline control points
+
+        """
         batch, *fullshape = x.shape
         ndim = len(fullshape)
         smallshape = ensure_list(self.shape, ndim)
@@ -69,6 +86,8 @@ class ElasticTransform(Transform):
         t = torch.rand([batch, ndim, *smallshape], **backend)
         for d in range(ndim):
             t[:, d].sub_(0.5).mul_(2*dmax[d])
+        if not fullsize:
+            return t
         ft = interpol.resize(t, shape=fullshape, interpolation=3,
                              prefilter=False)
         if self.steps:
@@ -87,7 +106,7 @@ class RandomElasticTransform(RandomizedTransform):
     Elastic Transform with random parameters.
     """
 
-    def __init__(self, dmax=0.3, shape=10,
+    def __init__(self, dmax=0.15, shape=10,
                  unit='fov', bound='border', steps=0, shared=True):
         """
 
@@ -167,7 +186,7 @@ class AffineTransform(Transform):
         self.unit = unit
         self.bound = bound
 
-    def get_parameters(self, x):
+    def get_parameters(self, x, fullsize=True):
         batch, *fullshape = x.shape
         ndim = len(fullshape)
         backend = dict(dtype=x.dtype, device=x.device)
@@ -233,6 +252,8 @@ class AffineTransform(Transform):
         A = O.inverse() @ A
         A = T @ A
 
+        if not fullsize:
+            return A
         t = warps.affine_flow(A, fullshape).movedim(-1, 0)
         return t, A
 
@@ -308,62 +329,162 @@ class RandomAffineTransform(RandomizedTransform):
 
 class AffineElasticTransform(Transform):
     """
-    Affine + Elastic transform.
+    Affine + Elastic [+ Patch] transform.
     """
 
     def __init__(self, dmax=0.1, shape=5, steps=0,
                  translations=0, rotations=0, shears=0, zooms=0,
-                 unit='fov', bound='border', shared=True):
+                 unit='fov', bound='border', patch=None, shared=True):
+        """
+
+        Parameters
+        ----------
+        dmax : [list of] float
+            Max displacement per dimension
+        shape : [list of] int
+            Number of spline control points
+        steps : int
+            Number of scaling-and-squaring integration steps
+        translations : [list of] float
+            Translation (per X/Y/Z)
+        rotations : [list of] float
+            Rotations (about Z/Y/X), in deg
+        shears : [list of] float
+            Translation (about Z/Y/Z)
+        zooms : [list of] float
+            Zoom about 1 (per X/Y/Z)
+        unit : {'fov', 'vox'}
+            Unit of `translations` and `dmax`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        patch : [list of] int
+            Size of random patch to extract
+        shared : bool
+            Apply same transform to all images/channels
+        """
         super().__init__(shared=shared)
+        self.patch = patch
         self.affine = AffineTransform(translations, rotations, shears, zooms,
                                       unit, bound, shared)
         self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, shared)
 
     def get_parameters(self, x):
-        _, A = self.affine.get_parameters(x)
-        ft, t = self.elastic.get_parameters(x)
+        """
+
+        Parameters
+        ----------
+        x : (C, *shape) tensor
+
+        Returns
+        -------
+        warp : (C, D, *shape) tensor
+        control : (C, D, *self.shape) tensor
+        affine : (D+1, D+1) tensor
+
+        """
+        A = self.affine.get_parameters(x, fullsize=False)   # (D+1, D+1)
+        t = self.elastic.get_parameters(x, fullsize=False)  # (C, D, *shape)
         ndim = A.shape[-1] - 1
-        ft = warps.add_identity_(ft)
+        fullshape = x.shape[1:]
+        smallshape = t.shape[2:]
+        backend = dict(dtype=x.dtype, device=x.device)
+        if not x.dtype.is_floating_point:
+            backend['dtype'] = torch.get_default_dtype()
+        if self.patch:
+            patchshape = ensure_list(self.patch, ndim)
+        else:
+            patchshape = fullshape
+        ft = warps.identity(patchshape, **backend)          # (*shape, D)
+        if self.patch:
+            patch_origin = [math.randint(s-p) for s, p in zip(fullshape, patch)]
+            ft += torch.as_tensor(patch_origin, **backend)
         ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
-        ft += A[:ndim, -1]
-        ft = warps.sub_identity(ft)
+        ft = ft.add_(A[:ndim, -1])
+        scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
+        scale = torch.as_tensor(scale, **backend)
+        dp = warps.apply_flow(t, ft * scale, padding_mode='zeros',
+                              has_identity=True)
+        ft = dp.add_(ft.movedim(-1, 0))
         return ft, t, A
 
     def apply_transform(self, x, parameters):
         flow, controls, affine = parameters
         x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                             padding_mode=self.bound)
+                             padding_mode=self.elastic.bound,
+                             has_identity=True)
         return x[:, 0]
 
 
-class RandomAffineElasticTransform(Transform):
+class RandomAffineElasticTransform(RandomizedTransform):
     """
-    Affine + Elastic transform.
+    Random Affine + Elastic transform.
     """
 
-    def __init__(self, dmax=0.3, shape=10, steps=0,
+    def __init__(self, dmax=0.15, shape=10, steps=0,
                  translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                 unit='fov', bound='border', shared=True):
-        super().__init__(shared=shared)
-        self.affine = RandomAffineTransform(translations, rotations, shears, zooms,
-                                            unit, bound, shared)
-        self.elastic = RandomElasticTransform(dmax, shape, unit, bound, steps, shared)
+                 unit='fov', bound='border', patch=None, shared=True):
+        """
+
+        Parameters
+        ----------
+        dmax : Sampler or float
+            Sampler or Upper bound for maximum displacement
+        shape : Sampler or int
+            Sampler or Upper bounds for number of control points
+        translations : Sampler or [list of] float
+            Sampler or Upper bound for translation (per X/Y/Z)
+        rotations : Sampler or [list of] float
+            Sampler or Upper bound for rotations (about Z/Y/X), in deg
+        shears : Sampler or [list of] float
+            Sampler or Upper bound for shears (about Z/Y/Z)
+        zooms : Sampler or [list of] float
+            Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        unit : {'fov', 'vox'}
+            Unit of `translations`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        patch : [list of] int
+            Size of random patch to extract
+        shared : bool
+            Apply same transform to all images/channels
+        """
+        def to_range(vmax):
+            if not isinstance(vmax, Sampler):
+                if isinstance(vmax, (list, tuple)):
+                    vmax = ([-v for v in vmax], vmax)
+                else:
+                    vmax = (-vmax, vmax)
+            return vmax
+        if not isinstance(dmax, Sampler):
+            dmax = (0, dmax)
+        if not isinstance(shape, Sampler):
+            shape = (2, shape)
+
+        self._sample = dict(dmax=Uniform.make(dmax),
+                            shape=RandInt.make(shape),
+                            translations=Uniform.make(to_range(translations)),
+                            rotations=Uniform.make(to_range(rotations)),
+                            shears=Uniform.make(to_range(shears)),
+                            zooms=Uniform.make(to_range(zooms)))
+        super().__init__(self._build, self._sample, shared=shared)
+        self.unit = unit
+        self.bound = bound
+        self.steps = steps
+        self.patch = patch
 
     def get_parameters(self, x):
-        _, A = self.affine.get_parameters(x)
-        ft, t = self.elastic.get_parameters(x)
-        ndim = A.shape[-1] - 1
-        ft = warps.add_identity_(ft)
-        ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
-        ft += A[:ndim, -1]
-        ft = warps.sub_identity(ft)
-        return ft, t, A
+        ndim = x.dim() - 1
+        if isinstance(self.sample, (list, tuple)):
+            return self.subtransform(*[f(ndim) for f in self.sample])
+        if hasattr(self.sample, 'items'):
+            return self.subtransform(**{k: f(ndim) for k, f in self.sample.items()})
+        return self.subtransform(self.sample(ndim))
 
-    def apply_transform(self, x, parameters):
-        flow, controls, affine = parameters
-        x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                             padding_mode=self.bound)
-        return x[:, 0]
+    def _build(self, dmax, shape, translations, rotations, shears, zooms):
+        return AffineElasticTransform(
+            dmax=dmax, shape=shape, translations=translations,
+            rotations=rotations, shears=shears, zooms=zooms,
+            unit=self.unit, bound=self.bound, patch=self.patch)
 
 
 class MakeAffinePair(Transform):
