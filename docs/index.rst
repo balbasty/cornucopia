@@ -1,4 +1,5 @@
-.. include:: ../README.md
+```{include} ../README.md
+```
 
 .. toctree::
    :maxdepth: 2
