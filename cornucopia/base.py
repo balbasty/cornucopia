@@ -58,18 +58,17 @@ class Transform(nn.Module):
     the parent anf child transform. For example, we may want to randomly
     decide to apply (or not) a bias field at the parent level but, when
     applied, let the bias field be different in each channel. Such a
-    transform would be defined as:
-    ```python
-    t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
-    ```
+    transform would be defined as::
+
+        t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
 
     Furthermore, the addition of two transforms implictly defines
-    (or extends) a `SequentialTransform`:
-    ```python
-    t1 = MultFieldTransform()
-    t2 = GaussianNoiseTransform()
-    seq = t1 + t2
-    ```
+    (or extends) a `SequentialTransform`::
+
+        t1 = MultFieldTransform()
+        t2 = GaussianNoiseTransform()
+        seq = t1 + t2
+
     """
 
     def __init__(self, shared=False):
@@ -254,7 +253,22 @@ class Transform(nn.Module):
 
 
 class SequentialTransform(Transform):
-    """A sequence of transforms"""
+    """A sequence of transforms
+
+    Sequences can be built explicitly, or simply by adding transforms
+    together::
+
+        t1 = MultFieldTransform()
+        t2 = GaussianNoiseTransform()
+        seq = SequentialTransform([t1, t2])     # explicit
+        seq = t1 + t2                           # implicit
+
+    Sequences can also be extended by addition::
+
+        seq += SmoothTransform()
+
+
+    """
 
     def __init__(self, transforms):
         super().__init__()
@@ -413,11 +427,11 @@ class MappedTransform(Transform):
 
     Examples
     --------
-    ```python
-    dat = {'img': torch.randn([1, 32, 32]),
-           'seg': torch.randn([3, 32, 32]).softmax(0)}
-    dat = MappedTransform(img=GaussianNoise())(dat)
-    ```
+    ::
+        dat = {'img': torch.randn([1, 32, 32]),
+               'seg': torch.randn([3, 32, 32]).softmax(0)}
+        dat = MappedTransform(img=GaussianNoise())(dat)
+
     """
 
     def __init__(self, *maybe_map, **map):
