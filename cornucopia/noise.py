@@ -83,9 +83,12 @@ class GFactorTransform(Transform):
         self.gfactor = MultFieldTransform(shape, vmin=vmin, vmax=vmax)
 
     def get_parameters(self, x):
-        noise = self.noise.get_parameters(x)
+        noisetrf, noise = self.noise, self.noise.get_parameters(x)
+        if isinstance(noise, Transform):
+            noisetrf, noise = noise, noise.get_parameters(x)
         gfactor = self.gfactor.get_parameters(x)
-        return noise * gfactor
+        return noisetrf, noise * gfactor
 
     def apply_transform(self, x, parameters):
-        return self.noise.apply_transform(x, parameters)
+        noisetrf, noiseprm = parameters
+        return noisetrf.apply_transform(x, noiseprm)

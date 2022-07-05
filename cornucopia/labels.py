@@ -186,6 +186,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
         super().__init__(GaussianMixtureTransform, sample, shared=shared)
 
     def get_parameters(self, x):
-        return self.subtransform(**{k: f(len(x)) if callable(f)
-                                    else ensure_list(f, len(x))
+        n = len(x) if x.dtype.is_floating_point else x.max() + 1
+        return self.subtransform(**{k: f(n) if callable(f)
+                                    else ensure_list(f, n)
                                     for k, f in self.sample.items()})

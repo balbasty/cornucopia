@@ -136,7 +136,7 @@ def conv1d(input, kernel, dim=-1,  padding='same',
     indim = input.dim()
     input = input.movedim(dim, -1)
     while input.dim() < 5:
-        input = input.unsqueeze(-4)
+        input = input.unsqueeze(max(-input.dim()-1, -4))
     batch = input.shape[:1]
     if input.dim() > 5:
         batch = input.shape[:-4]
@@ -166,7 +166,7 @@ def conv1d(input, kernel, dim=-1,  padding='same',
     # reshape
     output = output.reshape([*batch, *output.shape[1:]])
     while output.dim() > indim:
-        output = output.squeeze(-4)
+        output = output.squeeze(max(-output.dim(), -4))
     output = output.movedim(-1, dim)
     return output
 
