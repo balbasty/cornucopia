@@ -1,5 +1,6 @@
 import torch
 from .base import Transform
+from .intensity import MultFieldTransform
 
 
 __all__ = ['GaussianNoiseTransform', 'ChiNoiseTransform']
@@ -24,7 +25,7 @@ class GaussianNoiseTransform(Transform):
     def get_parameters(self, x):
         return torch.randn_like(x).mul_(self.sigma)
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         return x + parameters
 
 
@@ -57,5 +58,34 @@ class ChiNoiseTransform(Transform):
         noise /= self.nb_channels
         return noise
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         return x.square().add_(parameters).sqrt_()
+
+
+class GFactorTransform(Transform):
+
+    def __init__(self, noise, shape=5, vmin=1, vmax=4):
+        """
+
+        Parameters
+        ----------
+        noise : Transform
+            A transform that applies additive noise
+        shape : float
+            Number of control points
+        vmin : float
+            Minimum g-factor
+        vmax : float
+            Maximum g-factor
+        """
+        super().__init__()
+        self.noise = noise
+        self.gfactor = MultFieldTransform(shape, vmin=vmin, vmax=vmax)
+
+    def get_parameters(self, x):
+        noise = self.noise.get_parameters(x)
+        gfactor = self.gfactor.get_parameters(x)
+        return noise * gfactor
+
+    def apply_transform(self, x, parameters):
+        return self.noise.apply_transform(x, parameters)

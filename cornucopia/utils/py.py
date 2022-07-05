@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 
-def ensure_list(x, size=None, crop=True):
+def ensure_list(x, size=None, crop=True, **kwargs):
     """Ensure that an object is a list (of size at last dim)
 
     If x is a list, nothing is done (no copy triggered).
@@ -16,7 +16,8 @@ def ensure_list(x, size=None, crop=True):
     elif not isinstance(x, list):
         x = list(x)
     if size and len(x) < size:
-        x += x[-1:] * (size - len(x))
+        default = kwargs.get('default', x[-1])
+        x += [default] * (size - len(x))
     if size and crop:
         x = x[:size]
     return x
@@ -61,6 +62,80 @@ def make_vector(input, n=None, crop=True, *args,
         default = input[-1]
     default = input.new_full([n-len(input)], default)
     return torch.cat([input, default])
+
+
+def cumprod(sequence, reverse=False, exclusive=False):
+    """Perform the cumulative product of a sequence of elements.
+
+    Parameters
+    ----------
+    sequence : any object that implements `__iter__`
+        Sequence of elements for which the `__mul__` operator is defined.
+    reverse : bool, default=False
+        Compute cumulative product from right-to-left:
+        `cumprod([a, b, c], reverse=True) -> [a*b*c, b*c, c]`
+    exclusive : bool, default=False
+        Exclude self from the cumulative product:
+        `cumprod([a, b, c], exclusive=True) -> [1, a, a*b]`
+
+    Returns
+    -------
+    product : list
+        Product of the elements in the sequence.
+
+    """
+    if reverse:
+        sequence = reversed(sequence)
+    accumulate = None
+    seq = [1] if exclusive else []
+    for elem in sequence:
+        if accumulate is None:
+            accumulate = elem
+        else:
+            accumulate = accumulate * elem
+        seq.append(accumulate)
+    if exclusive:
+        seq = seq[:-1]
+    if reverse:
+        seq = list(reversed(seq))
+    return seq
+
+
+def cumsum(sequence, reverse=False, exclusive=False):
+    """Perform the cumulative sum of a sequence of elements.
+
+    Parameters
+    ----------
+    sequence : any object that implements `__iter__`
+        Sequence of elements for which the `__sum__` operator is defined.
+    reverse : bool, default=False
+        Compute cumulative product from right-to-left:
+        `cumprod([a, b, c], reverse=True) -> [a+b+c, b+c, c]`
+    exclusive : bool, default=False
+        Exclude self from the cumulative product:
+        `cumprod([a, b, c], exclusive=True) -> [0, a, a+b]`
+
+    Returns
+    -------
+    sum : list
+        Sum of the elements in the sequence.
+
+    """
+    if reverse:
+        sequence = reversed(sequence)
+    accumulate = None
+    seq = [0] if exclusive else []
+    for elem in sequence:
+        if accumulate is None:
+            accumulate = elem
+        else:
+            accumulate = accumulate + elem
+        seq.append(accumulate)
+    if exclusive:
+        seq = seq[:-1]
+    if reverse:
+        seq = list(reversed(seq))
+    return seq
 
 
 def _compare_versions(version1, mode, version2):

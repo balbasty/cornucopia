@@ -4,7 +4,6 @@ from .base import Transform, RandomizedTransform
 from .random import Sampler, Uniform
 from .utils.py import ensure_list
 
-
 __all__ = ['MultFieldTransform', 'GlobalMultTransform',
            'RandomGlobalMultTransform', 'GlobalAdditiveTransform',
            'RandomGlobalAdditiveTransform', 'GammaTransform',
@@ -14,18 +13,22 @@ __all__ = ['MultFieldTransform', 'GlobalMultTransform',
 class MultFieldTransform(Transform):
     """Smooth multiplicative (bias) field"""
 
-    def __init__(self, shape=5, shared=False):
+    def __init__(self, shape=5, vmin=0, vmax=1, shared=False):
         """
 
         Parameters
         ----------
         shape : [list of] int
             Number of spline control points
+        amplitude : float
+            Maximum value
         shared : bool
             Apply the same field to all channels
         """
         super().__init__(shared=shared)
         self.shape = shape
+        self.vmax = vmax
+        self.vmin = vmin
 
     def get_parameters(self, x):
         batch, *fullshape = x.shape
@@ -34,9 +37,10 @@ class MultFieldTransform(Transform):
         b = torch.rand([batch, *smallshape], **backend)
         b = interpol.resize(b, shape=fullshape, interpolation=3,
                             prefilter=False)
+        b.mul_(self.vmax-self.vmin).add_(self.vmin)
         return b
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         return x * parameters
 
 
@@ -56,7 +60,7 @@ class GlobalMultTransform(Transform):
         super().__init__(shared=shared)
         self.value = value
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         return x * self.value
 
 
@@ -103,7 +107,7 @@ class GlobalAdditiveTransform(Transform):
         super().__init__(shared=shared)
         self.value = value
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         return x + self.value
 
 
@@ -166,7 +170,7 @@ class GammaTransform(Transform):
         vmax = x.max() if self.vmax is None else self.vmax
         return vmin, vmax
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         vmin, vmax = parameters
 
         x = x.sub(vmin).div_(vmax - vmin)
@@ -187,7 +191,7 @@ class ZTransform(Transform):
     def get_parameters(self, x):
         return x.mean(), x.std()
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         mu, sigma = parameters
         x = (x - mu) / sigma
         return x
@@ -228,7 +232,7 @@ class QuantileTransform(Transform):
         pmax = torch.quantile(x, q=self.pmax)
         return pmin, pmax
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         pmin, pmax = parameters
         x = x.sub(pmin).div_(pmax - pmin)
         if self.clamp:

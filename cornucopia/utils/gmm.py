@@ -13,17 +13,25 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
 
     Parameters
     ----------
-    x : (nc, *shape) tensor, Multispectral image
-    nk : int, Number of clusters
-    max_iter : int, Maximum number of iterations
-    tol : float, Tolerance for eraly stopping
+    x : (nc, *shape) tensor
+        Multispectral image
+    nk : int
+        Number of clusters
+    max_iter : int
+        Maximum number of iterations
+    tol : float
+        Tolerance for eraly stopping
 
     Returns
     -------
-    z : (nk, *shape) tensor, Posterior cluster probabilities
-    mu : (nk, nc) tensor, Cluster means
-    sigma : (nk, nc, nc) tensor, Cluster covariance matrices
-    pi : (nk,) tensor, Cluster proportions
+    z : (nk, *shape) tensor
+        Posterior cluster probabilities
+    mu : (nk, nc) tensor
+        Cluster means
+    sigma : (nk, nc, nc) tensor
+        Cluster covariance matrices
+    pi : (nk,) tensor
+        Cluster proportions
 
     """
 

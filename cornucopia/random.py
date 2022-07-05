@@ -49,12 +49,12 @@ class Sampler:
         else:
             return fn(*values)
 
-    def __getattribute__(self, item):
-        theta = super().__getattribute__('theta')
+    def __getattr__(self, item):
+        theta = self.__getattribute__('theta')
         if item in theta:
             theta = self._ensure_same_length(theta)
             return theta[item]
-        return super().__getattribute__(item)
+        raise AttributeError(item)
 
     def __setattr__(self, item, value):
         if item == 'theta':

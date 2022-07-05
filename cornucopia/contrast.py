@@ -3,20 +3,22 @@ from .base import Transform
 from .utils.gmm import fit_gmm
 
 
-__all__ = ['ContrastTransform']
+__all__ = ['ContrastMixtureTransform']
 
 
-class ContrastTransform(Transform):
+class ContrastMixtureTransform(Transform):
     """
     Find intensity modes using a GMM and change their means and covariances.
 
-    Notes
-    -----
-    As always, someone thought about it before us:
-    .. https://www.frontiersin.org/articles/10.3389/fnins.2021.708196/full
+    References
+    ----------
+    ..[1] "A Contrast Augmentation Approach to Improve Multi-Scanner
+           Generalization in MRI"
+          Meyer et al., Front. Neurosci. (2021)
+          https://www.frontiersin.org/articles/10.3389/fnins.2021.708196
     """
 
-    def __init__(self, nk=16, keep_background=True, dtype=None, shared=False):
+    def __init__(self, nk=16, keep_background=True, shared='channels'):
         """
 
         Parameters
@@ -24,16 +26,40 @@ class ContrastTransform(Transform):
         nk : int
             Number of classes
         keep_background : bool
-            Do not change background mean/cov
+            Do not change background mean/cov.
+            The background class is the class with minimum mean value.
         """
         super().__init__(shared=shared)
         self.keep_background = keep_background
-        self.dtype = dtype
         self.nk = nk
+
+    def apply_transform(self, x, parameters):
+        z, mu0, sigma0, mu, sigma = parameters
+
+        # Whiten using fitted parameters
+        chol = torch.linalg.cholesky(sigma0)
+        chol = chol.inverse()
+        x = x.movedim(0, -1)
+        x = x[..., None, :] - mu0                      # [..., nk, nc]
+        x = torch.matmul(chol, x[..., :, None])        # [..., nk, nc, 1]
+
+        # Color using new parameters
+        chol = torch.linalg.cholesky(sigma)
+        x = torch.matmul(chol, x)                       # [..., nk, nc, 1]
+        x = x[..., 0] + mu                              # [..., nk, nc]
+        x = x.movedim(-1, 0)                            # [..., nc, nk]
+
+        # Weight using posterior
+        z = z.movedim(0, -1)
+        x = torch.matmul(x[..., None, :], z[..., None]) # [..., nc, 1, 1]
+        x = x[..., 0, 0]                                # [..., nc]
+
+        return x
 
     def get_parameters(self, x):
         z, mu, sigma, _ = fit_gmm(x, self.nk)
-        return z, mu, sigma
+        new_mu, new_sigma = self.make_parameters(mu, sigma)
+        return z, mu, sigma, new_mu, new_sigma
 
     def make_parameters(self, old_mu, old_sigma):
         backend = dict(dtype=old_mu.dtype, device=old_mu.device)
@@ -72,26 +98,43 @@ class ContrastTransform(Transform):
 
         return mu, fullsigma
 
-    def transform_with_parameters(self, x, parameters):
-        z, mu, sigma = parameters
 
-        # Whiten using fitted parameters
-        chol = torch.linalg.cholesky(sigma)
-        chol = chol.inverse()
-        x = x.movedim(0, -1)
-        x = x[..., None, :] - mu                       # [..., nk, nc]
-        x = torch.matmul(chol, x[..., :, None])        # [..., nk, nc, 1]
+class ContrastLookupTransform(Transform):
+    """
+    Segment intensities into equidistant bins and change their mean value.
+    """
 
-        # Color using new parameters
-        mu, sigma = self.make_parameters(mu, sigma)
-        chol = torch.linalg.cholesky(sigma)
-        x = torch.matmul(chol, x)                       # [..., nk, nc, 1]
-        x = x[..., 0] + mu                              # [..., nk, nc]
-        x = x.movedim(-1, 0)                            # [..., nc, nk]
+    def __init__(self, nk=16, keep_background=True, shared=False):
+        """
 
-        # Weight using posterior
-        z = z.movedim(0, -1)
-        x = torch.matmul(x[..., None, :], z[..., None]) # [..., nc, 1, 1]
-        x = x[..., 0, 0]                                # [..., nc]
+        Parameters
+        ----------
+        nk : int
+            Number of classes
+        keep_background : bool
+            Do not change background mean/cov.
+            The background class is the class with minimum mean value.
+        """
+        super().__init__(shared=shared)
+        self.keep_background = keep_background
+        self.nk = nk
 
-        return x
+    def get_parameters(self, x):
+        vmin, vmax = x.min(), x.max()
+        edges = torch.linspace(vmin, vmax, self.nk+1)
+        new_mu = torch.rand(self.nk) * (vmax - vmin) + vmin
+        return edges, new_mu
+
+    def apply_transform(self, x, parameters):
+        edges, new_mu = parameters
+        old_mu = (edges[:-1] + edges[1:]) / 2
+
+        new_x = x.clone()
+        for k in range(self.nk):
+            mask = (edges[k] <= x) & (x < edges[k+1])
+            new_x[mask] += new_mu[k] - old_mu[k]
+        return new_x
+
+
+
+

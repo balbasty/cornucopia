@@ -49,3 +49,5 @@ from .intensity import *
 from .io import *
 from .labels import *
 from .noise import *
+from .psf import *
+from .synth import *

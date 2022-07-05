@@ -3,3 +3,4 @@ sphinx
 sphinx-book-theme
 sphinx-autoapi
 myst-parser
+m2r2

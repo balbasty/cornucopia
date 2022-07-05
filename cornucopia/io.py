@@ -21,7 +21,7 @@ class ToTensorTransform(Transform):
         self.dtype = dtype
         self.device = device
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         x = torch.as_tensor(x, dtype=self.dtype, device=self.device).squeeze()
         if self.dim:
             for _ in range(max(0, self.dim + 1 - x.dim())):

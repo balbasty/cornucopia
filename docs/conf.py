@@ -33,6 +33,7 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'autoapi.extension',
+    'm2r2',
 ]
 
 source_suffix = ['.rst', '.md']
@@ -53,10 +54,10 @@ autoapi_dirs = ['../cornucopia']
 autoapi_options = [
     'members', 
     'undoc-members', 
-#    'private-members', 
-    'show-inheritance', 
+    # 'private-members',
+    'show-inheritance',
     'show-module-summary', 
-#    'special-members', 
+    # 'special-members',
     'imported-members',
 ]
 

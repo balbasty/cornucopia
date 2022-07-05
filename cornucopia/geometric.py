@@ -1,3 +1,8 @@
+# TODO:
+#   [ ] Joint nonlin + affine + patch
+#       Merging these operations is more efficient that applying them
+#       sequentially because a single interpolation step -- on a the
+#       small grid defined by the patch -- is required.
 import torch
 import math
 import interpol
@@ -19,7 +24,7 @@ class ElasticTransform(Transform):
     """
 
     def __init__(self, dmax=0.1, unit='fov', shape=5, bound='border',
-                 shared=True):
+                 steps=0, shared=True):
         """
 
         Parameters
@@ -32,6 +37,8 @@ class ElasticTransform(Transform):
             Number of spline control points
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        steps : int
+            Number of scaling-and-squaring integration steps
         shared : bool
             Apply same transform to all images/channels
         """
@@ -47,6 +54,7 @@ class ElasticTransform(Transform):
         self.unit = unit
         self.bound = bound
         self.shape = shape
+        self.steps = steps
 
     def get_parameters(self, x):
         batch, *fullshape = x.shape
@@ -63,9 +71,11 @@ class ElasticTransform(Transform):
             t[:, d].sub_(0.5).mul_(2*dmax[d])
         ft = interpol.resize(t, shape=fullshape, interpolation=3,
                              prefilter=False)
+        if self.steps:
+            ft = warps.exp_velocity(ft, self.steps)
         return ft, t
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         flow, controls = parameters
         x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
                              padding_mode=self.bound)
@@ -78,7 +88,7 @@ class RandomElasticTransform(RandomizedTransform):
     """
 
     def __init__(self, dmax=0.3, shape=10,
-                 unit='fov', bound='border', shared=True):
+                 unit='fov', bound='border', steps=0, shared=True):
         """
 
         Parameters
@@ -103,9 +113,10 @@ class RandomElasticTransform(RandomizedTransform):
         super().__init__(self._build, self._sample, shared=shared)
         self.unit = unit
         self.bound = bound
+        self.steps = steps
 
     def _build(self, dmax, shape):
-        return ElasticTransform(dmax=dmax, shape=shape,
+        return ElasticTransform(dmax=dmax, shape=shape, steps=self.steps,
                                 unit=self.unit, bound=self.bound)
 
 
@@ -225,7 +236,7 @@ class AffineTransform(Transform):
         t = warps.affine_flow(A, fullshape).movedim(-1, 0)
         return t, A
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         flow, matrix = parameters
         x = warps.apply_flow(x[:, None], flow.movedim(0, -1),
                              padding_mode=self.bound)
@@ -295,6 +306,66 @@ class RandomAffineTransform(RandomizedTransform):
                                bound=self.bound)
 
 
+class AffineElasticTransform(Transform):
+    """
+    Affine + Elastic transform.
+    """
+
+    def __init__(self, dmax=0.1, shape=5, steps=0,
+                 translations=0, rotations=0, shears=0, zooms=0,
+                 unit='fov', bound='border', shared=True):
+        super().__init__(shared=shared)
+        self.affine = AffineTransform(translations, rotations, shears, zooms,
+                                      unit, bound, shared)
+        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, shared)
+
+    def get_parameters(self, x):
+        _, A = self.affine.get_parameters(x)
+        ft, t = self.elastic.get_parameters(x)
+        ndim = A.shape[-1] - 1
+        ft = warps.add_identity_(ft)
+        ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
+        ft += A[:ndim, -1]
+        ft = warps.sub_identity(ft)
+        return ft, t, A
+
+    def apply_transform(self, x, parameters):
+        flow, controls, affine = parameters
+        x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+                             padding_mode=self.bound)
+        return x[:, 0]
+
+
+class RandomAffineElasticTransform(Transform):
+    """
+    Affine + Elastic transform.
+    """
+
+    def __init__(self, dmax=0.3, shape=10, steps=0,
+                 translations=0.1, rotations=15, shears=0.012, zooms=0.15,
+                 unit='fov', bound='border', shared=True):
+        super().__init__(shared=shared)
+        self.affine = RandomAffineTransform(translations, rotations, shears, zooms,
+                                            unit, bound, shared)
+        self.elastic = RandomElasticTransform(dmax, shape, unit, bound, steps, shared)
+
+    def get_parameters(self, x):
+        _, A = self.affine.get_parameters(x)
+        ft, t = self.elastic.get_parameters(x)
+        ndim = A.shape[-1] - 1
+        ft = warps.add_identity_(ft)
+        ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
+        ft += A[:ndim, -1]
+        ft = warps.sub_identity(ft)
+        return ft, t, A
+
+    def apply_transform(self, x, parameters):
+        flow, controls, affine = parameters
+        x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+                             padding_mode=self.bound)
+        return x[:, 0]
+
+
 class MakeAffinePair(Transform):
     """
     Generate a pair made of the same image transformed in two different ways.
@@ -314,15 +385,15 @@ class MakeAffinePair(Transform):
         p1, p2 = t1.get_parameters(x), t2.get_parameters(x)
         return t1, p1, t2, p2
 
-    def transform_with_parameters(self, x, parameters):
+    def apply_transform(self, x, parameters):
         t1, p1, t2, p2 = parameters
-        x1 = t1.transform_with_parameters(x, p1)
-        x2 = t2.transform_with_parameters(x, p2)
+        x1 = t1.apply_transform(x, p1)
+        x2 = t2.apply_transform(x, p2)
         return x1, x2
 
     def forward(self, *x):
         numel = len(x)
-        x0 = self.get_first_element(x)
+        x0 = self._get_first_element(x)
         theta = self.get_parameters(x0)
         x = self.forward_with_parameters(*x, parameters=theta)
         if numel == 1: x = (x,)
