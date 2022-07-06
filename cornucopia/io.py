@@ -37,7 +37,7 @@ class ToTensorTransform(Transform):
 class LoadTransform(Transform):
 
     def __init__(self, ndim=None, dtype=None, device=None):
-        super().__init__(shared=False)
+        super().__init__(shared='channels')
         self.ndim = ndim
         self.dtype = dtype
         self.device = device
@@ -58,15 +58,15 @@ class LoadTransform(Transform):
                 for loader in loaders[ext]:
                     try:
                         return loader(self.ndim, self.dtype, self.device)(x)
-                    except Exception:
+                    except Exception as e:
                         pass
 
-        all_loaders = set(loader for loader_ext in loaders.values
+        all_loaders = set(loader for loader_ext in loaders.values()
                           for loader in loader_ext)
         for loader in all_loaders:
             try:
                 return loader(self.ndim, self.dtype, self.device)(x)
-            except Exception:
+            except Exception as e:
                 pass
 
         raise ValueError(f'Could not load {x}')

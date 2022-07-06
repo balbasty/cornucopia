@@ -36,18 +36,18 @@ class BabelLoader(Loader):
         super().__init__(ndim, dtype, device)
         self.to_ras = to_ras
 
-    def load(self, x):
+    def __call__(self, x):
         f = nibabel.load(x)
-        x = self.convert(f.fdata())
+        x = self.convert(f.get_fdata())
 
         # reorient to RAS layout
         if self.to_ras:
             aff = torch.as_tensor(f.affine)
-            perm = [aff[:3, :3].abs().argmax(1)]
+            perm = aff[:3, :3].abs().argmax(1).tolist()
             perm += list(range(3, x.dim()))
             x = x.permute(perm)
-            aff = aff[:, perm.tolist() + [-1]]
-            flipdims = (aff[:3, :3].diag() < 0).nonzero()
+            aff = aff[:, perm + [-1]]
+            flipdims = (aff[:3, :3].diag() < 0).nonzero().tolist()
             x = x.flip(flipdims)
 
         channel_dims = 0
@@ -58,7 +58,7 @@ class BabelLoader(Loader):
             channel_dims += 1
             x = x.movedim(4, 0)
         x = x.squeeze()
-        x = x.reshape([-1, x.shape[channel_dims:]])
+        x = x.reshape([-1, *x.shape[channel_dims:]])
         if self.ndim:
             while x.dim() < ndim + 2:
                 x = x[..., None]
@@ -70,7 +70,7 @@ class TiffLoader(Loader):
 
     EXT = ['.tiff', '.tif']
 
-    def load(self, x):
+    def __call__(self, x):
         with tifffile.TiffFile(x) as f:
             x = self.convert(f.asarray(series=0, level=0))
             axes = f.series[self.series].levels[self.level].axes
@@ -85,10 +85,10 @@ class TiffLoader(Loader):
                 perm.append(i)
         perm += dimzyx
 
-        x = x.permute(perm)
+        x = x.permute(*perm)
 
         x = x.squeeze()
-        x = x.reshape([-1, x.shape[-len(dimzyx):]])
+        x = x.reshape([-1, *x.shape[-len(dimzyx):]])
         if self.ndim:
             while x.dim() < ndim + 2:
                 x = x[..., None]
@@ -105,7 +105,7 @@ class PillowLoader(Loader):
         super().__init__(ndim, dtype, device)
         self.rot90 = rot90
 
-    def load(self, x):
+    def __call__(self, x):
         with Image.open(x) as f:
             f.load()
             x = self.convert(np.array(f))
