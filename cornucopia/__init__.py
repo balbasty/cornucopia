@@ -45,6 +45,7 @@ from .contrast import *
 from .geometric import *
 from .intensity import *
 from .io import *
+from .kspace import *
 from .labels import *
 from .noise import *
 from .psf import *
