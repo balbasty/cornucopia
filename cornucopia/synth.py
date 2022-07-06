@@ -3,7 +3,7 @@
 References
 ----------
 ..[1] "SynthSeg: Domain Randomisation for Segmentation of Brain
-       MRI Scans of any Contrast and Resolution"
+      MRI Scans of any Contrast and Resolution"
       Benjamin Billot, Douglas N. Greve, Oula Puonti, Axel Thielscher,
       Koen Van Leemput, Bruce Fischl, Adrian V. Dalca, Juan Eugenio Iglesias
       2021
@@ -41,7 +41,7 @@ class SynthTransform(SequentialTransform):
     References
     ----------
     ..[1] "SynthSeg: Domain Randomisation for Segmentation of Brain
-           MRI Scans of any Contrast and Resolution"
+          MRI Scans of any Contrast and Resolution"
           Benjamin Billot, Douglas N. Greve, Oula Puonti, Axel Thielscher,
           Koen Van Leemput, Bruce Fischl, Adrian V. Dalca, Juan Eugenio Iglesias
           2021

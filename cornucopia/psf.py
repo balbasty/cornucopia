@@ -11,6 +11,13 @@ class SmoothTransform(Transform):
     """Apply Gaussian smoothing"""
 
     def __init__(self, fwhm=1):
+        """
+
+        Parameters
+        ----------
+        fwhm : float
+            Full-width at half-maximum of the Gaussian kernel
+        """
         super().__init__()
         self.fwhm = fwhm
 
@@ -29,9 +36,9 @@ class LowResSliceTransform(Transform):
         Parameters
         ----------
         resolution : float
-            Resolution of the slice dimension
+            Resolution of the slice dimension, in terms of high-res voxels
         thickness : float in 0..1
-            Slice thickness as a proportion of resolution
+            Slice thickness, as a proportion of resolution
         axis : int
             Slice axis
         noise : Transform, optional
@@ -72,7 +79,7 @@ class LowResTransform(Transform):
         Parameters
         ----------
         resolution : float or list[float]
-            Resolution
+            Resolution of the low-res image, in terms of high-res voxels
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
         """
