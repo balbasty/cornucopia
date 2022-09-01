@@ -1,11 +1,16 @@
+__all__ = ['OneHotTransform', 'ArgMaxTransform', 'GaussianMixtureTransform',
+           'RandomGaussianMixtureTransform', 'SmoothLabelMap',
+           'ErodeLabelTransform', 'RandomErodeLabelTransform']
+
 import torch
-from .random import Uniform, Sampler
+from .random import Uniform, Sampler, RandInt
 from .base import Transform, RandomizedTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-
-
-__all__ = ['OneHotTransform']
+from.utils.morpho import erode
+import interpol
+import random as pyrand
+import math as pymath
 
 
 class OneHotTransform(Transform):
@@ -147,10 +152,14 @@ class GaussianMixtureTransform(Transform):
             mu = mu.to(**backend)
             sigma = sigma.to(**backend)
             for k in range(x.max().item()+1):
-                y1 = torch.randn(x.shape[1:], **backend)
                 if fwhm:
-                    y1 = smoothnd(y1, fwhm=fwhm)
-                y += (x == k) * y1.mul_(sigma[k]).add_(mu[k])
+                    y1 = torch.randn(x.shape[1:], **backend)
+                    if fwhm:
+                        y1 = smoothnd(y1, fwhm=fwhm)
+                    y += (x == k) * y1.mul_(sigma[k]).add_(mu[k])
+                else:
+                    mask = x == k
+                    y[mask] = torch.randn(mask.sum(), **backend)
         return y
 
 
@@ -159,8 +168,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=255, sigma=16,
-                 fwhm=2, shared='channels'):
+    def __init__(self, mu=255, sigma=16, fwhm=2, shared='channels'):
         """
 
         Parameters
@@ -190,3 +198,148 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
         return self.subtransform(**{k: f(n) if callable(f)
                                     else ensure_list(f, n)
                                     for k, f in self.sample.items()})
+
+
+class SmoothLabelMap(Transform):
+    """Generate a random label map"""
+
+    def __init__(self, nb_classes=2, shape=5, soft=False, shared=False):
+        """
+
+        Parameters
+        ----------
+        nb_classes : int
+            Number of classes
+        shape : [list of] int
+            Number of spline control points
+        soft : bool
+            Return a soft (one-hot) label map
+        shared : bool
+            Apply the same field to all channels
+        """
+        super().__init__(shared=shared)
+        self.nb_classes = nb_classes
+        self.shape = shape
+        self.soft = soft
+
+    def get_parameters(self, x):
+        batch, *fullshape = x.shape
+        smallshape = ensure_list(self.shape, len(fullshape))
+        backend = dict(dtype=x.dtype, device=x.device)
+        if not backend['dtype'].is_floating_point:
+            backend['dtype'] = torch.get_default_dtype()
+        if self.soft:
+            if batch > 1:
+                raise ValueError('Cannot generate a batched soft label map')
+            b = torch.rand([self.nb_classes, *smallshape], **backend)
+            b = interpol.resize(b, shape=fullshape, interpolation=3,
+                                prefilter=False)
+            b = b.softmax(0)
+        else:
+            maxprob = torch.full_like(x, float('-inf'), **backend)
+            b = torch.zeros_like(x, dtype=torch.long)
+            for k in range(self.nb_classes):
+                b1 = torch.rand([batch, *smallshape], **backend)
+                b1 = interpol.resize(b1, shape=fullshape, interpolation=3,
+                                     prefilter=False)
+                mask = maxprob < b1
+                b.masked_fill_(mask, k)
+                maxprob[mask] = b1[mask]
+        return b
+
+    def apply_transform(self, x, parameters):
+        return parameters
+
+
+class ErodeLabelTransform(Transform):
+
+    def __init__(self, labels, radius=3, output_labels=0):
+        """
+
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to erode
+        radius : [sequence of] int
+            Erosion radius (per label)
+        output_labels : [sequence of] int
+            Output label (per input label)
+        """
+        super().__init__(shared=True)
+        self.labels = ensure_list(labels)
+        self.radius = ensure_list(radius, len(self.labels))
+        self.output_labels = ensure_list(output_labels, len(self.labels))
+
+    def get_parameters(self, x):
+        return None
+
+    def apply_transform(self, x, parameters):
+        y = x.clone()
+        for label, radius, outlabel \
+                in zip(self.labels, self.radius, self.output_labels):
+            x1 = x == label
+            x1 = erode(x1, nb_iter=radius, dim=x.dim()-1).logical_xor_(x1)
+            y[x1] = outlabel
+        return y
+
+
+class RandomErodeLabelTransform(RandomizedTransform):
+
+    def __init__(self, labels=0.5, radius=3, output_labels=0, shared=False):
+        """
+
+        Parameters
+        ----------
+        labels : Sampler or float or [sequence of] int
+            Labels to erode.
+            If a float in 0..1, probability of eroding a label
+        radius : Sampler or int
+            Erosion radius (per label).
+            Either an int sampler, or an upper bound.
+        output_labels : int or 'unique'
+            Output label
+            If 'unique', assign a novel unique label (per input label).
+        """
+        def to_range(value):
+            if not isinstance(value, Sampler):
+                if not isinstance(value, (list, tuple)):
+                    value = (0, value)
+                value = tuple(value)
+            return value
+
+        super().__init__(ErodeLabelTransform,
+                         dict(labels=labels,
+                              radius=RandInt.make(to_range(radius)),
+                              output_labels=output_labels),
+                         shared=shared)
+
+    def get_parameters(self, x):
+        sample = dict(self.sample)
+        n = None
+        if isinstance(sample['labels'], float):
+            prob = sample['labels']
+            labels = x.unique().tolist()
+            n = int(pymath.ceil(len(labels) * prob))
+            def label_sampler():
+                pyrand.shuffle(labels)
+                return labels[:n]
+            sample['labels'] = label_sampler
+        if sample['output_labels'] == 'unique':
+            max_label = x.unique().max().item() + 1
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sample['output_labels'] = list(range(max_label, max_label + n))
+        if callable(sample['radius']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['radius']
+            def sample_radius():
+                return [sampler() for _ in range(n)]
+            sample['radius'] = sample_radius
+
+        return self.subtransform(**{k: f() if callable(f) else f
+                                    for k, f in sample.items()})

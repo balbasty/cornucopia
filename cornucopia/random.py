@@ -1,9 +1,8 @@
+__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal']
+
 import random
 import copy
 from .utils.py import ensure_list
-
-
-__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal']
 
 
 class Sampler:

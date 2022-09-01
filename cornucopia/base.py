@@ -1,11 +1,10 @@
+__all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
+           'MaybeTransform', 'MappedTransform']
+
 import torch
 from torch import nn
 import random
 from .utils.py import ensure_list, cumsum
-
-
-__all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
-           'MaybeTransform', 'MappedTransform']
 
 
 def _get_first_element(x):

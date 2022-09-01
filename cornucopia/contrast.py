@@ -1,9 +1,8 @@
+__all__ = ['ContrastMixtureTransform', 'ContrastLookupTransform']
+
 import torch
 from .base import Transform
 from .utils.gmm import fit_gmm
-
-
-__all__ = ['ContrastMixtureTransform']
 
 
 class ContrastMixtureTransform(Transform):

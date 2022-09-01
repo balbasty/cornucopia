@@ -1,3 +1,6 @@
+__all__ = ['FlipTransform', 'PatchTransform', 'CropTransform',
+           'PadTransform', 'PowerTwoTransform']
+
 import torch
 import math
 from .base import Transform
@@ -53,14 +56,14 @@ class PatchTransform(Transform):
         ndim = x.dim() - 1
         shape = ensure_list(self.shape, ndim)
         center = ensure_list(self.center, ndim)
-        center_vox = [(s-1)/2 for s in x.shape[1:]]
+        center = [(c + 1) / 2 * (s - 1) for c, s in zip(center, x.shape[1:])]
         crop = []
         padding = []
-        for ss, cc, cv, sv in zip(shape, center, center_vox, x.shape[1:]):
-            first = int(math.floor(cv + cc - ss/2))
+        for ss, cc, sv in zip(shape, center, x.shape[1:]):
+            first = int(math.floor(cc - ss/2))
             pad_first = max(0, -first)
             last = first + ss
-            pad_last = max(0, sv - last)
+            pad_last = max(0, last - sv)
             first = max(0, first)
             last = min(sv, last)
             crop.append(slice(first, last))
@@ -100,7 +103,7 @@ class CropTransform(Transform):
     def apply_transform(self, x, parameters):
         ndim = x.dim() - 1
         cropping = self.cropping
-        if side is not None:
+        if self.side is not None:
             cropping = ensure_list(cropping, ndim)
             if self.unit[0] == 'p':
                 cropping = [int(math.ceil(c * s))
@@ -112,7 +115,7 @@ class CropTransform(Transform):
             if self.unit[0] == 'p':
                 shape2 = [s for s in x.shape[1:] for _ in range(2)]
                 cropping = [int(math.ceil(c * s))
-                            for p, s in zip(cropping, shape2)]
+                            for c, s in zip(cropping, shape2)]
             cropping = [slice(c0, -c1 if c1 else None)
                         for c0, c1 in zip(cropping[::2], cropping[1::2])]
 
@@ -152,7 +155,7 @@ class PadTransform(Transform):
     def apply_transform(self, x, parameters):
         ndim = x.dim() - 1
         padding = self.padding
-        if side is not None:
+        if self.side is not None:
             padding = ensure_list(padding, ndim)
             if self.unit[0] == 'p':
                 padding = [int(math.ceil(p * s))
@@ -165,7 +168,7 @@ class PadTransform(Transform):
                 padding = [int(math.ceil(p * s))
                            for p, s in zip(padding, shape2)]
 
-        return pad(x, padding, mode=bound, side=self.side, value=self.value)
+        return pad(x, padding, mode=self.bound, side=self.side, value=self.value)
 
 
 class PowerTwoTransform(Transform):

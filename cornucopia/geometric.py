@@ -1,8 +1,14 @@
+__all__ = ['ElasticTransform', 'RandomElasticTransform',
+           'AffineTransform', 'RandomAffineTransform',
+           'AffineElasticTransform', 'RandomAffineElasticTransform',
+           'MakeAffinePair']
+
 # TODO:
 #   [ ] Joint nonlin + affine + patch
 #       Merging these operations is more efficient that applying them
 #       sequentially because a single interpolation step -- on a the
 #       small grid defined by the patch -- is required.
+
 import torch
 import math
 import interpol
@@ -10,12 +16,6 @@ from .base import Transform, RandomizedTransform
 from .random import Sampler, Uniform, RandInt
 from .utils import warps
 from .utils.py import ensure_list
-
-
-__all__ = ['ElasticTransform', 'RandomElasticTransform',
-           'AffineTransform', 'RandomAffineTransform',
-           'AffineElasticTransform', 'RandomAffineElasticTransform',
-           'MakeAffinePair']
 
 
 class ElasticTransform(Transform):

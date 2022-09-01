@@ -1,9 +1,8 @@
+__all__ = ['GaussianNoiseTransform', 'ChiNoiseTransform', 'GFactorTransform']
+
 import torch
 from .base import Transform
 from .intensity import MultFieldTransform
-
-
-__all__ = ['GaussianNoiseTransform', 'ChiNoiseTransform']
 
 
 class GaussianNoiseTransform(Transform):

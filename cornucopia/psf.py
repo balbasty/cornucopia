@@ -1,10 +1,9 @@
+__all__ = ['SmoothTransform', 'LowResTransform', 'LowResSliceTransform']
+
 from .base import Transform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
 from interpol import resize
-
-
-__all__ = ['SmoothTransform', 'LowResTransform', 'LowResSliceTransform']
 
 
 class SmoothTransform(Transform):

@@ -5,12 +5,17 @@ except ImportError:
     nibabel = None
 try:
     import pillow
+    import numpy as np
 except ImportError:
     pillow = None
 try:
     import tifffile
 except ImportError:
     tifffile = None
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 
 class Loader:
@@ -60,7 +65,7 @@ class BabelLoader(Loader):
         x = x.squeeze()
         x = x.reshape([-1, *x.shape[channel_dims:]])
         if self.ndim:
-            while x.dim() < ndim + 2:
+            while x.dim() < self.ndim + 1:
                 x = x[..., None]
         return x
 
@@ -90,7 +95,7 @@ class TiffLoader(Loader):
         x = x.squeeze()
         x = x.reshape([-1, *x.shape[-len(dimzyx):]])
         if self.ndim:
-            while x.dim() < ndim + 2:
+            while x.dim() < self.ndim + 1:
                 x = x[..., None]
         return x
 
@@ -106,7 +111,7 @@ class PillowLoader(Loader):
         self.rot90 = rot90
 
     def __call__(self, x):
-        with Image.open(x) as f:
+        with pillow.Image.open(x) as f:
             f.load()
             x = self.convert(np.array(f))
         if x.dim() > 2:
@@ -115,6 +120,37 @@ class PillowLoader(Loader):
             x = x[None]
         if self.rot90:
             x = x.transpose(-1, -2).flip(-1)
+        if self.ndim:
+            while x.dim() < self.ndim + 1:
+                x = x[..., None]
+        return x
+
+
+class NumpyLoader(Loader):
+    """Loader with numpy backend"""
+
+    EXT = ['.npy', '.npz']
+
+    def __init__(self, ndim=None, dtype=None, device=None, field=None):
+        super().__init__(ndim, dtype, device)
+        self.field = field
+
+    def __call__(self, x):
+        reader = np.load(x)
+        if np.isarray(reader):
+            x = reader
+        else:
+            field = self.field or 'arr_0'
+            if field in reader.keys():
+                x = reader[field]
+                reader.close()
+            else:
+                reader.close()
+                raise ValueError(f'No field "{field}" in numpy file')
+        x = self.convert(x)
+        if self.ndim:
+            while x.dim() < self.ndim + 1:
+                x = x[None]
         return x
 
 
@@ -145,3 +181,5 @@ if tifffile:
     register_loader(TiffLoader)
 if pillow:
     register_loader(PillowLoader)
+if np:
+    register_loader(NumpyLoader)

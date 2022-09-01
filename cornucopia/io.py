@@ -1,10 +1,9 @@
+__all__ = ['ToTensorTransform', 'LoadTransform']
+
 import torch
 import os.path
 from .base import Transform
 from .utils.io import loaders
-
-
-__all__ = ['ToTensorTransform', 'LoadTransform']
 
 
 class ToTensorTransform(Transform):

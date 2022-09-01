@@ -24,15 +24,14 @@ References
       MIDL 2020
       https://arxiv.org/abs/2003.01995
 """
+__all__ = ['SynthTransform']
+
 from .base import SequentialTransform, RandomizedTransform, SwitchTransform
 from .labels import RandomGaussianMixtureTransform
 from .intensity import MultFieldTransform, GammaTransform
 from .psf import SmoothTransform, LowResSliceTransform, LowResTransform
 from .noise import ChiNoiseTransform, GFactorTransform
 from .random import Uniform, RandInt, Fixed
-
-
-__all__ = ['SynthTransform']
 
 
 class SynthTransform(SequentialTransform):

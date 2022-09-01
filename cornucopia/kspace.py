@@ -1,3 +1,6 @@
+__all__ = ['ArrayCoilTransform', 'SumOfSquaresTransform',
+           'IntraScanMotionTransform', 'SmallIntraScanMotionTransform']
+
 import torch
 import math
 import random
