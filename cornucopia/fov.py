@@ -1,4 +1,5 @@
-__all__ = ['FlipTransform', 'PatchTransform', 'CropTransform',
+__all__ = ['FlipTransform', 'CropTransform',
+           'PatchTransform', 'RandomPatchTransform',
            'PadTransform', 'PowerTwoTransform']
 
 import torch
@@ -6,6 +7,7 @@ import math
 from .base import Transform
 from .utils.py import ensure_list
 from .utils.padding import pad
+from .random import Uniform
 
 
 class FlipTransform(Transform):
@@ -76,6 +78,33 @@ class PatchTransform(Transform):
         x = x[crop]
         x = pad(x, padding, mode=self.bound)
         return x
+
+
+class RandomPatchTransform(Transform):
+    """Extract a (randomly located) patch from the volume.
+
+    This transform ensures that the patch is fully contained within the
+    original field of view (unless the patch size is larger than the
+    input shape).
+    """
+
+    def __init__(self, patch_size, bound='dct2', shared=True):
+        super().__init__(shared=shared)
+        self.patch_size = patch_size
+        self.bound = bound
+
+    def get_parameters(self, x):
+        shape = x.shape[1:]
+        patch_size = ensure_list(self.patch_size, len(shape))
+        min_center = [max(p/s - 1, -1) for p, s in zip(patch_size, shape)]
+        max_center = [min(1 - p/s, 1) for p, s in zip(patch_size, shape)]
+        center = [Uniform(mn, mx)() for mn, mx in zip(min_center, max_center)]
+        return patch_size, center
+
+    def apply_transform(self, x, parameters):
+        patch_size, center = parameters
+        transform = PatchTransform(patch_size, center, self.bound)
+        return transform(x)
 
 
 class CropTransform(Transform):
