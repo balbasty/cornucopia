@@ -1,5 +1,4 @@
 import torch
-from nitorch.core import utils
 from .conv import convnd
 import itertools
 
@@ -55,7 +54,7 @@ def _morpho(mode, x, conn, nb_iter, dim):
     if in_dtype is not torch.bool:
         x = x > 0
     x = x.to(torch.uint8)
-    backend = utils.backend(x)
+    backend = dict(dtype=x.dtype, device=x.device)
 
     dim = dim or x.dim()
     if isinstance(conn, int):
@@ -110,7 +109,7 @@ def _soft_morpho(mode, x, conn, nb_iter, dim):
     y : (..., *spatial) tensor
 
     """
-    backend = utils.backend(x)
+    backend = dict(dtype=x.dtype, device=x.device)
 
     dim = dim or x.dim()
     if isinstance(conn, int):
