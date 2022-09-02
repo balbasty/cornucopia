@@ -53,7 +53,7 @@ def _morpho(mode, x, conn, nb_iter, dim):
     in_dtype = x.dtype
     if in_dtype is not torch.bool:
         x = x > 0
-    x = x.to(torch.uint8)
+    x = x.to(torch.float32 if x.is_cuda else torch.uint8)
     backend = dict(dtype=x.dtype, device=x.device)
 
     dim = dim or x.dim()
@@ -87,8 +87,12 @@ def _morpho(mode, x, conn, nb_iter, dim):
             dist.masked_fill_(xor(ix, oix), -n_iter)
 
     if mode == 'dilate':
+        if x.dtype.is_floating_point:
+            x = x.round()
         return x.to(in_dtype)
     if mode == 'erode':
+        if ix.dtype.is_floating_point:
+            ix = ix.round()
         return ix.neg_().add_(1).to(in_dtype)
     return dist
 
