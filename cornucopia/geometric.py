@@ -1,13 +1,8 @@
 __all__ = ['ElasticTransform', 'RandomElasticTransform',
            'AffineTransform', 'RandomAffineTransform',
            'AffineElasticTransform', 'RandomAffineElasticTransform',
-           'MakeAffinePair']
-
-# TODO:
-#   [ ] Joint nonlin + affine + patch
-#       Merging these operations is more efficient that applying them
-#       sequentially because a single interpolation step -- on a the
-#       small grid defined by the patch -- is required.
+           'MakeAffinePair',
+           'Slicewise3DAffineTransform', 'RandomSlicewise3DAffineTransform']
 
 import torch
 import math
@@ -396,7 +391,8 @@ class AffineElasticTransform(Transform):
             patchshape = fullshape
         ft = warps.identity(patchshape, **backend)          # (*shape, D)
         if self.patch:
-            patch_origin = [math.randint(s-p) for s, p in zip(fullshape, patch)]
+            patch_origin = [math.randint(s-p)
+                            for s, p in zip(fullshape, self.patch)]
             ft += torch.as_tensor(patch_origin, **backend)
         ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
         ft = ft.add_(A[:ndim, -1])
@@ -524,3 +520,212 @@ class MakeAffinePair(Transform):
         mat12 = mat2.inverse() @ mat1
 
         return (*x, dict(flow=flow12, affine=mat12))
+
+
+class Slicewise3DAffineTransform(Transform):
+    """Each slice samples the 3D volume using a different transform"""
+
+    def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
+                 slice=-1, unit='fov', bound='border', shared=True):
+        """
+
+        Parameters
+        ----------
+        translations : list of [list of] float
+            Translation per slice (per X/Y/Z)
+        rotations : list of [list of] float
+            Rotations per slice (about Z/Y/X), in deg
+        shears : list of [list of] float
+            Translation per slice (about Z/Y/Z)
+        zooms : list of [list of] float
+            Zoom about 1 per slice (per X/Y/Z)
+        slice : {0, 1, 2}
+            Slice direction
+        unit : {'fov', 'vox'}
+            Unit of `translations`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
+        """
+        super().__init__(shared=shared)
+        if unit not in ('fov', 'vox'):
+            raise ValueError('Unit must be one of {"fov", "vox"} '
+                             f'but got "{unit}".')
+        if bound not in ('zeros', 'border', 'reflection'):
+            raise ValueError('Bound must be one of '
+                             '{"zeros", "border", reflection"} '
+                             f'but got "{bound}".')
+        self.translations = translations
+        self.rotations = rotations
+        self.zooms = zooms
+        self.shears = shears
+        self.unit = unit
+        self.bound = bound
+        self.slice = slice
+
+    def get_parameters(self, x, fullsize=True):
+        batch, *fullshape = x.shape
+        ndim = len(fullshape)
+        slice = self.slice - ndim if self.slice >= 0 else self.slice
+        nb_slice = fullshape[slice]
+        backend = dict(dtype=x.dtype, device=x.device)
+        if not backend['dtype'].is_floating_point:
+            backend['dtype'] = torch.get_default_dtype()
+
+        rotations = [ensure_list(r, ndim * (ndim - 1) // 2) for r in self.rotations]
+        shears = [ensure_list(s, ndim * (ndim - 1) // 2) for s in self.shears]
+        translations = [ensure_list(t, ndim) for t in self.translations]
+        zooms = [ensure_list(z, ndim) for z in self.zooms]
+        offsets = [(n-1)/2 for n in fullshape]
+
+        if self.unit == 'fov':
+            translations = [[t1 * n for t1, n in zip(t, fullshape)] for t in translations]
+        rotations = [[r1 * math.pi / 180 for r1 in r] for r in rotations]
+
+        rotations = torch.as_tensor(rotations, **backend)
+        shears = torch.as_tensor(shears, **backend)
+        translations = torch.as_tensor(translations, **backend)
+        zooms = torch.as_tensor(zooms, **backend)
+        offsets = torch.as_tensor(offsets, **backend)
+
+        I = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
+        O = torch.eye(ndim+1, **backend)
+        O[:ndim, -1] = -offsets
+        Z = I.clone()
+        Z.diagonal(0, -1, -2)[:, :-1].copy_(1 + zooms)
+        T = I.clone()
+        T[:, :ndim, -1] = translations
+
+        A = O               # origin at center of FOV
+        A = Z.matmul(A)     # zoom
+        if ndim == 2:
+            S = I.clone()
+            S[:, 0, 1] = S[:, 1, 0] = shears[:, 0]
+            A = S.matmul(A)       # shear
+            R = I.clone()
+            R[:, 0, 0] = R[:, 1, 1] = rotations[:, 0].cos()
+            R[:, 0, 1] = rotations[:, 0].sin()
+            R[:, 1, 0] = -R[:, 0, 1]
+            A = R.matmul(A)       # rotation
+        elif ndim == 3:
+            Sz = I.clone()
+            Sz[:, 0, 1] = Sz[:, 1, 0] = shears[:, 0]
+            Sy = I.clone()
+            Sy[:, 0, 2] = Sz[:, 2, 0] = shears[:, 1]
+            Sx = I.clone()
+            Sx[:, 1, 2] = Sz[:, 2, 1] = shears[:, 2]
+            A = Sx.matmul(Sy).matmul(Sz).matmul(A)       # shear
+            Rz = I.clone()
+            Rz[:, 0, 0] = Rz[:, 1, 1] = rotations[:, 0].cos()
+            Rz[:, 0, 1] = rotations[:, 0].sin()
+            Rz[:, 1, 0] = -Rz[:, 0, 1]
+            Ry = I.clone()
+            Ry[:, 0, 0] = Ry[:, 2, 2] = rotations[:, 1].cos()
+            Ry[:, 0, 2] = rotations[:, 1].sin()
+            Ry[:, 2, 0] = -Ry[:, 0, 2]
+            Rx = I.clone()
+            Rx[:, 1, 1] = Rx[:, 2, 2] = rotations[:, 2].cos()
+            Rx[:, 1, 2] = rotations[:, 2].sin()
+            Rx[:, 2, 1] = -Rx[:, 1, 2]
+            A = Rx.matmul(Ry).matmul(Rz).matmul(A)       # rotation
+        A = O.inverse().matmul(A)
+        A = T.matmul(A)
+
+        if not fullsize:
+            return A
+        t = warps.identity(fullshape, dtype=A.dtype, device=A.device)
+        t = t.movedim(-1, 0).movedim(slice, -1).movedim(0, -1)
+        t = A[:, :-1, :-1].matmul(t.unsqueeze(-1)).squeeze(-1).add_(A[:, :-1, -1])
+        t = warps.sub_identity_(t)
+        t = t.movedim(-1, 0).movedim(-1, slice)
+        return t, A
+
+    def apply_transform(self, x, parameters):
+        flow, matrix = parameters
+        x = warps.apply_flow(x[:, None], flow.movedim(0, -1),
+                             padding_mode=self.bound)
+        return x[:, 0]
+
+
+class RandomSlicewise3DAffineTransform(RandomizedTransform):
+    """
+    Slicewise3DAffineTransform with random parameters.
+    """
+
+    def __init__(self, translations=0.1, rotations=15,
+                 shears=0, zooms=0, slice=-1, shots=2, nodes=8,
+                 unit='fov', bound='border', shared=True):
+        """
+
+        Parameters
+        ----------
+        translations : Sampler or [list of] float
+            Sampler or Upper bound for translation (per X/Y/Z)
+        rotations : Sampler or [list of] float
+            Sampler or Upper bound for rotations (about Z/Y/X), in deg
+        shears : Sampler or [list of] float
+            Sampler or Upper bound for shears (about Z/Y/Z)
+        zooms : Sampler or [list of] float
+            Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        slice : int, optional
+            Slice direction. If None, a random slice direction is selected.
+        shots : int
+            Number of interleaved sweeps.
+            Typically, two interleaved sequences of slices are acquired
+            to avoid slice cross talk.
+        nodes : Sampler or int, optional
+            Sampler or Upper bound for the number of nodes in the
+            motion trajectory (encoded by cubic splines).
+            If None, independent motions are sampled for each slice.
+        unit : {'fov', 'vox'}
+            Unit of `translations`.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        shared : bool
+            Apply same transform to all images/channels
+        """
+        def to_range(vmax):
+            if not isinstance(vmax, Sampler):
+                if isinstance(vmax, (list, tuple)):
+                    vmax = ([-v for v in vmax], vmax)
+                else:
+                    vmax = (-vmax, vmax)
+            return vmax
+
+        self._sample = dict(translations=Uniform.make(to_range(translations)),
+                            rotations=Uniform.make(to_range(rotations)),
+                            shears=Uniform.make(to_range(shears)),
+                            zooms=Uniform.make(to_range(zooms)))
+        super().__init__(Slicewise3DAffineTransform, self._sample, shared=shared)
+        self.unit = unit
+        self.bound = bound
+        self.slice = slice
+        self.shots = shots
+        if nodes:
+            nodes = RandInt.make(to_range(nodes))
+        self.nodes = nodes
+
+    def get_parameters(self, x):
+        slice = RandInt(0, 3)() if self.slice is None else self.slice
+        nb_slices = x.shape[1:][slice]
+        nodes = self.nodes
+        if callable(nodes):
+            nodes = nodes()
+        nodes = min(nodes or nb_slices, nb_slices)
+
+        kwargs = {key: [val() for _ in range(nb_slices)]
+                  for key, val in self._sample.items()}
+        if nodes < nb_slices:
+            def node2slice(x):
+                x = torch.as_tensor(x, dtype=torch.float32)
+                x = interpol.resize(x, shape=[nb_slices],
+                                    interpolation=3, bound='replicate',
+                                    prefilter=False).flatten().tolist()
+                y = []
+                for i in range(self.shots):
+                    y += x[i::self.shots]
+                return y
+            kwargs = {key: node2slice(val) for key, val in kwargs.items()}
+        return self.subtransform(slice=slice, **kwargs,
+                                 unit=self.unit, bound=self.bound)
