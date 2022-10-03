@@ -91,3 +91,34 @@ class GFactorTransform(Transform):
     def apply_transform(self, x, parameters):
         noisetrf, noiseprm = parameters
         return noisetrf.apply_transform(x, noiseprm)
+
+
+class GammaNoiseTransform(Transform):
+    """Multiplicative Gamma noise"""
+
+    def __init__(self, mean=1, sigma=0.1, shared=False):
+        """
+
+        Parameters
+        ----------
+        mean : float
+            Expected value
+        sigma : float
+            Standard deviation
+        shared : bool
+            Add the exact same values to all channels/images
+        """
+        super().__init__(shared=shared)
+        self.mean = mean
+        self.sigma = sigma
+
+    def get_parameters(self, x):
+        var = self.sigma * self.sigma
+        beta = self.mean / var
+        alpha = self.mean * beta
+        alpha = torch.as_tensor(alpha, dtype=x.dtype, device=x.device)
+        beta = torch.as_tensor(beta, dtype=x.dtype, device=x.device)
+        return torch.distributions.Gamma(alpha, beta).sample(x.shape)
+
+    def apply_transform(self, x, parameters):
+        return x * parameters

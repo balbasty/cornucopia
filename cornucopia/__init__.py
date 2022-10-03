@@ -40,7 +40,7 @@ image pairs with a random affine deformation between them::
 #       [ ] By default (non shared), let Transforms handle multi-channel
 #           data (currently we loop across channels in the base class)
 
-import random
+from . import random
 from .base import *
 from .contrast import *
 from .geometric import *

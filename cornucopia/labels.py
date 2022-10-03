@@ -100,7 +100,7 @@ class ArgMaxTransform(Transform):
 class GaussianMixtureTransform(Transform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
-    def __init__(self, mu=None, sigma=None, fwhm=0, shared=False):
+    def __init__(self, mu=None, sigma=None, fwhm=0, background=None, shared=False):
         """
 
         Parameters
@@ -111,11 +111,14 @@ class GaussianMixtureTransform(Transform):
             Standard deviation of each cluster
         fwhm : float or list[float], optional
             Width of a within-class smoothing kernel.
+        background : int, optional
+            Index of background channel
         """
         super().__init__(shared=shared)
         self.mu = mu
         self.sigma = sigma
         self.fwhm = fwhm
+        self.background = background
 
     def get_parameters(self, x):
         mu = self.mu
@@ -136,12 +139,14 @@ class GaussianMixtureTransform(Transform):
         mu, sigma = parameters
         fwhm = ensure_list(self.fwhm, x.dim() - 1) if self.fwhm else None
 
-        y = 0
         if x.dtype.is_floating_point:
             backend = dict(dtype=x.dtype, device=x.device)
+            y = torch.zeros_like(x[0], **backend)
             mu = mu.to(**backend)
             sigma = sigma.to(**backend)
             for k in range(len(x)):
+                if self.background is not None and k == self.background:
+                    continue
                 y1 = torch.randn(x.shape[1:], **backend)
                 if fwhm:
                     y1 = smoothnd(y1, fwhm=fwhm)
@@ -149,9 +154,12 @@ class GaussianMixtureTransform(Transform):
             y = y[None]
         else:
             backend = dict(dtype=torch.get_default_dtype(), device=x.device)
+            y = torch.zeros_like(x, **backend)
             mu = mu.to(**backend)
             sigma = sigma.to(**backend)
             for k in range(x.max().item()+1):
+                if self.background is not None and k == self.background:
+                    continue
                 if fwhm:
                     y1 = torch.randn(x.shape[1:], **backend)
                     if fwhm:
@@ -168,7 +176,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=255, sigma=16, fwhm=2, shared='channels'):
+    def __init__(self, mu=255, sigma=16, fwhm=2, background=None, shared='channels'):
         """
 
         Parameters
@@ -179,6 +187,8 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
             Sampling function for cluster standard deviations, or upper bound
         fwhm : callable or [list of] float
             Sampling function for smoothing width, or upper bound
+        background : int, optional
+            Index of background channel
         """
         def to_range(vmax):
             if not isinstance(vmax, Sampler):
@@ -190,14 +200,15 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
 
         sample = dict(mu=Uniform.make(to_range(mu)),
                       sigma=Uniform.make(to_range(sigma)),
-                      fwhm=Uniform.make(to_range(fwhm)))
+                      fwhm=Uniform.make(to_range(fwhm)),
+                      background=background)
         super().__init__(GaussianMixtureTransform, sample, shared=shared)
 
     def get_parameters(self, x):
         n = len(x) if x.dtype.is_floating_point else x.max() + 1
         return self.subtransform(**{k: f(n) if callable(f)
-                                    else ensure_list(f, n)
-                                    for k, f in self.sample.items()})
+                                    else ensure_list(f, n) if k != 'background'
+                                    else f for k, f in self.sample.items()})
 
 
 class SmoothLabelMap(Transform):

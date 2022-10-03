@@ -1,7 +1,7 @@
-__all__ = ['MultFieldTransform', 'GlobalMultTransform',
-           'RandomGlobalMultTransform', 'GlobalAdditiveTransform',
-           'RandomGlobalAdditiveTransform', 'GammaTransform',
-           'ZTransform', 'QuantileTransform']
+__all__ = ['AddFieldTransform', 'MultFieldTransform',
+           'GlobalMultTransform', 'RandomGlobalMultTransform',
+           'GlobalAdditiveTransform', 'RandomGlobalAdditiveTransform',
+           'GammaTransform', 'ZTransform', 'QuantileTransform']
 
 import torch
 import interpol
@@ -10,8 +10,7 @@ from .random import Sampler, Uniform
 from .utils.py import ensure_list
 
 
-class MultFieldTransform(Transform):
-    """Smooth multiplicative (bias) field"""
+class BaseFieldTransform(Transform):
 
     def __init__(self, shape=5, vmin=0, vmax=1, shared=False):
         """
@@ -40,8 +39,19 @@ class MultFieldTransform(Transform):
         b.mul_(self.vmax-self.vmin).add_(self.vmin)
         return b
 
+
+class MultFieldTransform(BaseFieldTransform):
+    """Smooth multiplicative (bias) field"""
+
     def apply_transform(self, x, parameters):
         return x * parameters
+
+
+class AddFieldTransform(BaseFieldTransform):
+    """Smooth additive (bias) field"""
+
+    def apply_transform(self, x, parameters):
+        return x + parameters
 
 
 class GlobalMultTransform(Transform):

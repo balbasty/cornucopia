@@ -28,7 +28,7 @@ class FlipTransform(Transform):
     def apply_transform(self, x, parameters):
         axis = self.axis
         if axis is None:
-            axis = list(range(1, x.dim()+1))
+            axis = list(range(1, x.dim()))
         axis = ensure_list(axis)
         return x.flip(axis)
 

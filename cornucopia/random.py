@@ -63,10 +63,29 @@ class Sampler:
         else:
             return super().__setattr__(item, value)
 
+    def __call__(self, n=None):
+        """
+        Parameters
+        ----------
+        n : int, optional
+            Number of values to sample
+
+        Returns
+        -------
+        sample : number or list[number]
+
+        """
+        raise NotImplementedError
+
 
 class Fixed(Sampler):
     """Fixed value"""
     def __init__(self, value):
+        """
+        Parameters
+        ----------
+        value : number or sequence[number]
+        """
         super().__init__(value=value)
 
     def __call__(self, n=None):
@@ -76,27 +95,51 @@ class Fixed(Sampler):
 class Uniform(Sampler):
     """Continuous uniform sampler"""
 
-    def __init__(self, a, b):
-        super().__init__(a=a, b=b)
+    def __init__(self, min, max):
+        """
+        Parameters
+        ----------
+        min : float or sequence[float]
+            Lower bound (inclusive)
+        max : float or sequence[float]
+            Upper bound (inclusive or exclusive, depending on rounding)
+        """
+        super().__init__(min=min, max=max)
 
     def __call__(self, n=None):
-        return self.map(random.uniform, self.a, self.b, n=n)
+        return self.map(random.uniform, self.min, self.max, n=n)
 
 
 class RandInt(Sampler):
     """Discrete uniform sampler"""
 
-    def __init__(self, a, b):
-        super().__init__(a=a, b=b)
+    def __init__(self, min, max):
+        """
+        Parameters
+        ----------
+        min : float or sequence[float]
+            Lower bound (inclusive)
+        max : float or sequence[float]
+            Upper bound (inclusive)
+        """
+        super().__init__(min=min, max=max)
 
     def __call__(self, n=None):
-        return self.map(random.randint, self.a, self.b, n=n)
+        return self.map(random.randint, self.min, self.max, n=n)
 
 
 class Normal(Sampler):
     """Gaussian sampler"""
 
     def __init__(self, mu, sigma):
+        """
+        Parameters
+        ----------
+        mu : float or sequence[float]
+            Mean
+        sigma : float or sequence[float]
+            Standard deviation
+        """
         super().__init__(mu=mu, sigma=sigma)
 
     def __call__(self, n=None):
@@ -107,6 +150,14 @@ class LogNormal(Sampler):
     """LogNormal sampler"""
 
     def __init__(self, mu, sigma):
+        """
+        Parameters
+        ----------
+        mu : float or sequence[float]
+            Mean of the log
+        sigma : float or sequence[float]
+            Standard deviation of the log
+        """
         super().__init__(mu=mu, sigma=sigma)
 
     def __call__(self, n=None):
