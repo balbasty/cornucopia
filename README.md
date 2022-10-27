@@ -47,17 +47,25 @@ The default value for `shared` can differ from transform to transform. For examp
 
 We offer utilities to randomly activate the application of a transform, or randomly choose a transform to apply from a set of transforms:
 ```python
+gauss = cc.GaussianNoiseTransform()
+chi = cc.ChiNoiseTransform()
+
 # 20% chance of adding noise
-img = cc.MaybeTransform(cc.GaussianNoiseTransform(), 0.2)(img)
+img = cc.MaybeTransform(gauss, 0.2)(img)
 # randomly apply either Gaussian or Chi noise
-img = cc.SwitchTransform([cc.GaussianNoiseTransform(), cc.ChiNoiseTransform()])(img)  
+img = cc.SwitchTransform([gauss, chi])(img)  
+
+# syntactic sugar
+img = 0.2 * gauss                           # -> MaybeTransform
+img = gauss | chi                           # -> SwitchTransform
+img = cc.switch({gauss: 0.5, chi: 0.5})     # -> SwitchTransform
 ```
 
 Transforms can be composed together using the `SequentialTransform` class, or by simply adding them together:
 ```python
 # programatic instantiation of a sequence
 seq = cc.SequentialTransform([cc.ElasticTransform(), cc.GaussianNoiseTransform()])
-# syntaxic sugar
+# syntactic sugar
 seq = cc.ElasticTransform() + cc.GaussianNoiseTransform()
 
 img = seq(img)

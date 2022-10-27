@@ -1,5 +1,6 @@
 __all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
-           'MaybeTransform', 'MappedTransform', 'randomize', 'map']
+           'MaybeTransform', 'MappedTransform', 'SwitchTransform',
+           'randomize', 'map', 'switch', 'include', 'exclude', 'exclude_keys']
 
 import torch
 from torch import nn
@@ -395,6 +396,12 @@ class Transform(nn.Module):
     def __imul__(self, prob):
         return MaybeTransform(self, prob)
 
+    def __or__(self, other):
+        return SwitchTransform([self, other])
+
+    def __ior__(self, other):
+        return SwitchTransform([self, other])
+
 
 class SequentialTransform(Transform):
     """A sequence of transforms
@@ -499,6 +506,12 @@ class MaybeTransform(Transform):
     def get_parameters(self, x):
         return random.random()
 
+    def __repr__(self):
+        s = f'{repr(self.subtransform)}?'
+        if self.prob != 0.5:
+            s += f'[{self.prob}]'
+        return s
+
 
 class SwitchTransform(Transform):
     """Randomly one of multiple transforms"""
@@ -516,15 +529,22 @@ class SwitchTransform(Transform):
             Roll the dice once for all input tensors
         """
         super().__init__(shared=shared)
-        self.transforms = transforms
+        self.transforms = list(transforms)
         if not prob:
-            prob = [1/len(transforms)] * len(transforms)
-        prob = ensure_list(prob, len(transforms), default=0)
-        prob = [x / sum(prob) for x in prob]
+            prob = []
         self.prob = prob
 
+    def _make_prob(self):
+        prob = ensure_list(self.prob, len(self.transforms), default=0)
+        sumprob = sum(prob)
+        if not sumprob:
+            prob = [1/len(self.transforms)] * len(self.transforms)
+        else:
+            prob = [x / sumprob for x in prob]
+        return prob
+
     def apply_transform(self, x, parameters):
-        prob = cumsum(self.prob)
+        prob = cumsum(self._make_prob())
         for k, t in enumerate(self.transforms):
             if parameters > 1 - prob[k]:
                 with include(t, self._include), exclude(t, self._exclude):
@@ -534,6 +554,47 @@ class SwitchTransform(Transform):
 
     def get_parameters(self, x):
         return random.random()
+
+    def __or__(self, other):
+        if isinstance(other, SwitchTransform) \
+                and not self.prob and not other.prob:
+            return SwitchTransform([*self.transforms, *other.transforms])
+        else:
+            return SwitchTransform([self, other])
+
+    def __ior__(self, other):
+        if isinstance(other, SwitchTransform) \
+                and not self.prob and not other.prob:
+            self.transforms.append(other.transforms)
+            return self
+        else:
+            return SwitchTransform([self, other])
+
+    def __repr__(self):
+        if self.prob:
+            prob = self._make_prob()
+            s = [f'{p} * {str(t)}' for p, t in zip(prob, self.transforms)]
+        else:
+            s = [str(t) for t in self.transforms]
+        s = ' | '.join(s)
+        s = f'({s})'
+        return s
+
+
+def switch(map):
+    """Random switchn between a set of transforms
+
+    Parameters
+    ----------
+    map : dict(Transform -> float)
+        A dictionary that maps transforms to probabilities of being chosen
+
+    Returns
+    -------
+    SwitchTransform
+
+    """
+    return SwitchTransform(map.keys(), map.values())
 
 
 class RandomizedTransform(Transform):
