@@ -80,7 +80,6 @@ class include:
             image, label = xform(image=image, label=label)
     """
 
-
     def __init__(self, transform, keys, union=True):
         """
         Parameters
@@ -95,7 +94,7 @@ class include:
         if keys and not isinstance(keys, (list, tuple)):
             keys = [keys]
         self.transform = transform
-        self.keys = list(keys)
+        self.keys = list(keys) if keys else keys
         self.union = union
 
     def __enter__(self):
@@ -134,7 +133,7 @@ class exclude:
         if keys and not isinstance(keys, (list, tuple)):
             keys = [keys]
         self.transform = transform
-        self.keys = list(keys)
+        self.keys = list(keys) if keys else keys
         self.union = union
 
     def __enter__(self):
