@@ -15,12 +15,12 @@ pip install git+https://github.com/balbasty/cornucopia
 
 ## Usage
 
-Let's start with importing corncucopia:
+Let's start with importing cornucopia:
 ```python
 import cornucopia as cc
 ```
 
-Transforms are simply Pytorch modules that expect (`list` or `tuple` or `dict` of) tensors with a channel but no batch dimension (e.g., `[C, X, Y, Z]`). 
+Transforms are simply Pytorch modules that expect tensors with a channel but no batch dimension (e.g., `[C, X, Y, Z]`). 
 To make this clear, the name of (almost) all transforms implemented has the suffix `Transform`. For example, here's how to add random noise to an image:
 ```python
 # Load an MRI and ensure that it is reshaped as [C, X, Y, Z]
@@ -45,7 +45,7 @@ img = cc.ElasticTransform(shared=False)(img)
 ```
 The default value for `shared` can differ from transform to transform. For example, the default for `ElasticTransform` is `True` (since we expect that most people want to apply the same deformation to different channels), whereas the default for `GaussianNoiseTransform` is `False` (since we want to resample noise in each channel).
 
-We offer a bunch of utilities to apply transforms to randomly activate the application of a transform, or randomly choose a transform to apply from a set of transforms:
+We offer utilities to randomly activate the application of a transform, or randomly choose a transform to apply from a set of transforms:
 ```python
 # 20% chance of adding noise
 img = cc.MaybeTransform(cc.GaussianNoiseTransform(), 0.2)(img)
@@ -69,8 +69,62 @@ Better augmentation can be obtained if the parameters of a random transform (_e.
 img = cc.RandomAffineElasticTransform()(img)
 
 # randomize a transform
-hypernoise = cc.RandomizedTransform(cc.GaussianNoise, cc.Uniform(0, 10))
+hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
 img = hypernoise(img)
+```
+
+Last but not least, transforms accept any nested collection 
+(`list`, `tuple`, `dict`) of tensors, applies the transform to each 
+leaf Tensor, and returns a collection with the same nested structure:
+```python
+img1 = cc.LoadTransform(dtype='float32')('path/to/mri1.nii.gz')
+lab1 = cc.LoadTransform(dtype='long')('path/to/labels1.nii.gz')
+img2 = cc.LoadTransform(dtype='float32')('path/to/mri2.nii.gz')
+lab2 = cc.LoadTransform(dtype='long')('path/to/labels2.nii.gz')
+
+dat = [(img1, lab1), (img2, lab2)]
+dat = cc.ElasticTransform()(dat)
+```
+
+It is also possible (as briefly showed earlier) to pass positional or even 
+keyword arguments. In this case, we return special `Args`, `Kwargs` or 
+`ArgsAndKwargs` object that act like tuples and dictionaries (but allow us
+to properly deal with transfoms composition and such). These structures 
+understand implicit unpacking, and always unpack values (which differs from 
+native `dict`, which unpack keys).
+```python
+img1, lab1 = cc.ElasticTransform()(img1, lab1)
+img1, lab1 = cc.ElasticTransform()(image=img1, label=lab1)
+img1, img2, lab1 = cc.ElasticTransform()(img1, img2, label=lab1)
+dat = cc.ElasticTransform()(image=img1, label=lab1)
+img1, lab1 = dat['image'], dat['label']
+# etc.
+```
+
+It is then possible to take advantage of positional arguments, keywords 
+and/or dictionaries to apply some transforms to a subset of inputs. 
+This is done using the `cc.MappedTransform` meta-transform (or the `cc.map`
+utility function):
+```python
+# using positionals
+geom = cc.RandomElasticTransform()
+noise = cc.GaussianNoiseTransform()
+trf = geom + cc.map(noise, None)
+img, lab = trf(img, lab)
+
+# using keywords
+geom = cc.RandomElasticTransform()
+noise = cc.GaussianNoiseTransform()
+trf = geom + cc.map(image=noise)
+img, lab = trf(image=img, label=lab)
+
+# using dictionaries
+dat = [dict(image=img1, label=lab1), 
+       dict(image=img2, label=lab2)]
+geom = cc.RandomElasticTransform()
+noise = cc.GaussianNoiseTransform()
+trf = geom + cc.map(image=noise, nested=True) # !! must be `nested`
+dat = trf(dat)
 ```
 
 ### Plug it in your project

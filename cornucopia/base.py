@@ -1,5 +1,5 @@
 __all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
-           'MaybeTransform', 'MappedTransform', 'randomize']
+           'MaybeTransform', 'MappedTransform', 'randomize', 'map']
 
 import torch
 from torch import nn
@@ -37,6 +37,36 @@ def _recursive_cat(x, **kwargs):
                     for x2 in zip(x1[k] for x1 in x)}
         raise TypeError(f'What should I do with a {type(x[0])}?')
     return _rec(*x)
+
+
+class Arguments:
+    """Base class for returned arguments"""
+    pass
+
+
+class Args(tuple, Arguments):
+    """Tuple-like"""
+    pass
+
+
+class Kwargs(dict, Arguments):
+    """Dict-like, except that unzipping works on values instead of keys"""
+
+    def __iter__(self):
+        for v in self.values():
+            yield v
+
+
+class ArgsAndKwargs(Arguments):
+    def __init__(self, args, kwargs):
+        self.args = Args(args)
+        self.kwargs = Kwargs(kwargs)
+
+    def __iter__(self):
+        for a in self.args:
+            yield a
+        for v in self.kwargs:
+            yield v
 
 
 class Transform(nn.Module):
@@ -84,7 +114,7 @@ class Transform(nn.Module):
         super().__init__()
         self.shared = shared
 
-    def forward(self, x):
+    def forward(self, *a, **k):
         """Apply the transform recursively.
 
         Parameters
@@ -99,13 +129,33 @@ class Transform(nn.Module):
 
         """
         # DEV: this function should in general not be overloaded
+
+        if k:
+            return self.forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
+        elif len(a) > 1:
+            return self.forward(Args(a))
+        elif not a:
+            return None
+
+        x = a[0]
+        intype = type(x)
+        outtype = lambda x: (ArgsAndKwargs(*x) if intype is ArgsAndKwargs else
+                             intype(x) if issubclass(intype, (Args, Kwargs))
+                             else x)
+        if isinstance(x, ArgsAndKwargs):
+            x = [tuple(x.args), dict(x.kwargs)]
+        elif isinstance(x, Args):
+            x = tuple(x)
+        elif isinstance(x, Kwargs):
+            x = dict(x)
+
         if self.shared is True or (self.shared and self.shared[0] == 't'):
             x0 = _get_first_element(x)
             if torch.is_tensor(x0) and self.shared is True:
                 x0 = x0[0, None]
             theta = self.get_parameters(x0)
             x = self.forward_with_parameters(x, parameters=theta)
-            return x
+            return outtype(x)
 
         # not shared across images -> unfold
         if isinstance(x, (list, tuple)):
@@ -115,9 +165,9 @@ class Transform(nn.Module):
 
         # now we're working with a single tensor (or str)
         if self.shared is False:
-            return self.transform_tensor_perchannel(x)
+            return outtype(self.transform_tensor_perchannel(x))
         else:
-            return self.transform_tensor(x)
+            return outtype(self.transform_tensor(x))
 
     def forward_with_parameters(self, x, parameters=None):
         """Apply the transform with pre-computed parameters
@@ -273,7 +323,17 @@ class SequentialTransform(Transform):
         super().__init__()
         self.transforms = transforms
 
-    def forward(self, x):
+    def forward(self, *args, **kwargs):
+        if kwargs and args:
+            x = ArgsAndKwargs(args, kwargs)
+        elif kwargs:
+            x = Kwargs(kwargs)
+        elif len(args) > 1:
+            x = Args(args)
+        elif args:
+            x = args[0]
+        else:
+            return None
         for transform in self.transforms:
             x = transform(x)
         return x
@@ -448,45 +508,92 @@ def randomize(klass, shared=False):
 
 class MappedTransform(Transform):
     """
-    Transforms that are applied to specific keys in an input dictionary
+    Transforms that are applied to specific positional or arguments
 
     Examples
     --------
     ::
+        img = torch.randn([1, 32, 32])
+        seg = torch.randn([3, 32, 32]).softmax(0)
+
+        # positional variant
+        trf = MappedTransform(GaussianNoise(), None)
+        img, seg = trf(img, seg)
+
+        # keyword variant
+        trf = MappedTransform(image=GaussianNoise())
+        img, seg = trf(image=img, label=seg)
+
+
+        # alternative version
         dat = {'img': torch.randn([1, 32, 32]),
                'seg': torch.randn([3, 32, 32]).softmax(0)}
-        dat = MappedTransform(img=GaussianNoise())(dat)
+        dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
+
 
     """
 
-    def __init__(self, *maybe_map, **map):
+    def __init__(self, *mapargs, nested=False, **mapkwargs):
         """
 
         Parameters
         ----------
-        map : dict[key -> Transform]
+        mapargs : tuple[Transform]
+            Transform to apply to positional arguments
+        mapkwargs : dict[key -> Transform]
+            Transform to apply to keyword arguments
+        nested : bool, default=False
+            Recursively traverse the inputs until we find matching dictionaries.
+            Only mapkwargs are accepted if "nested"
         """
         super().__init__(shared='channels')
-        if maybe_map:
-            map.update(maybe_map)
-        self.map = map
+        self.mapargs = mapargs
+        self.mapkwargs = mapkwargs
+        self.nested = nested
+        if nested and mapargs:
+            raise ValueError('Cannot have both `nested` and positional transforms')
 
-    def forward(self, x):
-        if isinstance(x, (list, tuple)):
-            return type(x)(self(elem) for elem in x)
-        if hasattr(x, 'items'):
-            return {key: self.map[key](value) if key in self.map else
-                    super(type(self), self).forward(value)
-                    for key, value in x.items()}
-        return x
+    def forward(self, *args, **kwargs):
+        if args:
+            a0 = args[0]
+            if isinstance(a0, Args):
+                return self.forward(*a0)
+            if isinstance(a0, Kwargs):
+                return self.forward(**a0)
+            if isinstance(a0, ArgsAndKwargs):
+                return self.forward(*a0.args, **a0.kwargs)
+        default = self.forward if self.nested else (lambda x: x)
+        if args:
+            mapargs = self.mapargs
+            mapargs += (default,) * max(0, len(args) - len(mapargs))
+            args = tuple(f(a) if f else a for f, a in zip(mapargs, args))
+        if kwargs:
+            kwargs = {key: (self.mapkwargs.get(key, None) or default)(value)
+                      for key, value in kwargs.items()}
+        if args and kwargs:
+            return ArgsAndKwargs(args, kwargs)
+        elif kwargs:
+            return Kwargs(kwargs)
+        elif len(args) > 1:
+            return Args(args)
+        else:
+            return args[0]
 
     def apply_transform(self, x, parameters):
         return x
 
     def __repr__(self):
-        mapping = {key: value for key, value in self.map.items()}
-        return f'{type(self).__name__}({mapping})'
+        s = []
+        for v in self.mapargs:
+            s += [f'{v}']
+        for k, v in self.mapkwargs.items():
+            s += [f'{k}={v}']
+        s = ', '.join(s)
+        return f'{type(self).__name__}({s})'
 
+
+def map(*mapargs, nested=False, **mapkwargs):
+    return MappedTransform(*mapargs, nested=False, **mapkwargs)
 
 class SplitChannels(Transform):
     """Unbind tensors across first dimension (without collapsing it)"""
@@ -506,6 +613,15 @@ class CatChannels(Transform):
     def __init__(self):
         super().__init__(shared='channels')
 
-    def forward(self, x):
-        return _recursive_cat(x)
+    def forward(self, *args, **kwargs):
+        args = tuple(_recursive_cat(x) for x in args)
+        kwargs = {k: _recursive_cat(v) for k, v in kwargs.items()}
+        if args and kwargs:
+            return ArgsAndKwargs(args, kwargs)
+        elif kwargs:
+            return Kwargs(kwargs)
+        elif len(args) > 1:
+            return Args(args)
+        else:
+            return args[0]
 
