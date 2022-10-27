@@ -637,13 +637,13 @@ class Slicewise3DAffineTransform(Transform):
         t = warps.identity(fullshape, dtype=A.dtype, device=A.device)
         t = t.movedim(-1, 0).movedim(slice, -1).movedim(0, -1)
         t = A[:, :-1, :-1].matmul(t.unsqueeze(-1)).squeeze(-1).add_(A[:, :-1, -1])
-        t = warps.sub_identity_(t)
-        t = t.movedim(-1, 0).movedim(-1, slice)
+        t = t.movedim(-1, 0).movedim(-1, slice).movedim(0, -1)
+        t = warps.sub_identity_(t).movedim(-1, 0)
         return t, A
 
     def apply_transform(self, x, parameters):
         flow, matrix = parameters
-        x = warps.apply_flow(x[:, None], flow.movedim(0, -1),
+        x = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
                              padding_mode=self.bound)
         return x[:, 0]
 
