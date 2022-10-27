@@ -75,11 +75,11 @@ class include:
     """
     Context manager for keys to include
 
-    ```python
-    with include(xform, "image"):
-        image, label = xform(image=image, label=label)
-    ```
+    ::
+        with include(xform, "image"):
+            image, label = xform(image=image, label=label)
     """
+
 
     def __init__(self, transform, keys, union=True):
         """
@@ -115,10 +115,9 @@ class exclude:
     """
     Context manager for keys to exclude
 
-    ```python
-    with exclude(xform, "image"):
-        image, label = xform(image=image, label=label)
-    ```
+    ::
+        with exclude(xform, "image"):
+            image, label = xform(image=image, label=label)
     """
 
     def __init__(self, transform, keys, union=True):
@@ -169,18 +168,16 @@ class Transform(nn.Module):
     the parent anf child transform. For example, we may want to randomly
     decide to apply (or not) a bias field at the parent level but, when
     applied, let the bias field be different in each channel. Such a
-    transform would be defined as:
-    ```python
-    t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
-    ```
+    transform would be defined as::
+
+        t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
 
     Furthermore, the addition of two transforms implictly defines
-    (or extends) a `SequentialTransform`:
-    ```
-    t1 = MultFieldTransform()
-    t2 = GaussianNoiseTransform()
-    seq = t1 + t2
-    ```
+    (or extends) a `SequentialTransform`::
+
+        t1 = MultFieldTransform()
+        t2 = GaussianNoiseTransform()
+        seq = t1 + t2
 
     """
 
@@ -412,18 +409,16 @@ class SequentialTransform(Transform):
     """A sequence of transforms
 
     Sequences can be built explicitly, or simply by adding transforms
-    together:
-    ```python
-    t1 = MultFieldTransform()
-    t2 = GaussianNoiseTransform()
-    seq = SequentialTransform([t1, t2])     # explicit
-    seq = t1 + t2                           # implicit
-    ```
+    together::
 
-    Sequences can also be extended by addition:
-    ```python
-    seq += SmoothTransform()
-    ```
+        t1 = MultFieldTransform()
+        t2 = GaussianNoiseTransform()
+        seq = SequentialTransform([t1, t2])     # explicit
+        seq = t1 + t2                           # implicit
+
+    Sequences can also be extended by addition::
+
+        seq += SmoothTransform()
 
 
     """
@@ -681,23 +676,24 @@ class MappedTransform(Transform):
 
     Examples
     --------
-    ```python
-    img = torch.randn([1, 32, 32])
-    seg = torch.randn([3, 32, 32]).softmax(0)
+    ::
+        img = torch.randn([1, 32, 32])
+        seg = torch.randn([3, 32, 32]).softmax(0)
 
-    # positional variant
-    trf = MappedTransform(GaussianNoise(), None)
-    img, seg = trf(img, seg)
+        # positional variant
+        trf = MappedTransform(GaussianNoise(), None)
+        img, seg = trf(img, seg)
 
-    # keyword variant
-    trf = MappedTransform(image=GaussianNoise())
-    img, seg = trf(image=img, label=seg)
+        # keyword variant
+        trf = MappedTransform(image=GaussianNoise())
+        img, seg = trf(image=img, label=seg)
 
-    # alternative version
-    dat = {'img': torch.randn([1, 32, 32]),
-           'seg': torch.randn([3, 32, 32]).softmax(0)}
-    dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
-    ```
+
+        # alternative version
+        dat = {'img': torch.randn([1, 32, 32]),
+               'seg': torch.randn([3, 32, 32]).softmax(0)}
+        dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
+
 
     """
 
