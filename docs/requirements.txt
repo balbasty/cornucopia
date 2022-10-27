@@ -1,6 +1,8 @@
+
 jinja2==3.0.3
 sphinx
 sphinx-book-theme
 sphinx-autoapi
 myst-parser
+myst-nb
 m2r2
