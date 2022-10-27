@@ -7,8 +7,8 @@
 # -- Path setup --------------------------------------------------------------
 
 # Module search path
-import os
 import sys
+from pathlib import Path
 here = Path(__file__).absolute().parent
 sys.path.insert(0, str(here.parent))
 sys.path.insert(0, str(here/'extensions'))
