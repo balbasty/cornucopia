@@ -1,6 +1,7 @@
 __all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
            'MaybeTransform', 'MappedTransform', 'SwitchTransform',
-           'randomize', 'map', 'switch', 'include', 'exclude', 'exclude_keys']
+           'randomize', 'map', 'switch', 'include', 'exclude',
+           'include_keys', 'exclude_keys']
 
 import torch
 from torch import nn
