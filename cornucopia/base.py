@@ -74,8 +74,8 @@ class ArgsAndKwargs(Arguments):
 class include:
     """
     Context manager for keys to include
-
     ::
+
         with include(xform, "image"):
             image, label = xform(image=image, label=label)
     """
@@ -113,8 +113,8 @@ class include:
 class exclude:
     """
     Context manager for keys to exclude
-
     ::
+
         with exclude(xform, "image"):
             image, label = xform(image=image, label=label)
     """
@@ -676,6 +676,7 @@ class MappedTransform(Transform):
     Examples
     --------
     ::
+
         img = torch.randn([1, 32, 32])
         seg = torch.randn([3, 32, 32]).softmax(0)
 
@@ -692,7 +693,6 @@ class MappedTransform(Transform):
         dat = {'img': torch.randn([1, 32, 32]),
                'seg': torch.randn([3, 32, 32]).softmax(0)}
         dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
-
 
     """
 
