@@ -28,7 +28,6 @@ author = 'Yael Balbastre'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'myst_parser',
     'myst_nb',
     'nbsphinx',
     'sphinx.ext.autodoc',
