@@ -127,6 +127,20 @@ trf = geom + cc.map(image=noise, nested=True) # !! must be `nested`
 dat = trf(dat)
 ```
 
+Alternatively, a transform can be applied selectively to a set of keys
+(or to all *but* a set of keys):
+```python
+geom = cc.RandomElasticTransform()
+noise = cc.GaussianNoiseTransform()
+trf = geom + cc.include_keys(noise, "image")
+img, lab = trf(image=img, label=lab)
+
+geom = cc.RandomElasticTransform()
+noise = cc.GaussianNoiseTransform()
+trf = geom + cc.exclude_keys(noise, "label")
+img, lab = trf(image=img, label=lab)
+```
+
 ### Plug it in your project
 
 Because cornucopia transforms are implemented in pure PyTorch, they can be run **on the CPU or GPU**, and benefit greatly from being run on the GPU.

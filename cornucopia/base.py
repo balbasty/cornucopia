@@ -69,6 +69,84 @@ class ArgsAndKwargs(Arguments):
             yield v
 
 
+class include:
+    """
+    Context manager for keys to include
+
+    ::
+        with include(xform, "image"):
+            image, label = xform(image=image, label=label)
+    """
+
+    def __init__(self, transform, keys, union=True):
+        """
+        Parameters
+        ----------
+        transform : Tranform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to include
+        union : bool, default=True
+            Include the union of what was already included and `keys`
+        """
+        if keys and not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        self.transform = transform
+        self.keys = list(keys)
+        self.union = union
+
+    def __enter__(self):
+        self.include = self.transform._include
+        self.transform._include = self.keys
+        if self.union and self.include is not None:
+            if self.transform._include is not None:
+                self.transform._include = self.transform._include + self.include
+            else:
+                self.transform._include = self.include
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.transform._include = self.include
+
+
+class exclude:
+    """
+    Context manager for keys to exclude
+
+    ::
+        with exclude(xform, "image"):
+            image, label = xform(image=image, label=label)
+    """
+
+    def __init__(self, transform, keys, union=True):
+        """
+        Parameters
+        ----------
+        transform : Tranform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to include
+        union : bool, default=True
+            Exclude the union of what was already excluded and `keys`
+        """
+        if keys and not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        self.transform = transform
+        self.keys = list(keys)
+        self.union = union
+
+    def __enter__(self):
+        self.exclude = self.transform._exclude
+        self.transform._exclude = self.keys
+        if self.union and self.exclude:
+            if self.transform._exclude is not None:
+                self.transform._exclude = self.transform._exclude + self.exclude
+            else:
+                self.transform._exclude = self.exclude
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.transform._exclude = self.exclude
+
+
 class Transform(nn.Module):
     """
     Base class for transforms.
@@ -113,6 +191,8 @@ class Transform(nn.Module):
         """
         super().__init__()
         self.shared = shared
+        self._include = None
+        self._exclude = tuple()
 
     def forward(self, *a, **k):
         """Apply the transform recursively.
@@ -161,7 +241,13 @@ class Transform(nn.Module):
         if isinstance(x, (list, tuple)):
             return type(x)(self(elem) for elem in x)
         if hasattr(x, 'items'):
-            return {key: self(value) for key, value in x.items()}
+            valid_keys = x.keys()
+            if self._include is not None:
+                valid_keys = [k for k in valid_keys if k in self._include]
+            if self._exclude:
+                valid_keys = [k for k in valid_keys if k not in self._exclude]
+            return {key: self(value) if key in valid_keys else value
+                    for key, value in x.items()}
 
         # now we're working with a single tensor (or str)
         if self.shared is False:
@@ -300,6 +386,15 @@ class Transform(nn.Module):
         else:
             return SequentialTransform([other, self])
 
+    def __mul__(self, prob):
+        return MaybeTransform(self, prob)
+
+    def __rmul__(self, prob):
+        return MaybeTransform(self, prob)
+
+    def __imul__(self, prob):
+        return MaybeTransform(self, prob)
+
 
 class SequentialTransform(Transform):
     """A sequence of transforms
@@ -334,8 +429,9 @@ class SequentialTransform(Transform):
             x = args[0]
         else:
             return None
-        for transform in self.transforms:
-            x = transform(x)
+        for trf in self.transforms:
+            with include(trf, self._include), exclude(trf, self._exclude):
+                x = trf(x)
         return x
 
     def __len__(self):
@@ -394,7 +490,9 @@ class MaybeTransform(Transform):
 
     def apply_transform(self, x, parameters):
         if parameters > 1 - self.prob:
-            return self.subtransform(x)
+            trf = self.subtransform
+            with include(trf, self._include), exclude(trf, self._exclude):
+                return trf(x)
         else:
             return x
 
@@ -429,7 +527,8 @@ class SwitchTransform(Transform):
         prob = cumsum(self.prob)
         for k, t in enumerate(self.transforms):
             if parameters > 1 - prob[k]:
-                return t(x)
+                with include(t, self._include), exclude(t, self._exclude):
+                    return t(x)
             else:
                 return x
 
@@ -474,7 +573,9 @@ class RandomizedTransform(Transform):
         return self.subtransform(*args, **kwargs)
 
     def apply_transform(self, x, parameters):
-        return parameters(x)
+        with include(parameters, self._include), \
+             exclude(parameters, self._exclude):
+            return parameters(x)
 
     def __repr__(self):
         if type(self) is RandomizedTransform:
@@ -533,7 +634,7 @@ class MappedTransform(Transform):
 
     """
 
-    def __init__(self, *mapargs, nested=False, **mapkwargs):
+    def __init__(self, *mapargs, nested=False, default=None, **mapkwargs):
         """
 
         Parameters
@@ -545,15 +646,27 @@ class MappedTransform(Transform):
         nested : bool, default=False
             Recursively traverse the inputs until we find matching dictionaries.
             Only mapkwargs are accepted if "nested"
+        default : Transform
+            Transform to apply if nothing is specifically mapped
         """
         super().__init__(shared='channels')
         self.mapargs = mapargs
         self.mapkwargs = mapkwargs
         self.nested = nested
+        self.default = default
         if nested and mapargs:
             raise ValueError('Cannot have both `nested` and positional transforms')
 
     def forward(self, *args, **kwargs):
+        if self._include is not None or self._exclude:
+            def wrap(f):
+                def ff(*a, **k):
+                    with include(f, self._include), exclude(f, self._exclude):
+                        return f(*a, **k)
+                return ff
+        else:
+            wrap = lambda f: f
+
         if args:
             a0 = args[0]
             if isinstance(a0, Args):
@@ -562,14 +675,23 @@ class MappedTransform(Transform):
                 return self.forward(**a0)
             if isinstance(a0, ArgsAndKwargs):
                 return self.forward(*a0.args, **a0.kwargs)
-        default = self.forward if self.nested else (lambda x: x)
+
+        def default(x):
+            if torch.is_tensor(x):
+                return self.default(x) if self.default else x
+            else:
+                return self.forward(x) if self.nested else x
+
         if args:
-            mapargs = self.mapargs
+            mapargs = tuple(wrap(f) if f else None for f in self.mapargs)
             mapargs += (default,) * max(0, len(args) - len(mapargs))
             args = tuple(f(a) if f else a for f, a in zip(mapargs, args))
         if kwargs:
-            kwargs = {key: (self.mapkwargs.get(key, None) or default)(value)
-                      for key, value in kwargs.items()}
+            mapkwargs = {k: wrap(f) if f else None
+                         for k, f in self.mapkwargs.items()}
+            func = lambda key: mapkwargs.get(key, default) or (lambda x: x)
+            kwargs = {key: func(key)(value) for key, value in kwargs.items()}
+
         if args and kwargs:
             return ArgsAndKwargs(args, kwargs)
         elif kwargs:
@@ -592,8 +714,64 @@ class MappedTransform(Transform):
         return f'{type(self).__name__}({s})'
 
 
-def map(*mapargs, nested=False, **mapkwargs):
-    return MappedTransform(*mapargs, nested=False, **mapkwargs)
+class MappedKeysTransform(Transform):
+    """Apply a transform to a set of keys"""
+
+    def __init__(self, transform, keys):
+        """
+
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to which to apply the transform
+        """
+        super().__init__()
+        self.transform = transform
+        self.keys = keys
+
+    def forward(self, *a, **k):
+        with include(self.transform, self.keys):
+            return self.transform.forward(*a, **k)
+
+
+class MappedExceptKeysTransform(MappedTransform):
+    """Apply a transform to all but a set of keys"""
+
+    def __init__(self, transform, keys):
+        """
+
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to which *not* to apply the transform
+        """
+        super().__init__()
+        self.transform = transform
+        self.keys = keys
+
+    def forward(self, *a, **k):
+        with exclude(self.transform, self.keys):
+            return self.transform.forward(*a, **k)
+
+
+def map(*mapargs, nested=False, default=None, **mapkwargs):
+    """Alias for MappedTransform"""
+    return MappedTransform(*mapargs, nested=nested, default=default, **mapkwargs)
+
+
+def include_keys(transform, keys):
+    """Alias for MappedKeysTransform"""
+    return MappedKeysTransform(transform, keys)
+
+
+def exclude_keys(transform, keys):
+    """Alias for MappedExceptKeysTransform"""
+    return MappedKeysTransform(transform, keys)
+
 
 class SplitChannels(Transform):
     """Unbind tensors across first dimension (without collapsing it)"""
@@ -615,7 +793,13 @@ class CatChannels(Transform):
 
     def forward(self, *args, **kwargs):
         args = tuple(_recursive_cat(x) for x in args)
-        kwargs = {k: _recursive_cat(v) for k, v in kwargs.items()}
+        valid_keys = kwargs.keys()
+        if self._include is not None:
+            valid_keys = [k for k in valid_keys if k in self._include]
+        if self._exclude:
+            valid_keys = [k for k in valid_keys if k not in self._exclude]
+        kwargs = {k: _recursive_cat(v) if k in valid_keys else v
+                  for k, v in kwargs.items()}
         if args and kwargs:
             return ArgsAndKwargs(args, kwargs)
         elif kwargs:
