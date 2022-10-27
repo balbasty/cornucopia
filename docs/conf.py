@@ -29,7 +29,6 @@ author = 'Yael Balbastre'
 # ones.
 extensions = [
     'myst_nb',
-    'nbsphinx',
     'sphinx.ext.autodoc',
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
