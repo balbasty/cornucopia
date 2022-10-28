@@ -20,7 +20,7 @@ except ImportError:
 
 class Loader:
     """Base class for file loaders"""
-    def __init__(self, ndim=None, dtype=None, device=None):
+    def __init__(self, ndim=None, dtype=None, device=None, **kwargs):
         self.ndim = ndim
         self.dtype = dtype
         self.device = device
@@ -37,7 +37,7 @@ class BabelLoader(Loader):
 
     EXT = ['.nii', '.nii.gz', '.mgh', '.mgz', '.mnc', '.img', '.hdr']
 
-    def __init__(self, ndim=None, dtype=None, device=None, to_ras=True):
+    def __init__(self, ndim=None, dtype=None, device=None, to_ras=True, **kwargs):
         super().__init__(ndim, dtype, device)
         self.to_ras = to_ras
 
@@ -52,7 +52,7 @@ class BabelLoader(Loader):
             perm += list(range(3, x.dim()))
             x = x.permute(perm)
             aff = aff[:, perm + [-1]]
-            flipdims = (aff[:3, :3].diag() < 0).nonzero().tolist()
+            flipdims = (aff[:3, :3].diag() < 0).nonzero().flatten().tolist()
             x = x.flip(flipdims)
 
         channel_dims = 0
@@ -106,7 +106,7 @@ class PillowLoader(Loader):
     EXT = ['.bmp', '.eps', '.gif', '.icns', '.ico', '.jpg', '.jpeg',
            '.png', '.apng']
 
-    def __init__(self, ndim=None, dtype=None, device=None, rot90=True):
+    def __init__(self, ndim=None, dtype=None, device=None, rot90=True, **kwargs):
         super().__init__(ndim, dtype, device)
         self.rot90 = rot90
 

@@ -11,7 +11,6 @@ class ToTensorTransform(Transform):
 
     def __init__(self, dim=None, dtype=None, device=None):
         """
-
         Parameters
         ----------
         dtype : torch.dtype, optional
@@ -34,12 +33,35 @@ class ToTensorTransform(Transform):
 
 
 class LoadTransform(Transform):
+    """
+    Load data from disk
+    """
 
-    def __init__(self, ndim=None, dtype=None, device=None):
+    def __init__(self, ndim=None, dtype=None, device=None, **kwargs):
+        """
+        Parameters
+        ----------
+        ndim : int, optional
+            Number of spatial dimensions (default: guess from file)
+        dtype : str or torch.dtype, optional
+            Data type (default: guess from file)
+        device : str or torch.device
+            Device on which to load data (default: cpu)
+
+        Keyword Parameters
+        ------------------
+        to_ras : bool, default=True
+            Reorient data so that it has a RAS layout.
+            Only used by Babel reader.
+        rot90 : bool, default=True
+            Rotate by 90 degrees in-plane.
+            Only used by Pillow reader.
+        """
         super().__init__(shared='channels')
         self.ndim = ndim
         self.dtype = dtype
         self.device = device
+        self.kwargs = kwargs
 
     def apply_transform(self, x, parameters):
         try:
@@ -56,7 +78,8 @@ class LoadTransform(Transform):
             if ext in loaders:
                 for loader in loaders[ext]:
                     try:
-                        return loader(self.ndim, self.dtype, self.device)(x)
+                        return loader(self.ndim, self.dtype, self.device,
+                                      **self.kwargs)(x)
                     except Exception as e:
                         pass
 
