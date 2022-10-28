@@ -56,6 +56,9 @@ class LoadTransform(Transform):
         rot90 : bool, default=True
             Rotate by 90 degrees in-plane.
             Only used by Pillow reader.
+        field : str, default="arr_0"
+            Field to load from a npz file.
+            Only used by Numpy reader.
         """
         super().__init__(shared='channels')
         self.ndim = ndim
