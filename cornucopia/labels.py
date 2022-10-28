@@ -4,7 +4,6 @@ __all__ = ['OneHotTransform', 'ArgMaxTransform', 'GaussianMixtureTransform',
            'BernoulliTransform', 'SmoothBernoulliTransform',
            'BernoulliDiskTransform', 'SmoothBernoulliDiskTransform']
 
-import edt
 import torch
 from .random import Uniform, Sampler, RandInt
 from .base import Transform, RandomizedTransform
@@ -13,6 +12,7 @@ from .utils.conv import smoothnd
 from .utils.py import ensure_list
 from .utils.morpho import erode
 import interpol
+import distmap
 import random as pyrand
 import math as pymath
 
@@ -453,9 +453,7 @@ class BernoulliDiskTransform(Transform):
             dtype = torch.get_default_dtype()
         loc = torch.rand_like(x, dtype=dtype) > (1 - self.prob / nvoxball)
 
-        loc = loc.cpu().numpy()
-        dist = torch.stack([torch.as_tensor(edt.edt(~l), device=x.device)
-                            for l in loc])
+        dist = distmap.euclidan_distance_transform(~loc, ndim=ndim)
         return dist < radius
 
     def apply_transform(self, x, parameters):
@@ -514,9 +512,7 @@ class SmoothBernoulliDiskTransform(BaseFieldTransform):
             dtype = torch.get_default_dtype()
         loc = torch.rand_like(x, dtype=dtype) > (1 - prob)
 
-        loc = loc.cpu().numpy()
-        dist = torch.stack([torch.as_tensor(edt.edt(~l), device=x.device)
-                            for l in loc])
+        dist = distmap.euclidan_distance_transform(~loc, ndim=ndim)
         return dist < radius
 
     def apply_transform(self, x, parameters):
