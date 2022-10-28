@@ -3,9 +3,12 @@
 Cornucopia, or horn of plenty, from latin _cornu_ (horn) and _copi_ (plenty), is a symbol of abundance from classical antiquity.
 
 The `cornucopia` package provides a generic framework for preprocessing, augmentation, and domain randomization; along with an abundance of specific layers,
-mostly targetted at (medical) imaging. `cornucopia` is written using a PyTorch backend, and therefore runs on the CPU or GPU. However, since gradients are not
-expected to backpropagate through its layers, it can be used within any dataloader pipeline, independent of the downstream learning framework
-(pytorch, tensorflow, jax, ...).
+mostly targetted at (medical) imaging. `cornucopia` is written using a PyTorch backend, and therefore runs **on the CPU or GPU**. 
+
+Cornucopia is *intended* to be used on the GPU for on-line augmentation. A quick [benchmark](examples/benchmark.ipynb) of affine and elastic augmentation shows that while cornucopia is slower than [TorchIO](https://github.com/fepegar/torchio) on the CPU (~ 3s vs 1s), it is greatly accelerated on the GPU (~ 50ms).
+
+Since gradients are not expected to backpropagate through its layers, it can theoretically be used within any dataloader pipeline, 
+independent of the downstream learning framework (pytorch, tensorflow, jax, ...).
 
 ## Installation
 
@@ -280,3 +283,15 @@ cc.IntraScanMotionTransform(shots=4, axis=-1, freq=True, pattern='sequential',
                  translations=0.1, rotations=15, sos=True, coils=None, shared='channels')
 cc.SmallIntraScanMotionTransform(translations=0.05, rotations=5, axis=-1, shared='channels')
 ```
+
+## Other augmentation packages
+
+There are other great, and much more mature, augmentation packages out-there (although few run on the GPU). Here's a non-exhaustive list:
+- [MONAI](https://github.com/fepegar/torchio)
+- [TorchIO](https://github.com/Project-MONAI/MONAI)
+- [Albumentations](https://github.com/albumentations-team/albumentations) (2D only)
+- [Volumentations](https://github.com/ZFTurbo/volumentations) (3D extension of Albumentations)
+
+## Contributions
+
+If you find this project useful and wish to contribute, please reach out!
