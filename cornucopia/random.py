@@ -2,6 +2,7 @@ __all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal']
 
 import random
 import copy
+import torch
 from .utils.py import ensure_list
 
 
@@ -63,16 +64,19 @@ class Sampler:
         else:
             return super().__setattr__(item, value)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
         """
         Parameters
         ----------
-        n : int, optional
+        n : int or list[int], optional
             Number of values to sample
+            - if None, return a scalar
+            - if an int, return a list
+            - if a list, return a tensor
 
         Returns
         -------
-        sample : number or list[number]
+        sample : number or list[number] or tensor
 
         """
         raise NotImplementedError
@@ -88,7 +92,9 @@ class Fixed(Sampler):
         """
         super().__init__(value=value)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
+        if isinstance(n, (list, tuple)):
+            return torch.full(n, self.value, **backend)
         return self.map(copy.deepcopy, self.value, n=n)
 
 
@@ -106,7 +112,9 @@ class Uniform(Sampler):
         """
         super().__init__(min=min, max=max)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
+        if isinstance(n, (list, tuple)):
+            return torch.rand(n, **backend).mul_(self.max - self.min).add_(self.min)
         return self.map(random.uniform, self.min, self.max, n=n)
 
 
@@ -124,7 +132,9 @@ class RandInt(Sampler):
         """
         super().__init__(min=min, max=max)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
+        if isinstance(n, (list, tuple)):
+            return torch.randint(1 + self.max - self.min, n, **backend).add_(self.min)
         return self.map(random.randint, self.min, self.max, n=n)
 
 
@@ -142,7 +152,9 @@ class Normal(Sampler):
         """
         super().__init__(mu=mu, sigma=sigma)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
+        if isinstance(n, (list, tuple)):
+            return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu)
         return self.map(random.normalvariate, self.mu, self.sigma, n=n)
 
 
@@ -160,5 +172,7 @@ class LogNormal(Sampler):
         """
         super().__init__(mu=mu, sigma=sigma)
 
-    def __call__(self, n=None):
+    def __call__(self, n=None, **backend):
+        if isinstance(n, (list, tuple)):
+            return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu).exp_()
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)

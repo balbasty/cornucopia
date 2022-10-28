@@ -1,13 +1,17 @@
 __all__ = ['OneHotTransform', 'ArgMaxTransform', 'GaussianMixtureTransform',
            'RandomGaussianMixtureTransform', 'SmoothLabelMap',
-           'ErodeLabelTransform', 'RandomErodeLabelTransform']
+           'ErodeLabelTransform', 'RandomErodeLabelTransform',
+           'BernoulliTransform', 'SmoothBernoulliTransform',
+           'BernoulliDiskTransform', 'SmoothBernoulliDiskTransform']
 
+import edt
 import torch
 from .random import Uniform, Sampler, RandInt
 from .base import Transform, RandomizedTransform
+from .intensity import BaseFieldTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from.utils.morpho import erode
+from .utils.morpho import erode
 import interpol
 import random as pyrand
 import math as pymath
@@ -354,3 +358,166 @@ class RandomErodeLabelTransform(RandomizedTransform):
 
         return self.subtransform(**{k: f() if callable(f) else f
                                     for k, f in sample.items()})
+
+
+class BernoulliTransform(Transform):
+    """Randomly mask voxels"""
+
+    def __init__(self, prob=0.1, shared=False):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shared=shared)
+        self.prob = prob
+
+    def get_parameters(self, x):
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        return torch.rand_like(x, dtype=dtype) > self.prob
+
+    def apply_transform(self, x, parameters):
+        return x * (~parameters)
+
+
+class SmoothBernoulliTransform(BaseFieldTransform):
+    """Randomly mask voxels"""
+
+    def __init__(self, prob=0.1, shape=5, shared=False):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+        shape : int or sequence[int]
+            Number of control points in the smooth field
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shape=shape, shared=shared)
+        self.prob = prob
+
+    def get_parameters(self, x):
+        ndim = x.dim() - 1
+        prob = super().get_parameters(x)
+        prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
+        prob *= self.prob * x.shape[1:].numel()
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        return torch.rand_like(x, dtype=dtype) > (1 - prob)
+
+    def apply_transform(self, x, parameters):
+        return x * (~parameters)
+
+
+class BernoulliDiskTransform(Transform):
+    """Randomly mask voxels in balls at random locations"""
+
+    def __init__(self, prob=0.1, radius=2, shared=False):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+        radius : float or Sampler
+            Disk radius
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shared=shared)
+        self.prob = prob
+        self.radius = radius
+
+    def get_parameters(self, x):
+        ndim = x.dim() - 1
+        nvoxball = pymath.pow(pymath.pi, ndim/2) / pymath.gamma(ndim/2 + 1)
+
+        # sample radii
+        if isinstance(self.radius, Sampler):
+            radius = self.radius(x.shape, device=x.device)
+            nvoxball = (nvoxball * radius).mean().item()
+        else:
+            radius = self.radius
+            nvoxball *= radius
+        nvoxball = max(nvoxball, 1)
+
+        # sample locations
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        loc = torch.rand_like(x, dtype=dtype) > (1 - self.prob / nvoxball)
+
+        loc = loc.cpu().numpy()
+        dist = torch.stack([torch.as_tensor(edt.edt(~l), device=x.device)
+                            for l in loc])
+        return dist < radius
+
+    def apply_transform(self, x, parameters):
+        return x * (~parameters)
+
+
+class SmoothBernoulliDiskTransform(BaseFieldTransform):
+    """Randomly mask voxels in balls at random locations"""
+
+    def __init__(self, prob=0.1, radius=2, shape=5, shared=False):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+            A probability field is sampled from a smooth random field.
+        radius : float or (float, float) or Sampler
+            Disk radius.
+            If a float (max) or two floats (min, max), radius is sampled
+            from a smooth random field.
+            If a Sampler, radius is sampled from the sampler.
+        shape : int or sequence[int]
+            Number of control points in the random field
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shape=shape, shared=shared)
+        self.prob = prob
+        self.radius = radius
+
+    def get_parameters(self, x):
+        ndim = x.dim() - 1
+        nvoxball = pymath.pow(pymath.pi, ndim / 2) / pymath.gamma(ndim / 2 + 1)
+
+        # sample radii
+        if isinstance(self.radius, Sampler):
+            radius = self.radius(x.shape, device=x.device)
+        else:
+            radius = ensure_list(self.radius)
+            if len(radius) == 1:
+                mn, mx = 0, radius[0]
+            else:
+                mn, mx = radius
+            radius = super().get_parameters(x)
+            radius.mul_(mx - mn).add_(mn)
+        nvoxball = (nvoxball * radius).mean().item()
+        nvoxball = max(nvoxball, 1)
+
+        # sample locations
+        prob = super().get_parameters(x)
+        prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
+        prob *= self.prob * x.shape[1:].numel() / nvoxball
+
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        loc = torch.rand_like(x, dtype=dtype) > (1 - prob)
+
+        loc = loc.cpu().numpy()
+        dist = torch.stack([torch.as_tensor(edt.edt(~l), device=x.device)
+                            for l in loc])
+        return dist < radius
+
+    def apply_transform(self, x, parameters):
+        return x * (~parameters)

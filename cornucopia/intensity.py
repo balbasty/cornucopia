@@ -1,4 +1,4 @@
-__all__ = ['AddFieldTransform', 'MultFieldTransform',
+__all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
            'GlobalMultTransform', 'RandomGlobalMultTransform',
            'GlobalAdditiveTransform', 'RandomGlobalAdditiveTransform',
            'GammaTransform', 'ZTransform', 'QuantileTransform']
@@ -33,6 +33,8 @@ class BaseFieldTransform(Transform):
         batch, *fullshape = x.shape
         smallshape = ensure_list(self.shape, len(fullshape))
         backend = dict(dtype=x.dtype, device=x.device)
+        if not backend['dtype'].is_floating_point:
+            backend['dtype'] = torch.get_default_dtype()
         b = torch.rand([batch, *smallshape], **backend)
         b = interpol.resize(b, shape=fullshape, interpolation=3,
                             prefilter=False)
