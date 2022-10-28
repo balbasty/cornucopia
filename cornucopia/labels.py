@@ -2,7 +2,8 @@ __all__ = ['OneHotTransform', 'ArgMaxTransform', 'GaussianMixtureTransform',
            'RandomGaussianMixtureTransform', 'SmoothLabelMap',
            'ErodeLabelTransform', 'RandomErodeLabelTransform',
            'BernoulliTransform', 'SmoothBernoulliTransform',
-           'BernoulliDiskTransform', 'SmoothBernoulliDiskTransform']
+           'BernoulliDiskTransform', 'SmoothBernoulliDiskTransform',
+           'RelabelTransform']
 
 import torch
 from .random import Uniform, Sampler, RandInt
@@ -99,6 +100,34 @@ class ArgMaxTransform(Transform):
 
     def apply_transform(self, x, parameters):
         return x.argmax(0)
+
+
+class RelabelTransform(Transform):
+    """Relabel a label map"""
+
+    def __init__(self, labels):
+        """
+
+        Parameters
+        ----------
+        labels : list of [list of] int, optional
+            Relabeling scheme.
+            The labels in this list are mapped to the range {1..len(labels)}.
+            If an element of this list is a sublist of indices, they are merged.
+            All labels absent from the list are mapped to 0.
+        """
+        super().__init__(shared=False)
+        self.labels = labels
+
+    def apply_transform(self, x, parameters=None):
+        y = torch.zeros_like(x)
+        for out, inp in enumerate(self.labels):
+            out = out + 1
+            if not isinstance(inp, (list, tuple)):
+                inp = [inp]
+            for inp1 in inp:
+                y.masked_fill_(x == inp1, out)
+        return y
 
 
 class GaussianMixtureTransform(Transform):

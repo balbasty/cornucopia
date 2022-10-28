@@ -16,7 +16,7 @@ def ensure_list(x, size=None, crop=True, **kwargs):
     elif not isinstance(x, list):
         x = list(x)
     if size and len(x) < size:
-        default = kwargs.get('default', x[-1])
+        default = kwargs.get('default', x[-1] if x else None)
         x += [default] * (size - len(x))
     if size and crop:
         x = x[:size]

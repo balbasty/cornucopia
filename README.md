@@ -284,6 +284,15 @@ cc.IntraScanMotionTransform(shots=4, axis=-1, freq=True, pattern='sequential',
 cc.SmallIntraScanMotionTransform(translations=0.05, rotations=5, axis=-1, shared='channels')
 ```
 
+### Synth
+```python
+cc.SynthContrastTransform(...)
+cc.SynthFromLabelTransform(patch=None, from_disk=False, one_hot=False, 
+                           synth_labels=None, synth_labels_maybe=None, target_labels=None,
+                           ...)
+```
+
+
 ## Other augmentation packages
 
 There are other great, and much more mature, augmentation packages out-there (although few run on the GPU). Here's a non-exhaustive list:

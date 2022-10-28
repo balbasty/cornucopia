@@ -24,17 +24,20 @@ References
       MIDL 2020
       https://arxiv.org/abs/2003.01995
 """
-__all__ = ['SynthTransform']
+__all__ = ['SynthContrastTransform', 'SynthFromLabelTransform']
 
-from .base import SequentialTransform, RandomizedTransform, SwitchTransform
-from .labels import RandomGaussianMixtureTransform
+from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform
+from .labels import RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
 from .intensity import MultFieldTransform, GammaTransform
 from .psf import SmoothTransform, LowResSliceTransform, LowResTransform
 from .noise import ChiNoiseTransform, GFactorTransform
+from .geometric import RandomAffineElasticTransform
 from .random import Uniform, RandInt, Fixed
+from .io import LoadTransform
+import random as pyrandom
 
 
-class SynthTransform(SequentialTransform):
+class SynthContrastTransform(SequentialTransform):
     """Synthesize a contrast and imaging artefacts from a label map
 
     References
@@ -53,14 +56,33 @@ class SynthTransform(SequentialTransform):
                  gamma=0.6,
                  motion_fwhm=3,
                  resolution=8,
-                 noise=48,
+                 snr=10,
                  gfactor=5):
+        """
+        Parameters
+        ----------
+        gmm_fwhm : float
+            Upper bound for the FWHM of the intra-tissue smoothing kernel
+        bias : int
+            Upper bound for the number of control points of the bias field
+        gamma : float
+            Upper bound for the exponent of the Gamma transform
+        motion_fwhm : float
+            Upper bound of the FWHM of the global (PSF/motion) smoothing kernel
+        resolution : float
+            Upper bound for the inter-slice spacing (in voxels)
+        snr : float
+            Lower bound for the signal-to-noise ratio
+        gfactor : int
+            Upper bound for the number of control points of the g-factor map
+        """
+        noise_sd = 255 / snr
 
-        gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm)
+        gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
         bias = RandomizedTransform(MultFieldTransform, RandInt(2, bias))
         gamma = RandomizedTransform(GammaTransform, Uniform(0, gamma))
         smooth = RandomizedTransform(SmoothTransform, Uniform(0, motion_fwhm))
-        noise1 = RandomizedTransform(ChiNoiseTransform, Uniform(0, noise))
+        noise1 = RandomizedTransform(ChiNoiseTransform, Uniform(0, noise_sd))
         noise = RandomizedTransform(GFactorTransform, [Fixed(noise1),
                                                        RandInt(2, gfactor)])
         lowres2d = RandomizedTransform(LowResSliceTransform,
@@ -74,15 +96,148 @@ class SynthTransform(SequentialTransform):
         super().__init__([gmm, bias, gamma, smooth, lowres])
 
 
-class SynthPipeline(SequentialTransform):
+class SynthFromLabelTransform(Transform):
+    """
+    Synthesize an MRI from an existing label map
 
-    def __init__(self):
-        super().__init__([])
+    Examples
+    --------
+    ::
 
-    def forward(self, x):
-        seg = self.load(x)
-        seg = self.deform(seg)
-        img = self.synth(seg)
-        return img, seg
+        # if inputs are preloaded label tensors (default)
+        synth = SynthFromLabelTransform()
+
+        # if inputs are filenames
+        synth = SynthFromLabelTransform(from_disk=True)
+
+        # memory-efficient patch-synthesis
+        synth = SynthFromLabelTransform(patch=64)
+
+        img, lab = synth(input)
+
+    References
+    ----------
+    ..[1] "SynthSeg: Domain Randomisation for Segmentation of Brain
+          MRI Scans of any Contrast and Resolution"
+          Benjamin Billot, Douglas N. Greve, Oula Puonti, Axel Thielscher,
+          Koen Van Leemput, Bruce Fischl, Adrian V. Dalca, Juan Eugenio Iglesias
+          2021
+          https://arxiv.org/abs/2107.09559
+    """
+
+    def __init__(self,
+                 patch=None,
+                 from_disk=False,
+                 one_hot=False,
+                 synth_labels=None,
+                 synth_labels_maybe=None,
+                 target_labels=None,
+                 rotation=15,
+                 shears=0.012,
+                 zooms=0.15,
+                 elastic=0.15,
+                 elastic_nodes=10,
+                 gmm_fwhm=10,
+                 bias=7,
+                 gamma=0.6,
+                 motion_fwhm=3,
+                 resolution=8,
+                 snr=10,
+                 gfactor=5):
+        """
+
+        Parameters
+        ----------
+        patch : [list of] int, optional
+            Shape of the patches to extact
+        from_disk : bool, default=False
+            Assume inputs are filenames and load from disk
+        one_hot : bool, default=False
+            Return one-hot labels. Else return a label map.
+        synth_labels : tuple of [tuple of] int, optional
+            List of labels to use for synthesis.
+            If multiple labels are grouped in a sublist, they share the
+            same intensity in the GMM. All labels not listed are assumed
+            background.
+        synth_labels_maybe : dict(tuple of [tuple of] int -> float), optional
+            List of labels to sometimes use for synthesis, and their
+            probability of being sampled.
+        target_labels : tuple of [tuple of] int, optional
+            List of target labels.
+            If multiple labels are grouped in a sublist, they are fused.
+            All labels not listed are assumed background.
+            The final label map is relabeled in the order provided,
+            starting from 1 (background is 0).
+
+        Geometric Parameters
+        --------------------
+        rotation : float
+            Upper bound for rotations, in degree.
+        shears : float
+            Upper bound for shears
+        zooms : float
+            Upper bound for zooms (about one)
+        elastic : float
+            Upper bound for elastic displacements, in percent of the FOV.
+        elastic_nodes : int
+            Upper bound for number of control points in the elastic field.
+
+        Intensity Parameters
+        --------------------
+        gmm_fwhm : float
+            Upper bound for the FWHM of the intra-tissue smoothing kernel
+        bias : int
+            Upper bound for the number of control points of the bias field
+        gamma : float
+            Upper bound for the exponent of the Gamma transform
+        motion_fwhm : float
+            Upper bound of the FWHM of the global (PSF/motion) smoothing kernel
+        resolution : float
+            Upper bound for the inter-slice spacing (in voxels)
+        snr : float
+            Lower bound for the signal-to-noise ratio
+        gfactor : int
+            Upper bound for the number of control points of the g-factor map
+        """
+        super().__init__(shared=False)
+        self.load = LoadTransform(dtype='long') if from_disk else None
+        self.synth_labels = synth_labels
+        self.synth_labels_maybe = synth_labels_maybe
+        if one_hot:
+            postproc = OneHotTransform()
+            if target_labels:
+                postproc = RelabelTransform(target_labels) + postproc
+        elif target_labels:
+            postproc = RelabelTransform(target_labels)
+        else:
+            postproc = None
+        self.postproc_labels = postproc
+        self.deform = RandomAffineElasticTransform(
+            elastic, elastic_nodes,
+            rotations=rotation, shears=shears, zooms=zooms, patch=patch)
+        self.intensity = SynthContrastTransform(
+            gmm_fwhm, bias, gamma, motion_fwhm, resolution, snr, gfactor)
+
+    def get_parameters(self, x):
+        synth_labels = list(self.synth_labels or [])
+        if self.synth_labels_maybe:
+            for labels, prob in self.synth_labels_maybe.items():
+                if pyrandom.random() > (1 - prob):
+                    synth_labels += list(labels)
+        if synth_labels:
+            return RelabelTransform(synth_labels)
+        else:
+            return None
+
+    def apply_transform(self, lab, parameters=None):
+        load = self.load or (lambda x: x)
+        preproc = parameters or (lambda x: x)
+        postproc = self.postproc_labels or (lambda x: x)
+
+        lab = load(lab)
+        lab = self.deform(lab)
+        img = self.intensity(preproc(lab))
+        lab = postproc(lab)
+        return img, lab
 
 
