@@ -645,7 +645,7 @@ class Slicewise3DAffineTransform(Transform):
         flow, matrix = parameters
         x = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
                              padding_mode=self.bound)
-        return x[:, 0]
+        return x[0]
 
 
 class RandomSlicewise3DAffineTransform(RandomizedTransform):
