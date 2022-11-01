@@ -72,6 +72,7 @@ class LoadTransform(Transform):
         except Exception:
             pass
 
+        exceptions = []
         if isinstance(x, str):
             parts, ext = os.path.splitext(x)
             if ext.lower() in ('.gz', '.bz', '.bz2', '.gzip', '.bzip2'):
@@ -84,6 +85,7 @@ class LoadTransform(Transform):
                         return loader(self.ndim, self.dtype, self.device,
                                       **self.kwargs)(x)
                     except Exception as e:
+                        exceptions.append(str(e))
                         pass
 
         all_loaders = set(loader for loader_ext in loaders.values()
@@ -92,9 +94,12 @@ class LoadTransform(Transform):
             try:
                 return loader(self.ndim, self.dtype, self.device)(x)
             except Exception as e:
+                exceptions.append(str(e))
                 pass
 
-        raise ValueError(f'Could not load {x}')
+        message = [f'Could not load {x}:'] + exceptions
+        message = '\n'.join(message)
+        raise ValueError(message)
 
 
 
