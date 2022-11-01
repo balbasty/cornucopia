@@ -1,13 +1,17 @@
 # Cornucopia
 
-Cornucopia, or horn of plenty, from latin _cornu_ (horn) and _copi_ (plenty), is a symbol of abundance from classical antiquity.
+The `cornucopia` package provides a generic framework for preprocessing,
+augmentation, and domain randomization; along with an abundance of specific layers,
+mostly targeted at (medical) imaging. `cornucopia` is written using a PyTorch
+backend, and therefore runs **on the CPU or GPU**.
 
-The `cornucopia` package provides a generic framework for preprocessing, augmentation, and domain randomization; along with an abundance of specific layers,
-mostly targetted at (medical) imaging. `cornucopia` is written using a PyTorch backend, and therefore runs **on the CPU or GPU**. 
+Cornucopia is *intended* to be used on the GPU for on-line augmentation.
+A quick [benchmark](examples/benchmark.ipynb) of affine and elastic augmentation
+shows that while cornucopia is slower than [TorchIO](https://github.com/fepegar/torchio)
+on the CPU (~ 3s vs 1s), it is greatly accelerated on the GPU (~ 50ms).
 
-Cornucopia is *intended* to be used on the GPU for on-line augmentation. A quick [benchmark](examples/benchmark.ipynb) of affine and elastic augmentation shows that while cornucopia is slower than [TorchIO](https://github.com/fepegar/torchio) on the CPU (~ 3s vs 1s), it is greatly accelerated on the GPU (~ 50ms).
-
-Since gradients are not expected to backpropagate through its layers, it can theoretically be used within any dataloader pipeline, 
+Since gradients are not expected to backpropagate through its layers, it can
+theoretically be used within any dataloader pipeline,
 independent of the downstream learning framework (pytorch, tensorflow, jax, ...).
 
 ## Installation
@@ -23,8 +27,10 @@ Let's start with importing cornucopia:
 import cornucopia as cc
 ```
 
-Transforms are simply Pytorch modules that expect tensors with a channel but no batch dimension (e.g., `[C, X, Y, Z]`). 
-To make this clear, the name of (almost) all transforms implemented has the suffix `Transform`. For example, here's how to add random noise to an image:
+Transforms are simply Pytorch modules that expect tensors with a channel but
+no batch dimension (e.g., `[C, X, Y, Z]`).
+To make this clear, the name of (almost) all transforms implemented has the
+suffix `Transform`. For example, here's how to add random noise to an image:
 ```python
 # Load an MRI and ensure that it is reshaped as [C, X, Y, Z]
 img = cc.LoadTransform(dtype='float32')('path/to/mri.nii.gz')
@@ -33,7 +39,8 @@ img = cc.LoadTransform(dtype='float32')('path/to/mri.nii.gz')
 img = cc.GaussianNoiseTransform()(img)
 ```
 
-Sometimes, the exact same transform must be applied to multiple images (say, a geometric transform). In this case, multiple images can be provided:
+Sometimes, the exact same transform must be applied to multiple images
+(say, a geometric transform). In this case, multiple images can be provided:
 ```python
 img = cc.LoadTransform(dtype='float32')('path/to/mri.nii.gz')
 lab = cc.LoadTransform(dtype='long')('path/to/labels.nii.gz')
@@ -42,13 +49,19 @@ lab = cc.LoadTransform(dtype='long')('path/to/labels.nii.gz')
 img, lab = cc.ElasticTransform()(img, lab)
 ```
 
-Note that if one wants to have different random parameters applied ot different channels of an image, the keyword `shared=False` can be used:
+Note that if one wants to have different random parameters applied ot different
+channels of an image, the keyword `shared=False` can be used:
 ```python
 img = cc.ElasticTransform(shared=False)(img)
 ```
-The default value for `shared` can differ from transform to transform. For example, the default for `ElasticTransform` is `True` (since we expect that most people want to apply the same deformation to different channels), whereas the default for `GaussianNoiseTransform` is `False` (since we want to resample noise in each channel).
+The default value for `shared` can differ from transform to transform.
+For example, the default for `ElasticTransform` is `True` (since we expect
+that most people want to apply the same deformation to different channels),
+whereas the default for `GaussianNoiseTransform` is `False` (since we want
+to resample noise in each channel).
 
-We offer utilities to randomly activate the application of a transform, or randomly choose a transform to apply from a set of transforms:
+We offer utilities to randomly activate the application of a transform,
+or randomly choose a transform to apply from a set of transforms:
 ```python
 gauss = cc.GaussianNoiseTransform()
 chi = cc.ChiNoiseTransform()
@@ -64,7 +77,8 @@ img = gauss | chi                           # -> SwitchTransform
 img = cc.switch({gauss: 0.5, chi: 0.5})     # -> SwitchTransform
 ```
 
-Transforms can be composed together using the `SequentialTransform` class, or by simply adding them together:
+Transforms can be composed together using the `SequentialTransform` class,
+or by simply adding them together:
 ```python
 # programatic instantiation of a sequence
 seq = cc.SequentialTransform([cc.ElasticTransform(), cc.GaussianNoiseTransform()])
@@ -74,7 +88,11 @@ seq = cc.ElasticTransform() + cc.GaussianNoiseTransform()
 img = seq(img)
 ```
 
-Better augmentation can be obtained if the parameters of a random transform (_e.g._, Gaussian noise variance) are themselves sampled from a prior distribution (_e.g._, a uniform distribution between [0 and 10]). We provide high-level randomized transform for this, as well as a utility class that allows any transform to be easily randomized:
+Better augmentation can be obtained if the parameters of a random transform
+(_e.g._, Gaussian noise variance) are themselves sampled from a prior
+distribution (_e.g._, a uniform distribution between [0 and 10]).
+We provide high-level randomized transform for this, as well as a utility
+class that allows any transform to be easily randomized:
 ```python
 # use a pre-defined randomized transform
 img = cc.RandomAffineElasticTransform()(img)
