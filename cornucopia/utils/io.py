@@ -37,7 +37,7 @@ class BabelLoader(Loader):
 
     EXT = ['.nii', '.nii.gz', '.mgh', '.mgz', '.mnc', '.img', '.hdr']
 
-    def __init__(self, ndim=None, dtype=None, device=None, to_ras=True, **kwargs):
+    def __init__(self, ndim=3, dtype=None, device=None, to_ras=True, **kwargs):
         super().__init__(ndim, dtype, device)
         self.to_ras = to_ras
 
