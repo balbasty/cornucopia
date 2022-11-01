@@ -101,15 +101,26 @@ class Fixed(Sampler):
 class Uniform(Sampler):
     """Continuous uniform sampler"""
 
-    def __init__(self, min, max):
+    def __init__(self, *args, **kwargs):
         """
         Parameters
         ----------
-        min : float or sequence[float]
+        min : float or sequence[float], default=0
             Lower bound (inclusive)
         max : float or sequence[float]
             Upper bound (inclusive or exclusive, depending on rounding)
         """
+        min, max = 0, None
+        if len(args) == 2:
+            min, max = args
+        elif len(args) == 1:
+            max = args[0]
+        if 'min' in kwargs:
+            min = kwargs['min']
+        if 'max' in kwargs:
+            max = kwargs['max']
+        if max is None:
+            raise ValueError('Expected at least one argument')
         super().__init__(min=min, max=max)
 
     def __call__(self, n=None, **backend):
@@ -121,15 +132,26 @@ class Uniform(Sampler):
 class RandInt(Sampler):
     """Discrete uniform sampler"""
 
-    def __init__(self, min, max):
+    def __init__(self, *args, **kwargs):
         """
         Parameters
         ----------
-        min : float or sequence[float]
+        min : float or sequence[float], default=0
             Lower bound (inclusive)
         max : float or sequence[float]
             Upper bound (inclusive)
         """
+        min, max = 0, None
+        if len(args) == 2:
+            min, max = args
+        elif len(args) == 1:
+            max = args[0]
+        if 'min' in kwargs:
+            min = kwargs['min']
+        if 'max' in kwargs:
+            max = kwargs['max']
+        if max is None:
+            raise ValueError('Expected at least one argument')
         super().__init__(min=min, max=max)
 
     def __call__(self, n=None, **backend):
@@ -141,7 +163,7 @@ class RandInt(Sampler):
 class Normal(Sampler):
     """Gaussian sampler"""
 
-    def __init__(self, mu, sigma):
+    def __init__(self, mu=0, sigma=1):
         """
         Parameters
         ----------
@@ -161,7 +183,7 @@ class Normal(Sampler):
 class LogNormal(Sampler):
     """LogNormal sampler"""
 
-    def __init__(self, mu, sigma):
+    def __init__(self, mu=0, sigma=1):
         """
         Parameters
         ----------

@@ -1,8 +1,13 @@
-__all__ = ['GaussianNoiseTransform', 'ChiNoiseTransform', 'GFactorTransform']
+__all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
+           'ChiNoiseTransform', 'RandomChiNoiseTransform',
+           'GammaNoiseTransform', 'RandomGammaNoiseTransform',
+           'GFactorTransform']
 
 import torch
-from .base import Transform
+from .base import Transform, RandomizedTransform
 from .intensity import MultFieldTransform
+from .random import Uniform, RandInt
+from .utils import upper_range
 
 
 class GaussianNoiseTransform(Transform):
@@ -28,6 +33,23 @@ class GaussianNoiseTransform(Transform):
         return x + parameters
 
 
+class RandomGaussianNoiseTransform(RandomizedTransform):
+    """Additive Gaussian noise with random standard deviation"""
+
+    def __init__(self, sigma=0.1, shared=False):
+        """
+        Parameters
+        ----------
+        sigma : Sampler or float
+            Sampler or upper bound for the standard deviation
+        shared : bool
+            Use the same sd for all channels/images
+        """
+        super().__init__(GaussianNoiseTransform,
+                         dict(sigma=Uniform.make(upper_range(sigma))),
+                         shared=shared)
+
+
 class ChiNoiseTransform(Transform):
     """Additive Noncentral Chi noise
 
@@ -36,7 +58,6 @@ class ChiNoiseTransform(Transform):
 
     def __init__(self, sigma=0.1, nb_channels=2, shared=False):
         """
-
         Parameters
         ----------
         sigma : float
@@ -59,6 +80,26 @@ class ChiNoiseTransform(Transform):
 
     def apply_transform(self, x, parameters):
         return x.square().add_(parameters).sqrt_()
+
+
+class RandomChiNoiseTransform(RandomizedTransform):
+    """Additive Chi noise with random standard deviation and channels"""
+
+    def __init__(self, sigma=0.1, nb_channels=8, shared=False):
+        """
+        Parameters
+        ----------
+        sigma : Sampler or float
+            Sampler or upper bound for the standard deviation
+        nb_channels : Sampler or int
+            Sampler or upper bound for the number of channels
+        shared : bool
+            Use the same sd for all channels/images
+        """
+        super().__init__(ChiNoiseTransform,
+                         dict(sigma=Uniform.make(upper_range(sigma)),
+                              nb_channels=RandInt.make(upper_range(nb_channels, 2))),
+                         shared=shared)
 
 
 class GFactorTransform(Transform):
@@ -122,3 +163,23 @@ class GammaNoiseTransform(Transform):
 
     def apply_transform(self, x, parameters):
         return x * parameters
+
+
+class RandomGammaNoiseTransform(RandomizedTransform):
+    """Multiplicative Gamma noise with random standard deviation and mean"""
+
+    def __init__(self, mean=2, sigma=0.1, shared=False):
+        """
+        Parameters
+        ----------
+        mean : Sampler or float
+            Sampler or upper bound for the mean
+        sigma : Sampler or float
+            Sampler or upper bound for the standard deviation
+        shared : bool
+            Use the same mean/sd for all channels/images
+        """
+        super().__init__(GammaNoiseTransform,
+                         dict(mean=Uniform.make(upper_range(mean)),
+                              sigma=Uniform.make(upper_range(sigma))),
+                         shared=shared)

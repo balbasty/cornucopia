@@ -1,13 +1,16 @@
 __all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
+           'RandomAddFieldTransform', 'RandomMultFieldTransform',
            'GlobalMultTransform', 'RandomGlobalMultTransform',
            'GlobalAdditiveTransform', 'RandomGlobalAdditiveTransform',
-           'GammaTransform', 'ZTransform', 'QuantileTransform']
+           'GammaTransform', 'RandomGammaTransform',
+           'ZTransform', 'QuantileTransform']
 
 import torch
 import interpol
 from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform
+from .random import Sampler, Uniform, RandInt
 from .utils.py import ensure_list
+from .utils import upper_range, lower_range, sym_range
 
 
 class BaseFieldTransform(Transform):
@@ -49,11 +52,52 @@ class MultFieldTransform(BaseFieldTransform):
         return x * parameters
 
 
+class RandomMultFieldTransform(RandomizedTransform):
+    """Random multiplicative bias field transform"""
+
+    def __init__(self, shape=8, vmax=2, shared=False):
+        """
+        Parameters
+        ----------
+        shape : Sampler or int
+            Sampler or Upper bound for number of control points
+        vmax : Sampler or float
+            Sampler or Upper bound for maximum value
+        shared : bool
+            Whether to share random parameters across channels
+        """
+        kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
+                      shape=RandInt.make(upper_range(shape, 2)))
+        super().__init__(MultFieldTransform, kwargs, shared=shared)
+
+
 class AddFieldTransform(BaseFieldTransform):
     """Smooth additive (bias) field"""
 
     def apply_transform(self, x, parameters):
         return x + parameters
+
+
+class RandomAddFieldTransform(RandomizedTransform):
+    """Random additive bias field transform"""
+
+    def __init__(self, shape=8, vmin=-1, vmax=1, shared=False):
+        """
+        Parameters
+        ----------
+        shape : Sampler or int
+            Sampler or Upper bound for number of control points
+        vmin : Sampler or float
+            Sampler or Lower bound for minimum value
+        vmax : Sampler or float
+            Sampler or Upper bound for maximum value
+        shared : bool
+            Whether to share random parameters across channels
+        """
+        kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
+                      vmin=Uniform.make(lower_range(vmin)),
+                      shape=RandInt.make(upper_range(shape, 2)))
+        super().__init__(AddFieldTransform, kwargs, shared=shared)
 
 
 class GlobalMultTransform(Transform):
@@ -192,13 +236,44 @@ class GammaTransform(Transform):
         return x
 
 
+class RandomGammaTransform(RandomizedTransform):
+    """
+    Random Gamma transform.
+    """
+
+    def __init__(self, value=(0.5, 2), shared=True):
+        """
+        Parameters
+        ----------
+        value : Sampler or [pair of] float
+            Sampler or range for the exponent value
+        shared : bool
+            Apply same transform to all images/channels
+        """
+        super().__init__(GlobalAdditiveTransform,
+                         Uniform.make(value),
+                         shared=shared)
+
+
 class ZTransform(Transform):
     """
     Z-transform the data -> zero mean, unit standard deviation
     """
 
-    def __init__(self, shared=False):
+    def __init__(self, mu=0, sigma=1, shared=False):
+        """
+        Parameters
+        ----------
+        mu : float
+            Target mean. If None, keep the input mean.
+        sigma : float
+            Target standard deviation. If None, keep the input sd.
+        shared : bool
+            Apply same transform to all images/channels
+        """
         super().__init__(shared)
+        self.mu = mu
+        self.sigma = sigma
 
     def get_parameters(self, x):
         return x.mean(), x.std()
@@ -206,6 +281,12 @@ class ZTransform(Transform):
     def apply_transform(self, x, parameters):
         mu, sigma = parameters
         x = (x - mu) / sigma
+        if self.sigma != 1:
+            sigma = self.sigma or sigma
+            x *= sigma
+        if self.mu != 0:
+            mu = self.mu or mu
+            x += mu
         return x
 
 
