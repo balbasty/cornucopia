@@ -1,6 +1,7 @@
 __all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
            'MaybeTransform', 'MappedTransform', 'SwitchTransform',
-           'randomize', 'map', 'switch', 'include', 'exclude',
+           'BatchedTransform',
+           'randomize', 'map', 'switch', 'include', 'exclude', 'batch',
            'include_keys', 'exclude_keys']
 
 import torch
@@ -832,7 +833,7 @@ def include_keys(transform, keys):
 
 def exclude_keys(transform, keys):
     """Alias for MappedExceptKeysTransform"""
-    return MappedKeysTransform(transform, keys)
+    return MappedExceptKeysTransform(transform, keys)
 
 
 class SplitChannels(Transform):
@@ -871,3 +872,77 @@ class CatChannels(Transform):
         else:
             return args[0]
 
+
+class BatchedTransform(nn.Module):
+    """Apply a transform to a batch"""
+
+    def __init__(self, transform):
+        """
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply to a batched tensor or to a nested
+            structure of batched tensors
+        """
+        super().__init__()
+        self.transform = transform
+
+    def forward(self, *args):
+
+        class UnpackError(ValueError):
+            pass
+
+        def _unpack(x, i):
+            if isinstance(x, (list, tuple)):
+                return type(x)(_unpack(x1, i) for x1 in x)
+            elif hasattr(x, 'items'):
+                return {key: _unpack(val, i) for key, val in x.items()}
+            elif torch.is_tensor(x):
+                if len(x) <= i:
+                    raise UnpackError(f'Trying to unpack index {i} of '
+                                      f'tensor with shape {list(x.shape)}')
+                return x[i]
+            else:
+                raise TypeError(f'Don\'t know what to do with type {type(x)}')
+
+        def unpack(x):
+            i = 0
+            while True:
+                try:
+                    yield _unpack(x, i)
+                    i += 1
+                except UnpackError:
+                    return
+
+        def pack(x):
+            x0 = x[0]
+            if isinstance(x0, (list, tuple)):
+                return type(x0)(pack([x1[i] for x1 in x]) for i in range(len(x0)))
+            elif hasattr(x0, 'items'):
+                return {key: pack([x1[key] for x1 in x]) for key in x0.keys()}
+            elif torch.is_tensor(x0):
+                return torch.stack(x)
+            else:
+                raise TypeError(f'Don\'t know what to do with type {type(x0)}')
+
+        batch = []
+        for elem in unpack(args):
+            batch.append(self.transform(elem))
+        batch = pack(batch)
+        return batch[0] if len(args) == 1 else tuple(batch)
+
+
+def batch(transform):
+    """
+    Parameters
+    ----------
+    transform : Transform
+        Transform to apply to a batched tensor or to a nested
+        structure of batched tensors
+
+    Returns
+    -------
+    BatchedTransform
+
+    """
+    return BatchedTransform(transform)
