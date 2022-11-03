@@ -33,7 +33,7 @@ image pairs with a random affine deformation between them::
 # TODO:
 #   [x] Make it a standalone package?
 #   [x] Move samplers in their own file
-#   [ ] Add IO transforms (that transform filenames in tensors)
+#   [x] Add IO transforms (that transform filenames in tensors)
 #   [ ] Better deal with separable/shared transforms
 #       [ ] Add a SharedTransform class (like Randomized) that does the heavy
 #           lifting
@@ -52,3 +52,4 @@ from .labels import *
 from .noise import *
 from .psf import *
 from .synth import *
+from .utils.patch import patch_apply
