@@ -232,3 +232,116 @@ def cartesian_grid(shape, **backend):
 
     """
     return meshgrid_ij(*(torch.arange(s, **backend) for s in shape))
+
+
+def move_to_permutation(length, source, destination):
+
+    source = ensure_list(source)
+    destination = ensure_list(destination)
+    if len(destination) == 1:
+        # we assume that the user wishes to keep moved dimensions
+        # in the order they were provided
+        destination = destination[0]
+        if destination >= 0:
+            destination = list(range(destination, destination+len(source)))
+        else:
+            destination = list(range(destination+1-len(source), destination+1))
+    if len(source) != len(destination):
+        raise ValueError('Expected as many source as destination positions.')
+    source = [length + src if src < 0 else src for src in source]
+    destination = [length + dst if dst < 0 else dst for dst in destination]
+    if len(set(source)) != len(source):
+        raise ValueError(f'Expected source positions to be unique but got '
+                         f'{source}')
+    if len(set(destination)) != len(destination):
+        raise ValueError(f'Expected destination positions to be unique but got '
+                         f'{destination}')
+
+    # compute permutation
+    positions_in = list(range(length))
+    positions_out = [None] * length
+    for src, dst in zip(source, destination):
+        positions_out[dst] = src
+        positions_in[src] = None
+    positions_in = filter(lambda x: x is not None, positions_in)
+    for i, pos in enumerate(positions_out):
+        if pos is None:
+            positions_out[i], *positions_in = positions_in
+
+    return positions_out
+
+
+def movedims(input, source, destination):
+    """Moves the position of one or more dimensions
+
+    Other dimensions that are not explicitly moved remain in their
+    original order and appear at the positions not specified in
+    destination.
+
+    Parameters
+    ----------
+    input : tensor
+        Input tensor
+    source : int or sequence[int]
+        Initial positions of the dimensions
+    destination : int or sequence[int]
+        Output positions of the dimensions.
+
+        If a single destination is provided:
+        - if it is negative, the last source dimension is moved to
+          `destination` and all other source dimensions are moved to its left.
+        - if it is positive, the first source dimension is moved to
+          `destination` and all other source dimensions are moved to its right.
+
+    Returns
+    -------
+    output : tensor
+        Tensor with moved dimensions.
+
+    """
+    perm = move_to_permutation(input.dim(), source, destination)
+    return input.permute(*perm)
+
+
+def remainder(x, d):
+    return x - (x // d) * d
+
+
+def sub2ind(sub: List[int], shape: List[int]) -> int:
+    """Convert sub indices (i, j, k) into linear indices.
+    The rightmost dimension is the most rapidly changing one
+    -> if shape == [D, H, W], the strides are therefore [H*W, W, 1]
+    Parameters
+    ----------
+    sub : list[int]
+    shape : list[int]
+    Returns
+    -------
+    ind : int
+    """
+    *sub, ind = sub
+    stride = cumprod(shape[1:], reverse=True)
+    for i, s in zip(sub, stride):
+        ind += i * s
+    return ind
+
+
+def ind2sub(ind: int, shape: List[int]) -> List[int]:
+    """Convert linear indices into sub indices (i, j, k).
+    The rightmost dimension is the most rapidly changing one
+    -> if shape == [D, H, W], the strides are therefore [H*W, W, 1]
+    Parameters
+    ----------
+    ind : int
+    shape : list[int]
+    Returns
+    -------
+    sub : list[int]
+    """
+    stride = list(cumprod(shape, reverse=True, exclusive=True))
+    sub: List[int] = [ind] * len(shape)
+    for d in range(len(shape)):
+        if d > 0:
+            sub[d] = remainder(sub[d], stride[d-1])
+        sub[d] = sub[d] // stride[d]
+    return sub
