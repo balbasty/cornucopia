@@ -276,7 +276,13 @@ class Transform(nn.Module):
         """
         # DEV: this function should in general not be overloaded
         if hasattr(x, 'items'):
+            valid_keys = x.keys()
+            if self._include is not None:
+                valid_keys = [k for k in valid_keys if k in self._include]
+            if self._exclude:
+                valid_keys = [k for k in valid_keys if k not in self._exclude]
             return {key: self.forward_with_parameters(value, parameters=parameters)
+                    if key in valid_keys else value
                     for key, value in x.items()}
         if isinstance(x, (list, tuple)):
             return type(x)(self.forward_with_parameters(elem, parameters=parameters)

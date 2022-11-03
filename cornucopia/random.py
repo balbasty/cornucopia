@@ -198,3 +198,24 @@ class LogNormal(Sampler):
         if isinstance(n, (list, tuple)):
             return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu).exp_()
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
+
+
+def sym_range(x):
+    if not isinstance(x, Sampler):
+        if isinstance(x, (list, tuple)):
+            x = (tuple(-x1 for x1 in x), x)
+        else:
+            x = (-x, x)
+    return x
+
+
+def upper_range(x, min=0):
+    if not isinstance(x, Sampler):
+        x = (min, x)
+    return x
+
+
+def lower_range(x, max=0):
+    if not isinstance(x, Sampler):
+        x = (x, max)
+    return x

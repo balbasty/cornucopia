@@ -3,10 +3,10 @@ __all__ = ['SmoothTransform', 'RandomSmoothTransform',
            'LowResSliceTransform', 'RandomLowResSliceTransform']
 
 from .base import Transform, RandomizedTransform
-from .utils import upper_range, lower_range, sym_range
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from .random import Uniform, RandInt, Fixed
+from .random import Uniform, RandInt, Fixed, sym_range, upper_range, \
+    lower_range
 from interpol import resize
 
 

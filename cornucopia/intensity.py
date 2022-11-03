@@ -8,9 +8,9 @@ __all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
 import torch
 import interpol
 from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform, RandInt
+from .random import Sampler, Uniform, RandInt, sym_range, upper_range, \
+    lower_range
 from .utils.py import ensure_list
-from .utils import upper_range, lower_range, sym_range
 
 
 class BaseFieldTransform(Transform):
@@ -250,7 +250,7 @@ class RandomGammaTransform(RandomizedTransform):
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(GlobalAdditiveTransform,
+        super().__init__(GammaTransform,
                          Uniform.make(value),
                          shared=shared)
 

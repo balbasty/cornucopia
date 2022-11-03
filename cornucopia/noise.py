@@ -6,8 +6,7 @@ __all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
 import torch
 from .base import Transform, RandomizedTransform
 from .intensity import MultFieldTransform
-from .random import Uniform, RandInt
-from .utils import upper_range
+from .random import Uniform, RandInt, upper_range
 
 
 class GaussianNoiseTransform(Transform):
