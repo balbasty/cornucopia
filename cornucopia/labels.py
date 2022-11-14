@@ -1,17 +1,20 @@
 __all__ = ['OneHotTransform', 'ArgMaxTransform', 'GaussianMixtureTransform',
            'RandomGaussianMixtureTransform', 'SmoothLabelMap',
            'ErodeLabelTransform', 'RandomErodeLabelTransform',
+           'DilateLabelTransform', 'RandomDilateLabelTransform',
+           'SmoothMorphoLabelTransform', 'RandomSmoothMorphoLabelTransform',
+           'SmoothShallowLabelTransform', 'RandomSmoothShallowLabelTransform',
            'BernoulliTransform', 'SmoothBernoulliTransform',
            'BernoulliDiskTransform', 'SmoothBernoulliDiskTransform',
            'RelabelTransform']
 
 import torch
-from .random import Uniform, Sampler, RandInt
+from .random import Uniform, Sampler, RandInt, Fixed, upper_range, lower_range
 from .base import Transform, RandomizedTransform
 from .intensity import BaseFieldTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from .utils.morpho import erode
+from .utils.morpho import bounded_distance
 import interpol
 import distmap
 import random as pyrand
@@ -296,40 +299,147 @@ class SmoothLabelMap(Transform):
 
 
 class ErodeLabelTransform(Transform):
+    """
+    Morphological erosion.
+    """
 
-    def __init__(self, labels, radius=3, output_labels=0):
+    def __init__(self, labels=tuple(), radius=3, method='conv'):
         """
-
         Parameters
         ----------
         labels : [sequence of] int
             Labels to erode
         radius : [sequence of] int
             Erosion radius (per label)
-        output_labels : [sequence of] int
-            Output label (per input label)
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
         """
         super().__init__(shared=True)
         self.labels = ensure_list(labels)
-        self.radius = ensure_list(radius, len(self.labels))
-        self.output_labels = ensure_list(output_labels, len(self.labels))
+        self.radius = ensure_list(radius, min(len(self.labels), 1))
+        self.method = method
 
     def get_parameters(self, x):
         return None
 
     def apply_transform(self, x, parameters):
+        max_radius = max(self.radius)
+        if self.method == 'conv':
+            dist = lambda x, r: bounded_distance(x, int(round(r)), dim=x.dim()-1)
+            dtype = torch.int
+            dmax = max_radius+1
+        elif self.method == 'l1':
+            dist = lambda x, r: distmap.l1_signed_transform(x, ndim=x.dim()-1).neg_()
+            dtype = torch.get_default_dtype()
+            dmax = float('inf')
+        elif self.method == 'l2':
+            dist = lambda x, r: distmap.euclidean_signed_transform(x, ndim=x.dim()-1).neg_()
+            dtype = torch.get_default_dtype()
+            dmax = float('inf')
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0]
+        foreground_radius = ensure_list(self.radius, len(foreground_labels))
+
+        y = torch.zeros_like(x)
+        d = torch.full_like(x, dmax, dtype=dtype)
+        for label in all_labels:
+            is_foreground = label in foreground_labels
+            if is_foreground:
+                radius = foreground_radius[foreground_labels.index(label)]
+            else:
+                radius = max_radius
+            x0 = x == label
+            d1 = dist(x0, radius)
+            if is_foreground:
+                mask = d1 < -radius
+            else:
+                mask = d1 < d
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
+        return y
+
+
+class DilateLabelTransform(Transform):
+    """
+    Morphological dilation.
+    """
+
+    def __init__(self, labels=tuple(), radius=3, method='conv'):
+        """
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to dilate. By default, all but zero.
+        radius : [sequence of] int
+            Dilation radius (per label)
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        super().__init__(shared=True)
+        self.labels = ensure_list(labels)
+        self.radius = ensure_list(radius, min(len(self.labels), 1))
+        self.method = method
+
+    def get_parameters(self, x):
+        return None
+
+    def apply_transform(self, x, parameters):
+        max_radius = max(self.radius)
+        if self.method == 'conv':
+            dist = lambda x, r: bounded_distance(x, int(round(r)), dim=x.dim()-1)
+            dtype = torch.int
+            dmax = max_radius+1
+        elif self.method == 'l1':
+            dist = lambda x, r: distmap.l1_signed_transform(x, ndim=x.dim()-1).neg_()
+            dtype = torch.get_default_dtype()
+            dmax = float('inf')
+        elif self.method == 'l2':
+            dist = lambda x, r: distmap.euclidean_signed_transform(x, ndim=x.dim()-1).neg_()
+            dtype = torch.get_default_dtype()
+            dmax = float('inf')
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0]
+        foreground_radius = ensure_list(self.radius, len(foreground_labels))
+
         y = x.clone()
-        for label, radius, outlabel \
-                in zip(self.labels, self.radius, self.output_labels):
-            x1 = x == label
-            x1 = erode(x1, nb_iter=radius, dim=x.dim()-1).logical_xor_(x1)
-            y[x1] = outlabel
+        d = torch.full_like(x, dmax, dtype=dtype)
+        for label in all_labels:
+            is_foreground = label in foreground_labels
+            if not is_foreground:
+                continue
+            radius = foreground_radius[foreground_labels.index(label)]
+            x0 = x == label
+            d1 = dist(x0, radius)
+            if is_foreground:
+                mask = d1 < radius
+                mask = mask & (d1 < d)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
         return y
 
 
 class RandomErodeLabelTransform(RandomizedTransform):
+    """
+    Morphological erosion with random radius/labels.
+    """
 
-    def __init__(self, labels=0.5, radius=3, output_labels=0, shared=False):
+    def __init__(self, labels=0.5, radius=3, method='conv', shared=False):
         """
 
         Parameters
@@ -340,9 +450,11 @@ class RandomErodeLabelTransform(RandomizedTransform):
         radius : Sampler or int
             Erosion radius (per label).
             Either an int sampler, or an upper bound.
-        output_labels : int or 'unique'
-            Output label
-            If 'unique', assign a novel unique label (per input label).
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
         """
         def to_range(value):
             if not isinstance(value, Sampler):
@@ -353,8 +465,8 @@ class RandomErodeLabelTransform(RandomizedTransform):
 
         super().__init__(ErodeLabelTransform,
                          dict(labels=labels,
-                              radius=RandInt.make(to_range(radius)),
-                              output_labels=output_labels),
+                              radius=Uniform.make(to_range(radius)),
+                              method=Fixed(method)),
                          shared=shared)
 
     def get_parameters(self, x):
@@ -368,13 +480,6 @@ class RandomErodeLabelTransform(RandomizedTransform):
                 pyrand.shuffle(labels)
                 return labels[:n]
             sample['labels'] = label_sampler
-        if sample['output_labels'] == 'unique':
-            max_label = x.unique().max().item() + 1
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sample['output_labels'] = list(range(max_label, max_label + n))
         if callable(sample['radius']):
             if n is None:
                 n = len(ensure_list(sample['labels']()
@@ -384,6 +489,383 @@ class RandomErodeLabelTransform(RandomizedTransform):
             def sample_radius():
                 return [sampler() for _ in range(n)]
             sample['radius'] = sample_radius
+
+        return self.subtransform(**{k: f() if callable(f) else f
+                                    for k, f in sample.items()})
+
+
+class RandomDilateLabelTransform(RandomizedTransform):
+    """
+    Morphological dilation with random radius/labels.
+    """
+
+    def __init__(self, labels=0.5, radius=3, method='conv', shared=False):
+        """
+
+        Parameters
+        ----------
+        labels : Sampler or float or [sequence of] int
+            Labels to dilate.
+            If a float in 0..1, probability of eroding a label
+        radius : Sampler or int
+            Dilation radius (per label).
+            Either an int sampler, or an upper bound.
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        def to_range(value):
+            if not isinstance(value, Sampler):
+                if not isinstance(value, (list, tuple)):
+                    value = (0, value)
+                value = tuple(value)
+            return value
+
+        super().__init__(DilateLabelTransform,
+                         dict(labels=labels,
+                              radius=Uniform.make(to_range(radius)),
+                              method=Fixed(method)),
+                         shared=shared)
+
+    def get_parameters(self, x):
+        sample = dict(self.sample)
+        n = None
+        if isinstance(sample['labels'], float):
+            prob = sample['labels']
+            labels = x.unique().tolist()
+            n = int(pymath.ceil(len(labels) * prob))
+            def label_sampler():
+                pyrand.shuffle(labels)
+                return labels[:n]
+            sample['labels'] = label_sampler
+        if callable(sample['radius']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['radius']
+            def sample_radius():
+                return [sampler() for _ in range(n)]
+            sample['radius'] = sample_radius
+
+        return self.subtransform(**{k: f() if callable(f) else f
+                                    for k, f in sample.items()})
+
+
+class SmoothMorphoLabelTransform(Transform):
+    """
+    Morphological erosion with spatially varying radius.
+
+    We're actually computing the level set of each label and pushing it
+    up and down using a smooth "radius" map. In theory, this can
+    create "holes" or "islands", which would not happen with a normal
+    erosion. With radii that are small and radius map that are smooth
+    compared to the label size, it should be fine.
+    """
+
+    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5, method='conv'):
+        """
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to erode
+        min_radius : [sequence of] int
+            Minimum erosion (if < 0) or dilation (if > 0) radius (per label)
+        max_radius : [sequence of] int
+            Maximum erosion (if < 0) or dilation (if > 0)  radius (per label)
+        shape : [sequence of] int
+            Number of nodes in the smooth radius map
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        super().__init__(shared=True)
+        self.labels = ensure_list(labels)
+        self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
+        self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
+        self.shape = shape
+        self.method = method
+
+    def get_parameters(self, x):
+        return None
+
+    def apply_transform(self, x, parameters):
+        max_abs_radius = max(max(map(abs, self.min_radius)),
+                             max(map(abs, self.max_radius))) + 1
+        if self.method == 'conv':
+            dist = lambda x: bounded_distance(x, nb_iter=max_abs_radius, dim=x.dim()-1)
+        elif self.method == 'l1':
+            dist = lambda x: distmap.l1_signed_transform(x, ndim=x.dim()-1).neg_()
+        elif self.method == 'l2':
+            dist = lambda x: distmap.euclidean_signed_transform(x, ndim=x.dim()-1).neg_()
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0]
+        foreground_min_radius = ensure_list(self.min_radius, len(foreground_labels))
+        foreground_max_radius = ensure_list(self.max_radius, len(foreground_labels))
+
+        dtype = x.dtype if x.dtype.is_floating_point else torch.get_default_dtype()
+        y = torch.zeros_like(x)
+        d = torch.full_like(x, float('inf'), dtype=dtype)
+        all_labels = x.unique()
+        for label in all_labels:
+            x0 = x == label
+            is_foreground = label in foreground_labels
+            if is_foreground:
+                label_index = foreground_labels.index(label)
+                min_radius = foreground_min_radius[label_index]
+                max_radius = foreground_max_radius[label_index]
+                radius = BaseFieldTransform(self.shape, min_radius, max_radius)
+                radius = radius.get_parameters(x)
+            else:
+                radius = 0
+            d1 = dist(x0).to(d).sub_(radius)
+            mask = d1 < d
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
+        return y
+
+
+class RandomSmoothMorphoLabelTransform(RandomizedTransform):
+    """
+    Morphological erosion/dilation with smooth random radius/labels.
+    """
+
+    def __init__(self, labels=0.5, min_radius=-3, max_radius=3,
+                 shape=5, method='conv', shared=False):
+        """
+
+        Parameters
+        ----------
+        labels : Sampler or float or [sequence of] int
+            Labels to dilate.
+            If a float in 0..1, probability of eroding a label
+        min_radius : [sequence of] int
+            Minimum erosion (if < 0) or dilation (if > 0) radius (per label)
+            Either an int sampler, or an upper bound.
+        max_radius : [sequence of] int
+            Maximum erosion (if < 0) or dilation (if > 0)  radius (per label)
+            Either an int sampler, or an upper bound.
+        shape : [sequence of] int
+            Number of nodes in the smooth radius map
+            Either an int sampler, or an upper bound.
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        super().__init__(SmoothMorphoLabelTransform,
+                         dict(labels=labels,
+                              min_radius=Uniform.make(lower_range(min_radius)),
+                              max_radius=Uniform.make(upper_range(max_radius)),
+                              shape=RandInt.make(upper_range(shape)),
+                              method=Fixed(method)),
+                         shared=shared)
+
+    def get_parameters(self, x):
+        sample = dict(self.sample)
+        n = None
+        if isinstance(sample['labels'], float):
+            prob = sample['labels']
+            labels = x.unique().tolist()
+            n = int(pymath.ceil(len(labels) * prob))
+            def label_sampler():
+                pyrand.shuffle(labels)
+                return labels[:n]
+            sample['labels'] = label_sampler
+        if callable(sample['min_radius']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['min_radius']
+            def sample_min_radius():
+                return [sampler() for _ in range(n)]
+            sample['min_radius'] = sample_min_radius
+        if callable(sample['max_radius']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['max_radius']
+            def sample_max_radius():
+                return [sampler() for _ in range(n)]
+            sample['max_radius'] = sample_max_radius
+
+        return self.subtransform(**{k: f() if callable(f) else f
+                                    for k, f in sample.items()})
+
+
+class SmoothShallowLabelTransform(Transform):
+    """Make labels "empty", with a border of a given size."""
+
+    def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
+                 background_labels=tuple(), method='l2', shared=False):
+        """
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to make shallow
+        max_width : [sequence of] int
+            Maximum border width (per label)
+        min_width : [sequence of] int
+            Minimum border width (per label)
+        shape : [sequence of] int
+            Number of nodes in the smooth width map
+        background_labels : [sequence of] int
+            Labels that are allowed to grow into the shallow space
+            (default: all that are not in labels)
+        method : {'l1', 'l2'}
+            Method to use to compute the distance map.
+        """
+        super().__init__(shared=shared)
+        self.labels = ensure_list(labels)
+        self.background_labels = ensure_list(background_labels)
+        self.shape = shape
+        self.min_width = ensure_list(min_width, min(len(self.labels), 1))
+        self.max_width = ensure_list(max_width, min(len(self.labels), 1))
+        self.method = method
+
+    def get_parameters(self, x):
+        return None
+
+    def apply_transform(self, x, parameters):
+        if self.method == 'l1':
+            dist = lambda x: distmap.l1_signed_transform(x, ndim=x.dim()-1).neg_()
+        elif self.method == 'l2':
+            dist = lambda x: distmap.euclidean_signed_transform(x, ndim=x.dim()-1).neg_()
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0]
+        background_labels = self.background_labels
+        if not background_labels:
+            background_labels = [l for l in all_labels if l not in foreground_labels]
+        foreground_min_width = ensure_list(self.min_width, len(foreground_labels))
+        foreground_max_width = ensure_list(self.max_width, len(foreground_labels))
+
+        dtype = x.dtype if x.dtype.is_floating_point else torch.get_default_dtype()
+        y = torch.zeros_like(x)
+        d = torch.full_like(x, float('inf'), dtype=dtype)
+        m = torch.zeros_like(x, dtype=torch.bool)
+        all_labels = x.unique()
+
+        # fill object borders and keep track of object interiors
+        for label, min_width, max_width in zip(foreground_labels,
+                                               foreground_min_width,
+                                               foreground_max_width):
+            x0 = x == label
+            radius = BaseFieldTransform(self.shape, -min_width, -max_width)
+            radius = radius.get_parameters(x)
+            d1 = dist(x0).to(d)
+            mask = (d1 < 0) & (d1 > radius)
+            m.masked_fill_(d1 < radius, True)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
+
+        # elsewhere, use maximum probability labels
+        for label in all_labels:
+            if label in foreground_labels:
+                continue
+            x0 = x == label
+            if label not in background_labels:
+                y.masked_fill_(x0, label)
+                d.masked_fill_(x0, -1)
+            elif len(background_labels) == 1:
+                y.masked_fill_(x0, label)
+                d.masked_fill_(x0, -1)
+                y.masked_fill_(m, label)
+                d.masked_fill_(m, -1)
+            else:
+                d1 = dist(x0).to(d)
+                mask = d1 < d
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
+
+        return y
+
+
+class RandomSmoothShallowLabelTransform(RandomizedTransform):
+    """
+    Make labels "empty", with a border of a given (random) size.
+    """
+
+    def __init__(self, labels=0.5, max_width=5, min_width=1, shape=5,
+                 background_labels=tuple(), method='l2', shared=False):
+        """
+        Parameters
+        ----------
+        labels : Sampler or float or [sequence of] int
+            Labels to make shallow
+            If a float in 0..1, probability of eroding a label
+        max_width : Sampler or [sequence of] float
+            Maximum border width (per label)
+            Either an int sampler, or an upper bound.
+        min_width : Sampler or [sequence of] float
+            Minimum border width (per label)
+            Either an int sampler, or an upper bound.
+        shape : Sampler or [sequence of] int
+            Number of nodes in the smooth width map
+            Either an int sampler, or an upper bound.
+        background_labels : [sequence of] int
+            Labels that are allowed to grow into the shallow space
+            (default: all that are not in labels)
+        method : {'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        super().__init__(SmoothShallowLabelTransform,
+                         dict(labels=labels,
+                              min_width=Uniform.make(lower_range(min_width)),
+                              max_width=Uniform.make(upper_range(max_width)),
+                              shape=RandInt.make(upper_range(shape)),
+                              background_labels=Fixed(background_labels),
+                              method=Fixed(method)),
+                         shared=shared)
+
+    def get_parameters(self, x):
+        sample = dict(self.sample)
+        n = None
+        if isinstance(sample['labels'], float):
+            prob = sample['labels']
+            labels = x.unique().tolist()
+            n = int(pymath.ceil(len(labels) * prob))
+            def label_sampler():
+                pyrand.shuffle(labels)
+                return labels[:n]
+            sample['labels'] = label_sampler
+        if callable(sample['min_width']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['min_width']
+            def sample_min_width():
+                return [sampler() for _ in range(n)]
+            sample['min_width'] = sample_min_width
+        if callable(sample['max_width']):
+            if n is None:
+                n = len(ensure_list(sample['labels']()
+                                    if callable(sample['labels']) else
+                                    sample['labels']))
+            sampler = sample['max_width']
+            def sample_max_width():
+                return [sampler() for _ in range(n)]
+            sample['max_width'] = sample_max_width
 
         return self.subtransform(**{k: f() if callable(f) else f
                                     for k, f in sample.items()})

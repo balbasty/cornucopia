@@ -302,11 +302,23 @@ cc.OneHotTransform(label_map=None, label_ref=None, keep_background=True, dtype=N
 cc.ArgMaxTransform()
 cc.GaussianMixtureTransform(mu=None, sigma=None, fwhm=0, background=None, shared=False)
 cc.SmoothLabelMap(nb_classes=2, shape=5, soft=False, shared=False)
-cc.ErodeLabelMap(labels, radius=3, output_labels=0)
+cc.ErodeLabelMap(labels=tuple(), radius=3, method='conv')
+cc.DilateLabelMap(labels=tuple(), radius=3, method='conv')
+cc.SmoothMorphoLabelTransform(labels=tuple(), min_radius=-3, max_radius=3, shape=5, method='conv')
+cc.SmoothShallowLabelTransform(labels=tuple(), max_width=5, min_width=1, shape=5,
+                               background_labels=tuple(), method='l2', shared=False)
+cc.BernoulliTransform(prob=0.1, shared=False)
+cc.SmoothBernoulliTransform(prob=0.1, shape=5, shared=False)
 
 # randomized
 cc.RandomGaussianMixtureTransform(mu=255, sigma=16, fwhm=2, background=None, shared='channels')
-cc.RandomErodeLabelTransform(labels=0.5, radius=3, output_labels=0, shared=False)
+cc.RandomErodeLabelTransform(labels=0.5, radius=3, method='conv', shared=False)
+cc.RandomDilateLabelTransform(labels=0.5, radius=3, method='conv', shared=False)
+cc.RandomSmoothMorphoLabelTransform(labels=0.5, min_radius=-3, max_radius=3,
+                                    shape=5, method='conv', shared=False)
+cc.RandomSmoothShallowLabelTransform(labels=0.5, max_width=5, min_width=1, shape=5,
+                                     background_labels=tuple(), method='l2', shared=False)
+
 ```
 
 ### k-space
