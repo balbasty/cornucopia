@@ -222,8 +222,19 @@ class GammaTransform(Transform):
         self.vmax = vmax
 
     def get_parameters(self, x):
-        vmin = x.min() if self.vmin is None else self.vmin
-        vmax = x.max() if self.vmax is None else self.vmax
+        ndim = x.dim() - 1
+        if self.vmin is None:
+            vmin = x.reshape(len(x), -1).min(-1).values
+            for _ in range(ndim):
+                vmin = vmin.unsqueeze(-1)
+        else:
+            vmin = self.vmin
+        if self.vmax is None:
+            vmax = x.reshape(len(x), -1).max(-1).values
+            for _ in range(ndim):
+                vmax = vmax.unsqueeze(-1)
+        else:
+            vmax = self.vmax
         return vmin, vmax
 
     def apply_transform(self, x, parameters):
