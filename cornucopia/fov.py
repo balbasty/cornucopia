@@ -1,13 +1,13 @@
-__all__ = ['FlipTransform', 'CropTransform',
-           'PatchTransform', 'RandomPatchTransform',
+__all__ = ['FlipTransform', 'RandomFlipTransform',
+           'CropTransform', 'PatchTransform', 'RandomPatchTransform',
            'PadTransform', 'PowerTwoTransform']
 
 import torch
 import math
-from .base import Transform
+from .base import Transform, RandomizedTransform
 from .utils.py import ensure_list
 from .utils.padding import pad
-from .random import Uniform
+from .random import Uniform, RandKFrom
 
 
 class FlipTransform(Transform):
@@ -31,6 +31,29 @@ class FlipTransform(Transform):
             axis = list(range(1, x.dim()))
         axis = ensure_list(axis)
         return x.flip(axis)
+
+
+class RandomFlipTransform(RandomizedTransform):
+    """Flip one or more axes"""
+
+    def __init__(self, axis=None, shared=True):
+        """
+
+        Parameters
+        ----------
+        axis : [list of] int
+            Axes that can be flipped (default: all)
+        shared : bool or {'channels', 'tensors'}
+        """
+        super().__init__(FlipTransform, dict(axis=axis), shared=shared)
+
+    def get_parameters(self, x):
+        sample = dict(self.sample)
+        ndim = x.dim() - 1
+        if sample['axis'] is None:
+            sample['axis'] = RandKFrom(range(-ndim, 0))
+        return self.subtransform(**{k: f() if callable(f) else f
+                                    for k, f in sample.items()})
 
 
 class PatchTransform(Transform):

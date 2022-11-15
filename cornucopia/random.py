@@ -1,4 +1,5 @@
-__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal']
+__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal',
+           'RandKFrom']
 
 import random
 import copy
@@ -156,8 +157,46 @@ class RandInt(Sampler):
 
     def __call__(self, n=None, **backend):
         if isinstance(n, (list, tuple)):
+            n = tuple(n)
             return torch.randint(1 + self.max - self.min, n, **backend).add_(self.min)
         return self.map(random.randint, self.min, self.max, n=n)
+
+
+class RandKFrom(Sampler):
+    """Discrete uniform sampler"""
+
+    def __init__(self, range, k=None, replacement=False):
+        """
+        Parameters
+        ----------
+        range : sequence
+            Values from which to sample
+        k : int, default=None
+            Number of values to sample.
+            Sample random number if None.
+        replacement : bool, default=False
+            Whether to sample with replacement
+        """
+        super().__init__()
+        range = list(range)
+        if not replacement and k and k > len(range):
+            raise ValueError('Cannot sample more element than available. '
+                             'To sample with replacement, use `replacement=True`')
+        self.range = range
+        self.k = k
+        self.replacement = replacement
+
+    def __call__(self, n=None, **backend):
+        k = self.k or (1 + RandInt(len(self.range))())
+        if isinstance(n, (list, tuple)) or n:
+            raise ValueError('RandKFrom cannot sample multiple elements')
+        if not self.replacement:
+            range = list(self.range)
+            random.shuffle(range)
+            return range[:k]
+        else:
+            index = RandInt(len(self.range))(k)
+            return [self.range[i] for i in index]
 
 
 class Normal(Sampler):
