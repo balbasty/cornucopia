@@ -51,7 +51,7 @@ autoapi_dirs = ['../cornucopia']
 
 autoapi_options = [
     'members', 
-    'undoc-members', 
+    # 'undoc-members',
     # 'private-members',
     'show-inheritance',
     'show-module-summary', 
