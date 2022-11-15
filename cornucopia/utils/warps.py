@@ -212,8 +212,11 @@ def apply_flow(image, flow, has_identity=False, **kwargs):
     flow = flow_to_torch(flow, shape_in,
                          align_corners=kwargs['align_corners'],
                          has_identity=has_identity)
+    B = max(len(flow), len(image))
     if len(flow) != B:
         flow = flow.expand([B, *flow.shape[1:]])
+    if len(image) != B:
+        image = image.expand([B, *image.shape[1:]])
     if not image.dtype.is_floating_point:
         vmax = flow.new_full([B, C, *shape_out], -float('inf'))
         warped = image.new_zeros([B, C, *shape_out])
