@@ -517,8 +517,7 @@ def compose_flows(flow_left, flow_right, has_identity=False):
     flow_left = flow_left.movedim(-1, 1)
     flow = apply_flow(flow_left, flow_right, has_identity=has_identity)
     flow = flow.movedim(1, -1)
-    if has_identity:
-        flow = add_identity_(flow)
+    flow += flow_right
     return flow
 
 
