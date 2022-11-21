@@ -1065,7 +1065,6 @@ class SmoothBernoulliDiskTransform(Transform):
         self.value = value
 
     def get_parameters(self, x):
-        print(self.radius)
         ndim = x.dim() - 1
         nvoxball = pymath.pow(pymath.pi, ndim / 2) / pymath.gamma(ndim / 2 + 1)
         nvoxball *= sum(self.radius) / 2
