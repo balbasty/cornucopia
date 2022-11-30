@@ -137,7 +137,8 @@ class RelabelTransform(Transform):
 class GaussianMixtureTransform(Transform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
-    def __init__(self, mu=None, sigma=None, fwhm=0, background=None, shared=False):
+    def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
+                 dtype=None, shared=False):
         """
 
         Parameters
@@ -150,12 +151,15 @@ class GaussianMixtureTransform(Transform):
             Width of a within-class smoothing kernel.
         background : int, optional
             Index of background channel
+        dtype : torch.dtype
+            Output data type. Only used if input is an integer label map.
         """
         super().__init__(shared=shared)
         self.mu = mu
         self.sigma = sigma
         self.fwhm = fwhm
         self.background = background
+        self.dtype = dtype
 
     def get_parameters(self, x):
         mu = self.mu
@@ -167,7 +171,8 @@ class GaussianMixtureTransform(Transform):
         if x.dtype.is_floating_point:
             backend = dict(dtype=x.dtype, device=x.device)
         else:
-            backend = dict(dtype=torch.get_default_dtype(), device=x.device)
+            backend = dict(dtype=self.type or torch.get_default_dtype(),
+                           device=x.device)
         mu = torch.as_tensor(mu).to(**backend)
         sigma = torch.as_tensor(sigma).to(**backend)
         return mu, sigma
@@ -190,10 +195,10 @@ class GaussianMixtureTransform(Transform):
                 y += x[k] * y1.mul_(sigma[k]).add_(mu[k])
             y = y[None]
         else:
-            backend = dict(dtype=torch.get_default_dtype(), device=x.device)
+            backend = dict(dtype=self.dtype or torch.get_default_dtype(),
+                           device=x.device)
             y = torch.zeros_like(x, **backend)
-            mu = mu.to(**backend)
-            sigma = sigma.to(**backend)
+            mu, sigma = mu.to(y), sigma.to(y)
             nk = x.max().item()+1
             fwhm = ensure_list(self.fwhm or [0], nk)
             for k in range(nk):
@@ -205,7 +210,9 @@ class GaussianMixtureTransform(Transform):
                     y += (x == k) * y1.mul_(sigma[k]).add_(mu[k])
                 else:
                     mask = x == k
-                    y[mask] = torch.randn(mask.sum(), **backend).mul_(sigma[k]).add_(mu[k])
+                    numel = mask.sum()
+                    if numel:
+                        y[mask] = torch.randn(numel, **backend).mul_(sigma[k]).add_(mu[k])
         return y
 
 
@@ -284,8 +291,9 @@ class SmoothLabelMap(Transform):
                 b1 = interpol.resize(b1, shape=fullshape, interpolation=3,
                                      prefilter=False)
                 mask = maxprob < b1
-                b.masked_fill_(mask, k)
-                maxprob[mask] = b1[mask]
+                if mask.any():
+                    b.masked_fill_(mask, k)
+                    maxprob[mask] = b1[mask]
         return b
 
     def apply_transform(self, x, parameters):
@@ -385,8 +393,9 @@ class ErodeLabelTransform(Transform):
                 mask = d1 < -radius
             else:
                 mask = d1 < d
-            d[mask] = d1[mask]
-            y.masked_fill_(mask, label)
+            if mask.any():
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
         return y
 
     def _apply_newlabels(self, x, parameters):
@@ -479,11 +488,11 @@ class DilateLabelTransform(Transform):
             radius = foreground_radius[foreground_labels.index(label)]
             x0 = x == label
             d1 = dist(x0, radius)
-            if is_foreground:
-                mask = d1 < radius
-                mask = mask & (d1 < d)
-            d[mask] = d1[mask]
-            y.masked_fill_(mask, label)
+            mask = d1 < radius
+            mask = mask & (d1 < d)
+            if mask.any():
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
         return y
 
 
@@ -673,8 +682,9 @@ class SmoothMorphoLabelTransform(Transform):
                 radius = 0
             d1 = dist(x0).to(d).sub_(radius)
             mask = d1 < d
-            d[mask] = d1[mask]
-            y.masked_fill_(mask, label)
+            if mask.any():
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
         return y
 
 
@@ -816,8 +826,9 @@ class SmoothShallowLabelTransform(Transform):
             d1 = dist(x0).to(d)
             mask = (d1 < 0) & (d1 > radius)
             m.masked_fill_(d1 < radius, True)
-            d[mask] = d1[mask]
-            y.masked_fill_(mask, label)
+            if mask.any():
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
 
         # elsewhere, use maximum probability labels
         for label in all_labels:
@@ -835,8 +846,9 @@ class SmoothShallowLabelTransform(Transform):
             else:
                 d1 = dist(x0).to(d)
                 mask = d1 < d
-                d[mask] = d1[mask]
-                y.masked_fill_(mask, label)
+                if mask.any():
+                    d[mask] = d1[mask]
+                    y.masked_fill_(mask, label)
 
         return y
 
