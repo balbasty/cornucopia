@@ -171,7 +171,7 @@ class GaussianMixtureTransform(Transform):
         if x.dtype.is_floating_point:
             backend = dict(dtype=x.dtype, device=x.device)
         else:
-            backend = dict(dtype=self.type or torch.get_default_dtype(),
+            backend = dict(dtype=self.dtype or torch.get_default_dtype(),
                            device=x.device)
         mu = torch.as_tensor(mu).to(**backend)
         sigma = torch.as_tensor(sigma).to(**backend)
