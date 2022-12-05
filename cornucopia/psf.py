@@ -127,7 +127,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
         noise = self.sample['noise']()
         if axis is None:
             axis = -(RandInt(1, x.dim()-1)())
-        return RandomLowResSliceTransform(resolution, thickness, axis, noise)
+        return LowResSliceTransform(resolution, thickness, axis, noise)
 
 
 class LowResTransform(Transform):
