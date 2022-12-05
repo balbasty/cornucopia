@@ -291,9 +291,8 @@ class SmoothLabelMap(Transform):
                 b1 = interpol.resize(b1, shape=fullshape, interpolation=3,
                                      prefilter=False)
                 mask = maxprob < b1
-                if mask.any():
-                    b.masked_fill_(mask, k)
-                    maxprob[mask] = b1[mask]
+                b.masked_fill_(mask, k)
+                maxprob[mask] = b1[mask]
         return b
 
     def apply_transform(self, x, parameters):
@@ -372,10 +371,10 @@ class ErodeLabelTransform(Transform):
         else:
             raise ValueError('Unknown method', self.method)
 
-        all_labels = x.unique()
+        all_labels = x.unique().tolist()
         foreground_labels = self.labels
         if not foreground_labels:
-            foreground_labels = all_labels[all_labels != 0]
+            foreground_labels = [lab for lab in all_labels if lab != 0]
         foreground_radius = ensure_list(self.radius, len(foreground_labels))
 
         y = torch.zeros_like(x)
@@ -393,9 +392,8 @@ class ErodeLabelTransform(Transform):
                 mask = d1 < -radius
             else:
                 mask = d1 < d
-            if mask.any():
-                d[mask] = d1[mask]
-                y.masked_fill_(mask, label)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
         return y
 
     def _apply_newlabels(self, x, parameters):
@@ -408,10 +406,10 @@ class ErodeLabelTransform(Transform):
         else:
             raise ValueError('Unknown method', self.method)
 
-        all_labels = x.unique()
+        all_labels = x.unique().tolist()
         foreground_labels = self.labels
         if not foreground_labels:
-            foreground_labels = all_labels[all_labels != 0].tolist()
+            foreground_labels = [lab for lab in all_labels if lab != 0]
         foreground_radius = ensure_list(self.radius, len(foreground_labels))
         if self.new_labels is True:
             max_label = all_labels[-1]
@@ -473,10 +471,10 @@ class DilateLabelTransform(Transform):
         else:
             raise ValueError('Unknown method', self.method)
 
-        all_labels = x.unique()
+        all_labels = x.unique().tolist()
         foreground_labels = self.labels
         if not foreground_labels:
-            foreground_labels = all_labels[all_labels != 0].tolist()
+            foreground_labels = [lab for lab in all_labels if lab != 0]
         foreground_radius = ensure_list(self.radius, len(foreground_labels))
 
         y = x.clone()
@@ -490,9 +488,8 @@ class DilateLabelTransform(Transform):
             d1 = dist(x0, radius)
             mask = d1 < radius
             mask = mask & (d1 < d)
-            if mask.any():
-                d[mask] = d1[mask]
-                y.masked_fill_(mask, label)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
         return y
 
 
@@ -682,9 +679,8 @@ class SmoothMorphoLabelTransform(Transform):
                 radius = 0
             d1 = dist(x0).to(d).sub_(radius)
             mask = d1 < d
-            if mask.any():
-                d[mask] = d1[mask]
-                y.masked_fill_(mask, label)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
         return y
 
 
@@ -826,9 +822,8 @@ class SmoothShallowLabelTransform(Transform):
             d1 = dist(x0).to(d)
             mask = (d1 < 0) & (d1 > radius)
             m.masked_fill_(d1 < radius, True)
-            if mask.any():
-                d[mask] = d1[mask]
-                y.masked_fill_(mask, label)
+            d[mask] = d1[mask]
+            y.masked_fill_(mask, label)
 
         # elsewhere, use maximum probability labels
         for label in all_labels:
@@ -846,9 +841,8 @@ class SmoothShallowLabelTransform(Transform):
             else:
                 d1 = dist(x0).to(d)
                 mask = d1 < d
-                if mask.any():
-                    d[mask] = d1[mask]
-                    y.masked_fill_(mask, label)
+                d[mask] = d1[mask]
+                y.masked_fill_(mask, label)
 
         return y
 
@@ -1077,7 +1071,6 @@ class SmoothBernoulliDiskTransform(Transform):
         self.value = value
 
     def get_parameters(self, x):
-        print(self.radius)
         ndim = x.dim() - 1
         nvoxball = pymath.pow(pymath.pi, ndim / 2) / pymath.gamma(ndim / 2 + 1)
         nvoxball *= sum(self.radius) / 2
