@@ -343,8 +343,8 @@ cc.SynthFromLabelTransform(patch=None, from_disk=False, one_hot=False,
 ## Other augmentation packages
 
 There are other great, and much more mature, augmentation packages out-there (although few run on the GPU). Here's a non-exhaustive list:
-- [MONAI](https://github.com/fepegar/torchio)
-- [TorchIO](https://github.com/Project-MONAI/MONAI)
+- [MONAI](https://github.com/Project-MONAI/MONAI)
+- [TorchIO](https://github.com/fepegar/torchio)
 - [Albumentations](https://github.com/albumentations-team/albumentations) (2D only)
 - [Volumentations](https://github.com/ZFTurbo/volumentations) (3D extension of Albumentations)
 
