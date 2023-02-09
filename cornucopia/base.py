@@ -933,7 +933,7 @@ class BatchedTransform(nn.Module):
 
         batch = []
         for elem in unpack(args):
-            batch.append(self.transform(elem))
+            batch.append(self.transform(*elem))
         batch = pack(batch)
         return batch[0] if len(args) == 1 else tuple(batch)
 
