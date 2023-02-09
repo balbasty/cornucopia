@@ -24,7 +24,7 @@ References
       MIDL 2020
       https://arxiv.org/abs/2003.01995
 """
-__all__ = ['SynthContrastTransform', 'SynthFromLabelTransform']
+__all__ = ['SynthFromLabelTransform', 'IntensityTransform']
 
 from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform
 from .labels import RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
@@ -37,8 +37,8 @@ from .io import LoadTransform
 import random as pyrandom
 
 
-class SynthContrastTransform(SequentialTransform):
-    """Synthesize a contrast and imaging artefacts from a label map
+class IntensityTransform(SequentialTransform):
+    """Common intensity augmentation for MRI and related images
 
     References
     ----------
@@ -51,7 +51,6 @@ class SynthContrastTransform(SequentialTransform):
     """
 
     def __init__(self,
-                 gmm_fwhm=10,
                  bias=7,
                  gamma=0.6,
                  motion_fwhm=3,
@@ -61,8 +60,6 @@ class SynthContrastTransform(SequentialTransform):
         """
         Parameters
         ----------
-        gmm_fwhm : float
-            Upper bound for the FWHM of the intra-tissue smoothing kernel
         bias : int
             Upper bound for the number of control points of the bias field
         gamma : float
@@ -78,7 +75,6 @@ class SynthContrastTransform(SequentialTransform):
         """
         noise_sd = 255 / snr
 
-        gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
         bias = RandomizedTransform(MultFieldTransform, RandInt(2, bias))
         gamma = RandomizedTransform(GammaTransform, Uniform(0, gamma))
         smooth = RandomizedTransform(SmoothTransform, Uniform(0, motion_fwhm))
@@ -93,7 +89,7 @@ class SynthContrastTransform(SequentialTransform):
                                             noise=Fixed(noise)))
         lowres = SwitchTransform([lowres2d, lowres3d])
 
-        super().__init__([gmm, bias, gamma, smooth, lowres])
+        super().__init__([bias, gamma, smooth, lowres])
 
 
 class SynthFromLabelTransform(Transform):
@@ -215,28 +211,34 @@ class SynthFromLabelTransform(Transform):
         self.deform = RandomAffineElasticTransform(
             elastic, elastic_nodes,
             rotations=rotation, shears=shears, zooms=zooms, patch=patch)
-        self.intensity = SynthContrastTransform(
-            gmm_fwhm, bias, gamma, motion_fwhm, resolution, snr, gfactor)
+        self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
+        self.intensity = IntensityTransform(
+            bias, gamma, motion_fwhm, resolution, snr, gfactor)
 
     def get_parameters(self, x):
+        parameters = dict()
         synth_labels = list(self.synth_labels or [])
         if self.synth_labels_maybe:
             for labels, prob in self.synth_labels_maybe.items():
                 if pyrandom.random() > (1 - prob):
                     synth_labels += list(labels)
         if synth_labels:
-            return RelabelTransform(synth_labels)
-        else:
-            return None
+            parameters['preproc'] = RelabelTransform(synth_labels)
+        parameters['gmm'] = self.gmm.get_parameters(x)
+        parameters['deform'] = self.deform.get_parameters(x)
 
     def apply_transform(self, lab, parameters=None):
+        parameters = parameters or {}
         load = self.load or (lambda x: x)
-        preproc = parameters or (lambda x: x)
+        preproc = parameters.get('preproc', lambda x: x)
+        gmm = parameters.get('gmm', lambda x: x)
+        deform = parameters.get('deform', lambda x: x)
         postproc = self.postproc_labels or (lambda x: x)
 
         lab = load(lab)
-        lab = self.deform(lab)
-        img = self.intensity(preproc(lab))
+        lab = deform(lab)
+        img = gmm(preproc(lab))
+        img = self.intensity(img)
         lab = postproc(lab)
         return img, lab
 
