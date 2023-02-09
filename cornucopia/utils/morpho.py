@@ -30,6 +30,30 @@ def connectivity_kernel(dim, conn=1, **backend):
     return kernel
 
 
+@torch.jit.script
+def xor(x, y):
+    return (x + y) == 1
+
+
+def _dist1(x, ix, dist, conn, n_iter):
+    dim = conn.dim()
+    if dist is not None:
+        ox, oix = x, ix
+    if x is not None:
+        x = convnd(dim, x, conn, padding='same').clamp_max_(1)
+    if ix is not None:
+        ix = convnd(dim, ix, conn, padding='same').clamp_max_(1)
+    if dist is not None:
+        # NOTE: this function used to be inlined in the `_morpho` loop,
+        # but  the two following lines caused massive memory leaks
+        # (of RAM -- not VRAM, even when tensor live in the GPU).
+        # I haven't found the cause of it, but moving the loop body in a
+        # separate function seems to solve the problem.
+        dist = dist.masked_fill_(xor(x, ox), n_iter)
+        dist = dist.masked_fill_(xor(ix, oix), -n_iter)
+    return x, ix, dist
+
+
 def _morpho(mode, x, conn, nb_iter, dim):
     """Common worker for binary operations
 
@@ -71,20 +95,8 @@ def _morpho(mode, x, conn, nb_iter, dim):
         ix = 1 - x
         x = None
 
-    @torch.jit.script
-    def xor(x, y):
-        return (x + y) == 1
-
     for n_iter in range(1, nb_iter+1):
-        if dist is not None:
-            ox, oix = x, ix
-        if x is not None:
-            x = convnd(dim, x, conn, padding='same').clamp_max_(1)
-        if ix is not None:
-            ix = convnd(dim, ix, conn, padding='same').clamp_max_(1)
-        if dist is not None:
-            dist.masked_fill_(xor(x, ox), n_iter)
-            dist.masked_fill_(xor(ix, oix), -n_iter)
+        x, ix, dist = _dist1(x, ix, dist, conn, n_iter)
 
     if mode == 'dilate':
         if x.dtype.is_floating_point:
