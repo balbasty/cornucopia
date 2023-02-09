@@ -226,6 +226,7 @@ class SynthFromLabelTransform(Transform):
             parameters['preproc'] = RelabelTransform(synth_labels)
         parameters['gmm'] = self.gmm.get_parameters(x)
         parameters['deform'] = self.deform.get_parameters(x)
+        return parameters
 
     def apply_transform(self, lab, parameters=None):
         parameters = parameters or {}
