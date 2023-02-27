@@ -5,9 +5,9 @@ __all__ = ['SmoothTransform', 'RandomSmoothTransform',
 from .base import Transform, RandomizedTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from .random import Uniform, RandInt, Fixed, sym_range, upper_range, \
-    lower_range
-from interpol import resize
+from .random import Uniform, RandInt, Fixed, \
+    sym_range, upper_range, lower_range
+from torch.nn.functional import interpolate
 
 
 class SmoothTransform(Transform):
@@ -78,6 +78,9 @@ class LowResSliceTransform(Transform):
 
     def apply_transform(self, x, parameters):
         ndim = x.dim() - 1
+        mode = ('trilinear' if ndim == 3 else
+                'bilinear' if ndim == 2 else
+                'linear')
         fwhm = [0] * ndim
         fwhm[self.axis] = self.resolution * self.thickness
         y = smoothnd(x, fwhm=fwhm)
@@ -85,9 +88,11 @@ class LowResSliceTransform(Transform):
             y = self.noise.apply_transform(y, parameters)
         factor = [1] * ndim
         factor[self.axis] = 1/self.resolution
-        y = resize(y[None], factor=factor, anchor='f')[0]
+        y = interpolate(y[None], scale_factor=factor, align_corners=True,
+                        recompute_scale_factor=True, mode=mode)[0]
         factor[self.axis] = self.resolution
-        y = resize(y[None], factor=factor, shape=x.shape[1:], anchor='f')[0]
+        y = interpolate(y[None], size=x.shape[1:], align_corners=True,
+                        mode=mode)[0]
         return y
 
 
@@ -114,7 +119,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
             Use the same resolution for all channels/tensors
         """
         super().__init__(RandomLowResSliceTransform,
-                         dict(resolution=Uniform.make(upper_range(resolution)),
+                         dict(resolution=Uniform.make(upper_range(resolution, min=1)),
                               thickness=Uniform.make(lower_range(thickness, 1)),
                               axis=Fixed.make(axis),
                               noise=Fixed.make(noise)),
@@ -149,13 +154,18 @@ class LowResTransform(Transform):
 
     def apply_transform(self, x, parameters):
         ndim = x.dim() - 1
+        mode = ('trilinear' if ndim == 3 else
+                'bilinear' if ndim == 2 else
+                'linear')
         resolution = ensure_list(self.resolution, ndim)
         y = smoothnd(x, fwhm=resolution)
         if self.noise is not None:
             y = self.noise.apply_transform(y, parameters)
         factor = [1/r for r in resolution]
-        y = resize(y[None], factor=factor, anchor='f')[0]
-        y = resize(y[None], factor=resolution, shape=x.shape[1:], anchor='f')[0]
+        y = interpolate(y[None], scale_factor=factor, align_corners=True,
+                        recompute_scale_factor=True, mode=mode)[0]
+        y = interpolate(y[None], size=x.shape[1:], align_corners=True,
+                        mode=mode)[0]
         return y
 
 
@@ -173,5 +183,5 @@ class RandomLowResTransform(RandomizedTransform):
             Use the same resolution for all channels/tensors
         """
         super().__init__(LowResTransform,
-                         dict(resolution=Uniform.make(upper_range(resolution))),
+                         dict(resolution=Uniform.make(upper_range(resolution, min=1))),
                          shared=shared)
