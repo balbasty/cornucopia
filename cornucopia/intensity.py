@@ -6,24 +6,29 @@ __all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
            'ZTransform', 'QuantileTransform']
 
 import torch
+from torch.nn.functional import interpolate
 import interpol
 from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform, RandInt, sym_range, upper_range, \
-    lower_range
+from .random import Sampler, Uniform, RandInt, Fixed, \
+                    sym_range, upper_range, lower_range
 from .utils.py import ensure_list
 
 
 class BaseFieldTransform(Transform):
 
-    def __init__(self, shape=5, vmin=0, vmax=1, shared=False):
+    def __init__(self, shape=5, vmin=0, vmax=1, order=3, shared=False):
         """
 
         Parameters
         ----------
         shape : [list of] int
             Number of spline control points
-        amplitude : float
+        vmin : float
+            Minimum value
+        vmax : float
             Maximum value
+        order : int
+            Spline order
         shared : bool
             Apply the same field to all channels
         """
@@ -31,6 +36,7 @@ class BaseFieldTransform(Transform):
         self.shape = shape
         self.vmax = vmax
         self.vmin = vmin
+        self.order = order
 
     def get_parameters(self, x):
         batch, *fullshape = x.shape
@@ -39,8 +45,14 @@ class BaseFieldTransform(Transform):
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
         b = torch.rand([batch, *smallshape], **backend)
-        b = interpol.resize(b, shape=fullshape, interpolation=3,
-                            prefilter=False)
+        if self.order == 1:
+            mode = ('trilinear' if len(fullshape) == 3 else
+                    'bilinear' if len(fullshape) == 2 else
+                    'linear')
+            b = interpolate(b[None], fullshape, mode=mode, align_corners=True)[0]
+        else:
+            b = interpol.resize(b, shape=fullshape, interpolation=self.order,
+                                prefilter=False)
         b.mul_(self.vmax-self.vmin).add_(self.vmin)
         return b
 
@@ -55,7 +67,7 @@ class MultFieldTransform(BaseFieldTransform):
 class RandomMultFieldTransform(RandomizedTransform):
     """Random multiplicative bias field transform"""
 
-    def __init__(self, shape=8, vmax=2, shared=False):
+    def __init__(self, shape=8, vmax=2, order=3, shared=False):
         """
         Parameters
         ----------
@@ -63,11 +75,14 @@ class RandomMultFieldTransform(RandomizedTransform):
             Sampler or Upper bound for number of control points
         vmax : Sampler or float
             Sampler or Upper bound for maximum value
+        order : int
+            Spline order
         shared : bool
             Whether to share random parameters across channels
         """
         kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
-                      shape=RandInt.make(upper_range(shape, 2)))
+                      shape=RandInt.make(upper_range(shape, 2)),
+                      order=Fixed.make(order))
         super().__init__(MultFieldTransform, kwargs, shared=shared)
 
 
@@ -81,7 +96,7 @@ class AddFieldTransform(BaseFieldTransform):
 class RandomAddFieldTransform(RandomizedTransform):
     """Random additive bias field transform"""
 
-    def __init__(self, shape=8, vmin=-1, vmax=1, shared=False):
+    def __init__(self, shape=8, vmin=-1, vmax=1, order=3, shared=False):
         """
         Parameters
         ----------
@@ -91,12 +106,15 @@ class RandomAddFieldTransform(RandomizedTransform):
             Sampler or Lower bound for minimum value
         vmax : Sampler or float
             Sampler or Upper bound for maximum value
+        order : int
+            Spline order
         shared : bool
             Whether to share random parameters across channels
         """
         kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
                       vmin=Uniform.make(lower_range(vmin)),
-                      shape=RandInt.make(upper_range(shape, 2)))
+                      shape=RandInt.make(upper_range(shape, 2)),
+                      order=Fixed.make(order))
         super().__init__(AddFieldTransform, kwargs, shared=shared)
 
 

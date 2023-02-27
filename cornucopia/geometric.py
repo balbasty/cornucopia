@@ -5,10 +5,11 @@ __all__ = ['ElasticTransform', 'RandomElasticTransform',
            'Slicewise3DAffineTransform', 'RandomSlicewise3DAffineTransform']
 
 import torch
+from torch.nn.functional import interpolate
 import math
 import interpol
 from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform, RandInt
+from .random import Sampler, Uniform, RandInt, Fixed
 from .utils import warps
 from .utils.py import ensure_list
 
@@ -21,7 +22,7 @@ class ElasticTransform(Transform):
     """
 
     def __init__(self, dmax=0.1, unit='fov', shape=5, bound='border',
-                 steps=0, shared=True):
+                 steps=0, order=3, shared=True):
         """
 
         Parameters
@@ -36,6 +37,8 @@ class ElasticTransform(Transform):
             Padding mode
         steps : int
             Number of scaling-and-squaring integration steps
+        order : int
+            Spline order
         shared : bool
             Apply same transform to all images/channels
         """
@@ -52,6 +55,7 @@ class ElasticTransform(Transform):
         self.bound = bound
         self.shape = shape
         self.steps = steps
+        self.order = order
 
     def get_parameters(self, x, fullsize=True):
         """
@@ -83,8 +87,14 @@ class ElasticTransform(Transform):
             t[:, d].sub_(0.5).mul_(2*dmax[d])
         if not fullsize:
             return t
-        ft = interpol.resize(t, shape=fullshape, interpolation=3,
-                             prefilter=False)
+        if self.order == 1:
+            mode = ('trilinear' if len(fullshape) == 3 else
+                    'bilinear' if len(fullshape) == 2 else
+                    'linear')
+            ft = interpolate(t[None], fullshape, mode=mode, align_corners=True)[0]
+        else:
+            ft = interpol.resize(t, shape=fullshape, interpolation=self.order,
+                                 prefilter=False)
         if self.steps:
             ft = warps.exp_velocity(ft, self.steps)
         return ft, t
@@ -101,8 +111,8 @@ class RandomElasticTransform(RandomizedTransform):
     Elastic Transform with random parameters.
     """
 
-    def __init__(self, dmax=0.15, shape=10,
-                 unit='fov', bound='border', steps=0, shared=True):
+    def __init__(self, dmax=0.15, shape=10, unit='fov', bound='border',
+                 steps=0, order=3, shared=True):
         """
 
         Parameters
@@ -115,6 +125,8 @@ class RandomElasticTransform(RandomizedTransform):
             Unit of `dmax`
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        order : int
+            Spline order
         shared : bool
             Apply same transform to all images/channels
         """
@@ -123,15 +135,17 @@ class RandomElasticTransform(RandomizedTransform):
         if not isinstance(shape, Sampler):
             shape = (2, shape)
 
-        self._sample = dict(dmax=Uniform.make(dmax), shape=RandInt.make(shape))
+        self._sample = dict(dmax=Uniform.make(dmax),
+                            shape=RandInt.make(shape))
         super().__init__(self._build, self._sample, shared=shared)
         self.unit = unit
         self.bound = bound
         self.steps = steps
+        self.order = order
 
     def _build(self, dmax, shape):
         return ElasticTransform(dmax=dmax, shape=shape, steps=self.steps,
-                                unit=self.unit, bound=self.bound)
+                                unit=self.unit, bound=self.bound, order=self.order)
 
 
 class AffineTransform(Transform):
@@ -329,7 +343,7 @@ class AffineElasticTransform(Transform):
 
     def __init__(self, dmax=0.1, shape=5, steps=0,
                  translations=0, rotations=0, shears=0, zooms=0,
-                 unit='fov', bound='border', patch=None, shared=True):
+                 unit='fov', bound='border', patch=None, order=3, shared=True):
         """
 
         Parameters
@@ -354,6 +368,8 @@ class AffineElasticTransform(Transform):
             Padding mode
         patch : [list of] int
             Size of random patch to extract
+        order : int
+            Spline order
         shared : bool
             Apply same transform to all images/channels
         """
@@ -361,7 +377,7 @@ class AffineElasticTransform(Transform):
         self.patch = patch
         self.affine = AffineTransform(translations, rotations, shears, zooms,
                                       unit, bound, shared)
-        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, shared)
+        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, order, shared)
 
     def get_parameters(self, x):
         """
@@ -418,7 +434,7 @@ class RandomAffineElasticTransform(RandomizedTransform):
 
     def __init__(self, dmax=0.15, shape=10, steps=0,
                  translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                 unit='fov', bound='border', patch=None, shared=True):
+                 unit='fov', bound='border', patch=None, order=3, shared=True):
         """
 
         Parameters
@@ -441,6 +457,8 @@ class RandomAffineElasticTransform(RandomizedTransform):
             Padding mode
         patch : [list of] int
             Size of random patch to extract
+        order : int
+            Spline order
         shared : bool
             Apply same transform to all images/channels
         """
@@ -467,6 +485,7 @@ class RandomAffineElasticTransform(RandomizedTransform):
         self.bound = bound
         self.steps = steps
         self.patch = patch
+        self.order = order
 
     def get_parameters(self, x):
         ndim = x.dim() - 1
@@ -479,8 +498,8 @@ class RandomAffineElasticTransform(RandomizedTransform):
     def _build(self, dmax, shape, translations, rotations, shears, zooms):
         return AffineElasticTransform(
             dmax=dmax, shape=shape, translations=translations,
-            rotations=rotations, shears=shears, zooms=zooms,
-            unit=self.unit, bound=self.bound, patch=self.patch)
+            rotations=rotations, shears=shears, zooms=zooms, unit=self.unit,
+            bound=self.bound, patch=self.patch, order=self.order)
 
 
 class MakeAffinePair(Transform):

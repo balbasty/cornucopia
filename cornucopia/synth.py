@@ -28,7 +28,7 @@ __all__ = ['SynthFromLabelTransform', 'IntensityTransform']
 
 from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform
 from .labels import RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
-from .intensity import MultFieldTransform, GammaTransform
+from .intensity import MultFieldTransform, GammaTransform, QuantileTransform
 from .psf import SmoothTransform, LowResSliceTransform, LowResTransform
 from .noise import ChiNoiseTransform, GFactorTransform
 from .geometric import RandomAffineElasticTransform
@@ -56,7 +56,8 @@ class IntensityTransform(SequentialTransform):
                  motion_fwhm=3,
                  resolution=8,
                  snr=10,
-                 gfactor=5):
+                 gfactor=5,
+                 order=3):
         """
         Parameters
         ----------
@@ -72,10 +73,12 @@ class IntensityTransform(SequentialTransform):
             Lower bound for the signal-to-noise ratio
         gfactor : int
             Upper bound for the number of control points of the g-factor map
+        order : int
+            Spline order of the bias field (1 is much faster)
         """
         noise_sd = 255 / snr
 
-        bias = RandomizedTransform(MultFieldTransform, RandInt(2, bias))
+        bias = RandomizedTransform(MultFieldTransform, RandInt(2, bias), dict(order=order))
         gamma = RandomizedTransform(GammaTransform, Uniform(0, gamma))
         smooth = RandomizedTransform(SmoothTransform, Uniform(0, motion_fwhm))
         noise1 = RandomizedTransform(ChiNoiseTransform, Uniform(0, noise_sd))
@@ -88,8 +91,9 @@ class IntensityTransform(SequentialTransform):
                                        dict(resolution=Uniform(0, resolution),
                                             noise=Fixed(noise)))
         lowres = SwitchTransform([lowres2d, lowres3d])
+        rescale = QuantileTransform()
 
-        super().__init__([bias, gamma, smooth, lowres])
+        super().__init__([bias, gamma, smooth, lowres, rescale])
 
 
 class SynthFromLabelTransform(Transform):
@@ -131,7 +135,7 @@ class SynthFromLabelTransform(Transform):
                  rotation=15,
                  shears=0.012,
                  zooms=0.15,
-                 elastic=0.15,
+                 elastic=0.05,
                  elastic_nodes=10,
                  gmm_fwhm=10,
                  bias=7,
@@ -139,7 +143,8 @@ class SynthFromLabelTransform(Transform):
                  motion_fwhm=3,
                  resolution=8,
                  snr=10,
-                 gfactor=5):
+                 gfactor=5,
+                 order=3):
         """
 
         Parameters
@@ -164,6 +169,8 @@ class SynthFromLabelTransform(Transform):
             All labels not listed are assumed background.
             The final label map is relabeled in the order provided,
             starting from 1 (background is 0).
+        order : int
+            Spline order of the elastic and bias fields (1 is much faster)
 
         Geometric Parameters
         --------------------
@@ -209,11 +216,11 @@ class SynthFromLabelTransform(Transform):
             postproc = None
         self.postproc_labels = postproc
         self.deform = RandomAffineElasticTransform(
-            elastic, elastic_nodes,
+            elastic, elastic_nodes, order=order,
             rotations=rotation, shears=shears, zooms=zooms, patch=patch)
         self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
         self.intensity = IntensityTransform(
-            bias, gamma, motion_fwhm, resolution, snr, gfactor)
+            bias, gamma, motion_fwhm, resolution, snr, gfactor, order)
 
     def get_parameters(self, x):
         parameters = dict()
