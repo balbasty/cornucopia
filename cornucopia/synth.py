@@ -85,10 +85,10 @@ class IntensityTransform(SequentialTransform):
         noise = RandomizedTransform(GFactorTransform, [Fixed(noise1),
                                                        RandInt(2, gfactor)])
         lowres2d = RandomizedTransform(LowResSliceTransform,
-                                       dict(resolution=Uniform(0, resolution),
+                                       dict(resolution=Uniform(1, resolution),
                                             noise=Fixed(noise)))
         lowres3d = RandomizedTransform(LowResTransform,
-                                       dict(resolution=Uniform(0, resolution),
+                                       dict(resolution=Uniform(1, resolution),
                                             noise=Fixed(noise)))
         lowres = SwitchTransform([lowres2d, lowres3d])
         rescale = QuantileTransform()
