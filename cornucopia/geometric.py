@@ -7,6 +7,7 @@ __all__ = ['ElasticTransform', 'RandomElasticTransform',
 import torch
 from torch.nn.functional import interpolate
 import math
+import random
 import interpol
 from .base import Transform, RandomizedTransform
 from .random import Sampler, Uniform, RandInt, Fixed
@@ -407,7 +408,7 @@ class AffineElasticTransform(Transform):
             patchshape = fullshape
         ft = warps.identity(patchshape, **backend)          # (*shape, D)
         if self.patch:
-            patch_origin = [math.randint(s-p)
+            patch_origin = [random.randint(0, s-p)
                             for s, p in zip(fullshape, self.patch)]
             ft += torch.as_tensor(patch_origin, **backend)
         ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
