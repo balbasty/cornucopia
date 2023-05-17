@@ -1,4 +1,6 @@
-# Cornucopia
+<picture align="center">
+  <img alt="Cornucopia logo" src="icons/cornucopia_orange.svg">
+</picture>
 
 The `cornucopia` package provides a generic framework for preprocessing,
 augmentation, and domain randomization; along with an abundance of
