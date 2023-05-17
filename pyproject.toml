@@ -1,0 +1,14 @@
+[build-system]
+# Minimum requirements for the build system to execute.
+requires = [
+    "setuptools",
+    "wheel",
+]
+
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "cornucopia/_version.py"
+versionfile_build = "cornucopia/_version.py"
+tag_prefix = ""
+parentdir_prefix = ""
