@@ -1,0 +1,66 @@
+site_name: cornucopia
+site_url: https://cornucopia.readthedocs.io
+repo_url: https://github.com/balbasty/cornucopia
+edit_uri: blob/main/docs
+site_dir: html
+docs_dir: docs
+theme: 
+  name: material
+plugins:
+- mkdocs-jupyter
+- mkdocstrings:
+    handlers:
+      python:
+        paths: [..]
+        options:
+          docstring_style: numpy
+          merge_init_into_class: True
+          separate_signature: True
+          members_order: source
+          show_source: False
+          show_root_heading: True
+markdown_extensions:
+- admonition
+- pymdownx.details
+- pymdownx.superfences
+- pymdownx.highlight:
+    anchor_linenums: true
+    line_spans: __span
+    pygments_lang_class: true
+- pymdownx.inlinehilite
+- pymdownx.snippets
+- pymdownx.arithmatex:
+    generic: true
+extra_javascript:
+- javascripts/mathjax.js
+- https://polyfill.io/v3/polyfill.min.js?features=es6
+- https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+- Home: index.md
+- Installation: install.md
+- Getting Started: start.md
+- Examples:
+  -  Random coil sensitivities: examples/coils.ipynb
+  -  Contrast augmentation: examples/contrast.ipynb
+  -  Geometric transforms: examples/geom.ipynb
+  -  Random intra-scan motion: examples/motion.ipynb
+  -  Synthetic MRIs: examples/synth.ipynb
+  -  Benchmark: examples/benchmark.ipynb
+- API:
+  - overview: api/overview.md
+  - base: api/base.md
+  - contrast: api/contrast.md
+  - fov: api/fov.md
+  - geometric: api/geometric.md
+  - intensity: api/intensity.md
+  - io: api/io.md
+  - kspace: api/kspace.md
+  - labels: api/labels.md
+  - noise: api/noise.md
+  - psf: api/psf.md
+  - random: api/random.md
+  - synth: api/synth.md
+
+watch:
+- cornucopia
