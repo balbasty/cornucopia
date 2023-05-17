@@ -6,6 +6,21 @@ site_dir: html
 docs_dir: docs
 theme: 
   name: material
+  palette:
+    - primary: orange
+    - accent: orange
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/lightbulb
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/lightbulb-outline
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
 plugins:
 - mkdocs-jupyter
 - mkdocstrings:
