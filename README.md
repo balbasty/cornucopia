@@ -1,4 +1,8 @@
-# Cornucopia
+<picture align="center">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/icons/cornucopia_lightorange.svg">
+  <source media="(prefers-color-scheme: light)"  srcset="docs/icons/cornucopia_orange.svg">
+  <img alt="Cornucopia logo" src="docs/icons/cornucopia_orange.svg">
+</picture>
 
 The `cornucopia` package provides a generic framework for preprocessing,
 augmentation, and domain randomization; along with an abundance of specific layers,
