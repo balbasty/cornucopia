@@ -69,11 +69,12 @@ class Sampler:
         """
         Parameters
         ----------
-        n : int or list[int], optional
+        n : int or list[int]
             Number of values to sample
-            - if None, return a scalar
-            - if an int, return a list
-            - if a list, return a tensor
+
+            - if `None`, return a scalar
+            - if an `int`, return a list
+            - if a `list`, return a tensor
 
         Returns
         -------
@@ -87,6 +88,7 @@ class Fixed(Sampler):
     """Fixed value"""
     def __init__(self, value):
         """
+
         Parameters
         ----------
         value : number or sequence[number]
@@ -104,6 +106,11 @@ class Uniform(Sampler):
 
     def __init__(self, *args, **kwargs):
         """
+        ```python
+        Uniform(max)
+        Uniform(min, max)
+        ```
+
         Parameters
         ----------
         min : float or sequence[float], default=0
@@ -135,6 +142,11 @@ class RandInt(Sampler):
 
     def __init__(self, *args, **kwargs):
         """
+        ```python
+        RandInt(max)
+        RandInt(min, max)
+        ```
+
         Parameters
         ----------
         min : float or sequence[float], default=0

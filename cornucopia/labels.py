@@ -33,7 +33,7 @@ class OneHotTransform(Transform):
         ----------
         label_map : list or [list of] int
             Map one-hot classes to [list of] labels or label names
-            (!! Should not include the background class !!)
+            !!! warning "Should not include the background class"
         label_ref : dict[int] -> str
             Map label values to label names
         keep_background : bool
@@ -112,13 +112,19 @@ class RelabelTransform(Transform):
     def __init__(self, labels):
         """
 
+        !!! note
+
+            The `labels` are mapped to the range `{1..len(labels)}`.
+
+            If an element of this list is a sublist of indices, they are merged.
+
+            All labels absent from the list are mapped to `0`.
+
         Parameters
         ----------
         labels : list of [list of] int, optional
             Relabeling scheme.
-            The labels in this list are mapped to the range {1..len(labels)}.
-            If an element of this list is a sublist of indices, they are merged.
-            All labels absent from the list are mapped to 0.
+
         """
         super().__init__(shared=False)
         self.labels = labels
@@ -608,11 +614,12 @@ class SmoothMorphoLabelTransform(Transform):
     """
     Morphological erosion with spatially varying radius.
 
-    We're actually computing the level set of each label and pushing it
-    up and down using a smooth "radius" map. In theory, this can
-    create "holes" or "islands", which would not happen with a normal
-    erosion. With radii that are small and radius map that are smooth
-    compared to the label size, it should be fine.
+    !!! note
+        We're actually computing the level set of each label and pushing it
+        up and down using a smooth "radius" map. In theory, this can
+        create "holes" or "islands", which would not happen with a normal
+        erosion. With radii that are small and radius map that are smooth
+        compared to the label size, it should be fine.
     """
 
     def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5, method='conv'):

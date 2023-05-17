@@ -61,6 +61,7 @@ class Kwargs(dict, Arguments):
 
 
 class ArgsAndKwargs(Arguments):
+    """Iterator across both args and kwargs"""
     def __init__(self, args, kwargs):
         self.args = Args(args)
         self.kwargs = Kwargs(kwargs)
@@ -75,21 +76,23 @@ class ArgsAndKwargs(Arguments):
 class include:
     """
     Context manager for keys to include
-    ::
 
+    !!! example
+        ```python
         with include(xform, "image"):
             image, label = xform(image=image, label=label)
+        ```
     """
 
     def __init__(self, transform, keys, union=True):
         """
         Parameters
         ----------
-        transform : Tranform
+        transform : Transform
             Transform to apply
         keys : [sequence of] str
             Keys to include
-        union : bool, default=True
+        union : bool
             Include the union of what was already included and `keys`
         """
         if keys and not isinstance(keys, (list, tuple)):
@@ -113,22 +116,24 @@ class include:
 
 class exclude:
     """
-    Context manager for keys to exclude
-    ::
+    Context manager for keys to exclude.
 
+    !!! example
+        ```python
         with exclude(xform, "image"):
             image, label = xform(image=image, label=label)
+        ```
     """
 
     def __init__(self, transform, keys, union=True):
         """
         Parameters
         ----------
-        transform : Tranform
+        transform : Transform
             Transform to apply
         keys : [sequence of] str
             Keys to include
-        union : bool, default=True
+        union : bool
             Exclude the union of what was already excluded and `keys`
         """
         if keys and not isinstance(keys, (list, tuple)):
@@ -155,7 +160,7 @@ class Transform(nn.Module):
     Base class for transforms.
 
     Transforms are parameter-free modules that usually act on tensors
-    without a batch dimension (e.g., [C, *spatial])
+    without a batch dimension (e.g., `[C, *spatial]`)
 
     In general, transforms take an argument `shared` that can take values
     `True`, `False`, `'tensors'` or `'channels'`. If a transform is
@@ -168,16 +173,18 @@ class Transform(nn.Module):
     the parent anf child transform. For example, we may want to randomly
     decide to apply (or not) a bias field at the parent level but, when
     applied, let the bias field be different in each channel. Such a
-    transform would be defined as::
-
-        t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
+    transform would be defined as:
+    ```python
+    t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
+    ```
 
     Furthermore, the addition of two transforms implictly defines
-    (or extends) a `SequentialTransform`::
-
-        t1 = MultFieldTransform()
-        t2 = GaussianNoiseTransform()
-        seq = t1 + t2
+    (or extends) a `SequentialTransform`:
+    ```python
+    t1 = MultFieldTransform()
+    t2 = GaussianNoiseTransform()
+    seq = t1 + t2
+    ```
 
     """
 
@@ -187,10 +194,11 @@ class Transform(nn.Module):
         Parameters
         ----------
         shared : bool or 'channels' or 'tensors'
-            If True: shared across tensors and channels
-            If 'channels': shared across channels
-            If 'tensors': shared across tensors
-            If False: independent across tensors and channels
+
+            - If `True`: shared across tensors and channels
+            - If `channels`: shared across channels
+            - If `tensors`: shared across tensors
+            - If `False`: independent across tensors and channels
         """
         super().__init__()
         self.shared = shared
@@ -202,13 +210,13 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : [nested list or dict of] (C, *shape) tensor
-            Input tensors
+        x : [nested list or dict of] tensor
+            Input tensors, with shape `(C, *shape)`
 
         Returns
         -------
-        [nested list or dict of] (C, *shape) tensor
-            Output tensors
+        [nested list or dict of] tensor
+            Output tensors. with shape `(C, *shape)`
 
         """
         # DEV: this function should in general not be overloaded
@@ -263,15 +271,15 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : [nested list or dict of] (C, *shape) tensor
-            Input tensors
+        x : [nested list or dict of] tensor
+            Input tensors, with shape `(C, *shape)`
         parameters : any
             Pre-computed parameters of the transform
 
         Returns
         -------
-        [nested list or dict of] (C, *shape) tensor
-            Output tensors
+        [nested list or dict of] tensor
+            Output tensors, with shape `(C, *shape)`
 
         """
         # DEV: this function should in general not be overloaded
@@ -294,13 +302,13 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-            A single input tensor
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
 
         Returns
         -------
-        x : (C, *shape) tensor
-            A single output tensor
+        x : tensor
+            A single output tensor, with shape `(C, *shape)`.
 
         """
         # DEV: this function can be overloaded if `shared` is not supported
@@ -312,13 +320,13 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-            A single input tensor
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
 
         Returns
         -------
-        x : (C, *shape) tensor
-            A single output tensor
+        x : tensor
+            A single output tensor, with shape `(C, *shape)`.
 
         """
         # DEV: This function should usually not be overloaded
@@ -331,8 +339,8 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-            A single input tensor
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
 
         Returns
         -------
@@ -348,15 +356,15 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-            A single input tensor
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
         parameters : any
             Precomputed parameters
 
         Returns
         -------
-        x : (C, *shape) tensor
-            A single output tensor
+        x : tensor
+            A single output tensor, with shape `(C, *shape)`.
 
         """
         raise NotImplementedError("This function should be implemented "
@@ -367,15 +375,15 @@ class Transform(nn.Module):
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-            A single input tensor
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
 
         Returns
         -------
-        x : (C, *shape) tensor
-            A single output tensor
+        x : tensor
+            A single output tensor, with shape `(C, *shape)`.
         parameters : any
-            Computed parameters
+            Computed parameters.
 
         """
 
@@ -414,22 +422,30 @@ class Transform(nn.Module):
 class SequentialTransform(Transform):
     """A sequence of transforms
 
-    Sequences can be built explicitly, or simply by adding transforms
-    together::
-
+    !!! example
+        Sequences can be built explicitly, or simply by adding transforms
+        together:
+        ```python
         t1 = MultFieldTransform()
         t2 = GaussianNoiseTransform()
         seq = SequentialTransform([t1, t2])     # explicit
         seq = t1 + t2                           # implicit
+        ```
 
-    Sequences can also be extended by addition::
-
+        Sequences can also be extended by addition:
+        ```python
         seq += SmoothTransform()
-
+        ```
 
     """
 
     def __init__(self, transforms):
+        """
+        Parameters
+        ----------
+        transforms : list[Transform]
+            A list of transforms to apply sequentially.
+        """
         super().__init__()
         self.transforms = transforms
 
@@ -485,7 +501,23 @@ class SequentialTransform(Transform):
 
 
 class MaybeTransform(Transform):
-    """Randomly apply a transform"""
+    """Randomly apply a transform
+
+    !!! example "20% chance of adding noise"
+        ```python
+        import cornucopia as cc
+        gauss = cc.GaussianNoiseTransform()
+        ```
+        Explicit call to the class:
+        ```python
+         img = cc.MaybeTransform(gauss, 0.2)(img)
+        ```
+        Implicit call using syntactic sugar:
+        ```python
+        img = (0.2 * gauss)(img)
+        ```
+        ```
+    """
 
     def __init__(self, transform, prob=0.5, shared=False):
         """
@@ -522,7 +554,27 @@ class MaybeTransform(Transform):
 
 
 class SwitchTransform(Transform):
-    """Randomly one of multiple transforms"""
+    """Randomly choose a transform to apply
+
+    !!! example "Randomly apply either Gaussian or Chi noise"
+        ```python
+        import cornucopia as cc
+        gauss = cc.GaussianNoiseTransform()
+        chi = cc.ChiNoiseTransform()
+        ```
+        Explicit call to the class:
+        ```python
+        img = cc.SwitchTransform([gauss, chi])(img)
+        ```
+        Implicit call using syntactic sugar:
+        ```python
+        img = (gauss | chi)(img)
+        ```
+        Functional call:
+        ```python
+        img = cc.switch({gauss: 0.5, chi: 0.5})(img)
+        ```
+    """
 
     def __init__(self, transforms, prob=0, shared=False):
         """
@@ -590,7 +642,26 @@ class SwitchTransform(Transform):
 
 
 def switch(map):
-    """Random switchn between a set of transforms
+    """Randomly choose a transform to apply
+
+    !!! example "Randomly apply either Gaussian or Chi noise"
+        ```python
+        import cornucopia as cc
+        gauss = cc.GaussianNoiseTransform()
+        chi = cc.ChiNoiseTransform()
+        ```
+        Explicit call to the class:
+        ```python
+        img = cc.SwitchTransform([gauss, chi])(img)
+        ```
+        Implicit call using syntactic sugar:
+        ```python
+        img = (gauss | chi)(img)
+        ```
+        Functional call:
+        ```python
+        img = cc.switch({gauss: 0.5, chi: 0.5})(img)
+        ```
 
     Parameters
     ----------
@@ -608,6 +679,21 @@ def switch(map):
 class RandomizedTransform(Transform):
     """
     Transform generated by randomizing some parameters of another transform.
+
+    !!! example "Gaussian noise with randomized variance"
+        Object call
+        ```python
+        import cornucopia as cc
+        hypernoise = RandomizedTransform(cc.GaussianNoise, [cc.Uniform(0, 10)])
+        img = hypernoise(img)
+        ```
+        Functional call
+        ```python
+        import cornucopia as cc
+        hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
+        img = hypernoise(img)
+        ```
+
     """
 
     def __init__(self, transform, sample, ksample=None, shared=False):
@@ -659,6 +745,20 @@ class RandomizedTransform(Transform):
 def randomize(klass, shared=False):
     """Decorator to convert a Transform into a RandomizedTransform
 
+    !!! example "Gaussian noise with randomized variance"
+        Object call
+        ```python
+        import cornucopia as cc
+        hypernoise = RandomizedTransform(cc.GaussianNoise, [cc.Uniform(0, 10)])
+        img = hypernoise(img)
+        ```
+        Functional call
+        ```python
+        import cornucopia as cc
+        hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
+        img = hypernoise(img)
+        ```
+
     Parameters
     ----------
     klass : subclass(Transform)
@@ -680,10 +780,8 @@ class MappedTransform(Transform):
     """
     Transforms that are applied to specific positional or arguments
 
-    Examples
-    --------
-    ::
-
+    !!! example
+        ```python
         img = torch.randn([1, 32, 32])
         seg = torch.randn([3, 32, 32]).softmax(0)
 
@@ -695,11 +793,11 @@ class MappedTransform(Transform):
         trf = MappedTransform(image=GaussianNoise())
         img, seg = trf(image=img, label=seg)
 
-
         # alternative version
         dat = {'img': torch.randn([1, 32, 32]),
                'seg': torch.randn([3, 32, 32]).softmax(0)}
         dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
+        ```
 
     """
 
@@ -710,11 +808,11 @@ class MappedTransform(Transform):
         ----------
         mapargs : tuple[Transform]
             Transform to apply to positional arguments
-        mapkwargs : dict[key -> Transform]
+        mapkwargs : dict[str, Transform]
             Transform to apply to keyword arguments
         nested : bool, default=False
             Recursively traverse the inputs until we find matching dictionaries.
-            Only mapkwargs are accepted if "nested"
+            Only `mapkwargs` are accepted if "nested"
         default : Transform
             Transform to apply if nothing is specifically mapped
         """
@@ -828,17 +926,65 @@ class MappedExceptKeysTransform(MappedTransform):
 
 
 def map(*mapargs, nested=False, default=None, **mapkwargs):
-    """Alias for MappedTransform"""
+    """Alias for MappedTransform
+
+    !!! example
+        ```python
+        import cornucopia as cc
+        import torch
+
+        img = torch.randn([1, 32, 32])
+        seg = torch.randn([3, 32, 32]).softmax(0)
+
+        # positional variant
+        trf = cc.map(GaussianNoise(), None)
+        img, seg = trf(img, seg)
+
+        # keyword variant
+        trf = cc.map(image=GaussianNoise())
+        img, seg = trf(image=img, label=seg)
+
+        # alternative version
+        dat = {'img': torch.randn([1, 32, 32]),
+               'seg': torch.randn([3, 32, 32]).softmax(0)}
+        dat = cc.map(img=GaussianNoise(), nested=True)(dat)
+        ```
+    """
     return MappedTransform(*mapargs, nested=nested, default=default, **mapkwargs)
 
 
 def include_keys(transform, keys):
-    """Alias for MappedKeysTransform"""
+    """Alias for MappedKeysTransform
+
+    !!! example
+        Apply `geom` to all images, and apply `noise` to `img` only.
+        ```python
+        import cornucopia as cc
+
+        geom = cc.RandomElasticTransform()
+        noise = cc.GaussianNoiseTransform()
+        trf = geom + cc.include_keys(noise, "image")
+        img, lab = trf(image=img, label=lab)
+        ```
+    """
     return MappedKeysTransform(transform, keys)
 
 
 def exclude_keys(transform, keys):
-    """Alias for MappedExceptKeysTransform"""
+    """Alias for MappedExceptKeysTransform
+
+    !!! example
+        Apply `geom` to all images, and apply `noise` to all images
+        except `lab`.
+        ```python
+        import cornucopia as cc
+
+        geom = cc.RandomElasticTransform()
+        noise = cc.GaussianNoiseTransform()
+        trf = geom + cc.exclude_keys(noise, "label")
+        img, lab = trf(image=img, label=lab)
+        ```
+    """
     return MappedExceptKeysTransform(transform, keys)
 
 
@@ -880,7 +1026,20 @@ class CatChannels(Transform):
 
 
 class BatchedTransform(nn.Module):
-    """Apply a transform to a batch"""
+    """Apply a transform to a batch
+
+    !!! example
+        Functional call:
+        ```python
+        batched_transform = cc.batch(transform)
+        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
+        ```
+        Object call:
+        ```python
+        batched_transform = c.BatchedTransform(transform)
+        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
+        ```
+    """
 
     def __init__(self, transform):
         """
@@ -939,7 +1098,20 @@ class BatchedTransform(nn.Module):
 
 
 def batch(transform):
-    """
+    """Apply a transform to a batch
+
+    !!! example
+        Functional call:
+        ```python
+        batched_transform = cc.batch(transform)
+        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
+        ```
+        Object call:
+        ```python
+        batched_transform = c.BatchedTransform(transform)
+        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
+        ```
+
     Parameters
     ----------
     transform : Transform
@@ -948,7 +1120,7 @@ def batch(transform):
 
     Returns
     -------
-    BatchedTransform
+    trf : BatchedTransform
 
     """
     return BatchedTransform(transform)

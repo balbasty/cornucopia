@@ -11,10 +11,22 @@ class ContrastMixtureTransform(Transform):
 
     References
     ----------
-    ..[1] "A Contrast Augmentation Approach to Improve Multi-Scanner
-           Generalization in MRI"
-          Meyer et al., Front. Neurosci. (2021)
-          https://www.frontiersin.org/articles/10.3389/fnins.2021.708196
+    1. Meyer, M.I., de la Rosa, E., Pedrosa de Barros, N., Paolella, R.,
+       Van Leemput, K. and Sima, D.M., 2021.
+       [**A contrast augmentation approach to improve multi-scanner generalization in MRI.**](https://www.frontiersin.org/articles/10.3389/fnins.2021.708196)
+       Frontiers in Neuroscience, 15, p.708196.
+
+            @article{meyer2021,
+              title={A contrast augmentation approach to improve multi-scanner generalization in MRI},
+              author={Meyer, Maria Ines and de la Rosa, Ezequiel and Pedrosa de Barros, Nuno and Paolella, Roberto and Van Leemput, Koen and Sima, Diana M},
+              journal={Frontiers in Neuroscience},
+              volume={15},
+              pages={708196},
+              year={2021},
+              publisher={Frontiers Media SA},
+              url={https://www.frontiersin.org/articles/10.3389/fnins.2021.708196}
+            }
+
     """
 
     def __init__(self, nk=16, keep_background=True, shared='channels'):

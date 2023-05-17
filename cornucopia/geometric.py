@@ -155,9 +155,9 @@ class AffineTransform(Transform):
     shears and zooms.
 
     The affine matrix is defined as:
-        A = T @ Rx @ Ry @ Rz @ Sx @ Sy Sz @ Z
+        `A = T @ Rx @ Ry @ Rz @ Sx @ Sy Sz @ Z`
     with the center of the field of view used as center of rotation.
-    (A si a matrix so the transforms are applied right to left)
+    (A is a matrix so the transforms are applied right to left)
     """
 
     def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
