@@ -12,7 +12,7 @@ theme:
   icon:
     repo: fontawesome/brands/github
   logo:
-    icons/cc.png
+    icons/cc_full_white.svg
 plugins:
 - mkdocs-jupyter
 - mkdocstrings:
