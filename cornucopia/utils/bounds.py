@@ -17,6 +17,8 @@ dst2                                                        antireflect, dirichl
 dst1                                                        antimirror               -a  0 | a b c d |  0 -d
 """
 import torch
+from torch import Tensor
+from typing import Tuple
 
 
 nitorch_bounds = ('replicate', 'zero', 'dct2', 'dct1', 'dst2', 'dst1', 'dft')
@@ -165,37 +167,29 @@ def dft(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dft)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : {1, 0, -1}
+        Sign of the transformation (always 1 for dft)
 
     """
-    if isinstance(i, int):
-        return i % n, 1
+    return dft_script(i, n) if torch.is_tensor(i) else dft_int(i, n)
+
+
+def dft_int(i, n):
+    return i % n, 1
+
+
+@torch.jit.script
+def dft_script(i, n: int) -> Tuple[Tensor, int]:
     return i.remainder(n), 1
-
-
-def dft_(i, n):
-    """Apply DFT (circulant/wrap) boundary conditions to an index, in-place
-
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
-
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dft)
-
-    """
-    if isinstance(i, int):
-        return dft(i, n)
-    return i.remainder_(n), 1
 
 
 def replicate(i, n):
@@ -203,37 +197,29 @@ def replicate(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for replicate)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : {1, 0, -1}
+        Sign of the transformation (always 1 for replicate)
 
     """
-    if isinstance(i, int):
-        return min(max(i, 0), n-1), 1
+    return replicate_script(i, n) if torch.is_tensor(i) else replicate_int(i, n)
+
+
+def replicate_int(i, n):
+    return min(max(i, 0), n-1), 1
+
+
+@torch.jit.script
+def replicate_script(i, n: int) -> Tuple[Tensor, int]:
     return i.clamp(min=0, max=n-1), 1
-
-
-def replicate_(i, n):
-    """Apply replicate (nearest/border) boundary conditions to an index, in-place
-
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
-
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for replicate)
-
-    """
-    if isinstance(i, int):
-        return replicate(i, n)
-    return i.clamp_(min=0, max=n-1), 1
 
 
 def dct2(i, n):
@@ -241,48 +227,36 @@ def dct2(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct2)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : {1, 0, -1}
+        Sign of the transformation (always 1 for dct2)
 
     """
+    return dct2_script(i, n) if torch.is_tensor(i) else dct2_int(i, n)
+
+
+def dct2_int(i: int, n: int) -> Tuple[int, int]:
     n2 = n * 2
-    if isinstance(i, int):
-        i = n2 - 1 - ((-i-1) % n2) if i < 0 else i % n2
-        i = n2 - 1 - i if i >= n else i
-        return i, 1
-    i = torch.where(i < 0, (n2-1) - (-i-1).remainder(n2),
-                    i.remainder(n2))
-    i = torch.where(i >= n, (n2 - 1) - i, i)
+    i = (n2 - 1) - i if i < 0 else i
+    i = i % n2
+    i = (n2 - 1) - i if i >= n else i
     return i, 1
 
 
-def dct2_(i, n):
-    """Apply DCT-II (reflect) boundary conditions to an index, in-place
-
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
-
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct2)
-
-    """
-    if isinstance(i, int):
-        return dct2(i, n)
-    n2 = n*2
-    pre = (i < 0)
-    i[pre] = n2 - 1 - ((-i[pre]-1) % n2)
-    i[~pre] = (i[~pre] % n2)
-    post = (i >= n)
-    i[post] = n2 - i[post] - 1
+@torch.jit.script
+def dct2_script(i, n: int) -> Tuple[Tensor, int]:
+    n2 = n * 2
+    i = torch.where(i < 0, (n2 - 1) - i, i)
+    i = i.remainder(n2)
+    i = torch.where(i >= n, (n2 - 1) - i, i)
     return i, 1
 
 
@@ -291,55 +265,39 @@ def dct1(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : {1, 0, -1}
+        Sign of the transformation (always 1 for dct1)
 
     """
+    return dct1_script(i, n) if torch.is_tensor(i) else dct1_int(i, n)
+
+
+def dct1_int(i: int, n: int) -> Tuple[int, int]:
     if n == 1:
-        if isinstance(i, int):
-            return 0, 1
+        return 0, 1
+    n2 = (n - 1) * 2
+    i = abs(i) % n2
+    i = n2 - i if i >= n else i
+    return i, 1
+
+
+@torch.jit.script
+def dct1_script(i, n: int) -> Tuple[Tensor, int]:
+    if n == 1:
         return torch.zeros_like(i), 1
-    else:
-        n2 = (n - 1) * 2
-        if isinstance(i, int):
-            i = abs(i) % n2
-            i = n2 - i if i >= n else i
-            return i, 1
-        i = i.abs().remainder(n2)
-        i = torch.where(i >= n, -i + n2, i)
-        return i, 1
-
-
-def dct1_(i, n):
-    """Apply DCT-I (mirror) boundary conditions to an index
-
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
-
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
-
-    """
-    if isinstance(i, int):
-        return dct1(i, n)
-    if n == 1:
-        return i.zero_(), 1
-    else:
-        n2 = (n - 1) * 2
-        i = i.abs_().remainder_(n2)
-        mask = i >= n
-        i[mask] *= -1
-        i[mask] += n2
-        return i, 1
+    n2 = (n - 1) * 2
+    i = i.abs().remainder(n2)
+    i = torch.where(i >= n, n2 - i, i)
+    return i, 1
 
 
 def dst1(i, n):
@@ -347,86 +305,55 @@ def dst1(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : [tensor of] {1, 0, -1}
+        Sign of the transformation
 
     """
+    return dst1_script(i, n) if torch.is_tensor(i) else dst1_int(i, n)
+
+
+def dst1_int(i: int, n: int) -> Tuple[int, int]:
     n2 = 2 * (n + 1)
-    if isinstance(i, int):
-        # sign
-        ii = n - 1 - i if i < 0 else i
-        ii = ii % n2
-        x = 0 if ii == 0 else 1
-        x = 0 if ii % (n + 1) == n else x
-        x = -x if (ii / (n + 1)) % 2 > 0 else x
-        # index
-        i = -i - 2 if i < 0 else i
-        i = i % n2
-        i = n2 - 2 - i if i > n else i
-        i = min(max(i, 0), n-1)
-        return i, x
-
-    one = torch.ones([1], dtype=torch.int8, device=i.device)
-    zero = torch.zeros([1], dtype=torch.int8, device=i.device)
-    first = torch.full([1], 0, dtype=i.dtype, device=i.device)
-    last = torch.full([1], n - 1, dtype=i.dtype, device=i.device)
-
-    i = torch.where(i < 0, -i - 2, i)
-    i = i.remainder(n2)
 
     # sign
-    x = torch.where(i.remainder(n + 1) == n, zero, one)
-    x = torch.where((i / (n + 1)).remainder(2) > 0, -x, x)
+    ii = (2*n - i) if i < 0 else i
+    ii = (ii % n2) % (n + 1)
+    x = 0 if ii == n else 1
+    x = -x if (i / (n + 1)) % 2 >= 1 else x
 
     # index
-    i = torch.where(i > n, -i + (n2 - 2), i)
-    i = torch.where(i == -1, first, i)
-    i = torch.where(i == n, last, i)
+    i = -i - 2 if i < 0 else i
+    i = i % n2
+    i = (n2 - 2) - i if i > n else i
+    i = min(max(i, 0), n-1)
     return i, x
 
 
-def dst1_(i, n):
-    """Apply DST-I (antimirror) boundary conditions to an index, in-place
-
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
-
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
-
-    """
-    if isinstance(i, int):
-        return dst1(i, n)
-
-    one = torch.ones([1], dtype=torch.int8, device=i.device)
-    zero = torch.zeros([1], dtype=torch.int8, device=i.device)
-
+@torch.jit.script
+def dst1_script(i, n: int) -> Tuple[Tensor, Tensor]:
     n2 = 2 * (n + 1)
 
-    mask = i < 0
-    i[mask] += 2
-    i[mask] *= -1
-    i = i.remainder_(n2)
-
     # sign
-    x = torch.where(i.remainder(n + 1) == n, zero, one)
-    mask = (i / (n + 1)).remainder(2) > 0
-    x *= 1 - 2 * mask
+    #   zeros
+    ii = torch.where(i < 0, 2*n - i, i).remainder(n2).remainder(n + 1)
+    x = (ii != n).to(torch.int8)
+    #   +/- ones
+    x = torch.where((i / (n + 1)).remainder(2) >= 1, -x, x)
 
     # index
-    mask = i > n
-    i[mask] *= -1
-    i[mask] += n2 - 2
-    i.clamp_(0, n-1)
+    i = torch.where(i < 0, -2 - i, i)
+    i = i.remainder(n2)
+    i = torch.where(i > n, (n2 - 2) - i, i)
+    i = i.clamp(0, n-1)
     return i, x
 
 
@@ -435,45 +362,32 @@ def dst2(i, n):
 
     Parameters
     ----------
-    i : int                 Index
-    n : int                 Length of the field of view
+    i : int or tensor
+        Index
+    n : int
+        Length of the field of view
 
     Returns
     -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
+    i : int or tensor
+        Index that falls inside the field of view [0, n-1]
+    s : [tensor of] {1, 0, -1}
+        Sign of the transformation (always 1 for dct1)
 
     """
-    if n == 1:
-        return dct2(i, n)
-    else:
-        ii = torch.where(i < 0, n - 1 - i, i)
-        x = torch.ones([1], dtype=torch.int8, device=i.device)
-        x = torch.where((ii / n).remainder(2) > 0, -x, x)
-        return dct2(i, n)[0], x
+    return dst2_script(i, n) if torch.is_tensor(i) else dst2_int(i, n)
 
 
-def dst2_(i, n):
-    """Apply DST-II (antireflect) boundary conditions to an index, in-place
+def dst2_int(i: int, n: int) -> Tuple[int, int]:
+    x = -1 if (i/n) % 2 >= 1 else 1
+    return dct2_int(i, n)[0], x
 
-    Parameters
-    ----------
-    i : int                 Index
-    n : int                 Length of the field of view
 
-    Returns
-    -------
-    i : int                 Index that falls inside the field of view [0, n-1]
-    s : {1, -1}             Sign of the transformation (always 1 for dct1)
-
-    """
-    if n == 1:
-        return dct2_(i, n)
-    else:
-        ii = torch.where(i < 0, n - 1 - i, i)
-        x = torch.ones([1], dtype=torch.int8, device=i.device)
-        x = torch.where((ii / n).remainder(2) > 0, -x, x)
-        return dct2_(i, n)[0], x
+@torch.jit.script
+def dst2_script(i, n: int) -> Tuple[Tensor, Tensor]:
+    x = torch.ones([1], dtype=torch.int8, device=i.device)
+    x = torch.where((i / n).remainder(2) >= 1, -x, x)
+    return dct2_script(i, n)[0], x
 
 
 nearest = border = replicate

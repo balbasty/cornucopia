@@ -136,7 +136,7 @@ def pad(inp, padsize, mode='constant', value=0, side=None):
     if mode == 'zero':
         return _pad_constant(inp, padpre, padpost, value)
     else:
-        bound = getattr(bounds, mode + '_')
+        bound = getattr(bounds, mode)
         return _pad_bound(inp, padpre, padpost, bound)
 
 
@@ -159,7 +159,11 @@ def _pad_bound(inp, padpre, padpost, bound):
         grid[d], mult[d] = bound(grid[d], n)
     grid = list(meshgrid_list_ij(grid))
     if any(map(torch.is_tensor, mult)):
-        mult = meshgrid_list_ij(mult)
+        for d in range(len(mult)):
+            if not torch.is_tensor(mult[d]):
+                continue
+            for _ in range(d+1, len(mult)):
+                mult[d].unsqueeze_(-1)
     mult = prod(mult)
     grid = sub2ind_list(grid, inp.shape)
 
