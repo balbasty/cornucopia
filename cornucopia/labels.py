@@ -174,31 +174,24 @@ class GaussianMixtureTransform(Transform):
             mu = torch.rand([len(x)]).mul_(255)
         if sigma is None:
             sigma = torch.full([len(x)], 255 / len(x))
-        if x.dtype.is_floating_point:
-            backend = dict(dtype=x.dtype, device=x.device)
-        else:
-            backend = dict(dtype=self.dtype or torch.get_default_dtype(),
-                           device=x.device)
-        mu = torch.as_tensor(mu).to(**backend)
-        sigma = torch.as_tensor(sigma).to(**backend)
         return mu, sigma
 
     def apply_transform(self, x, parameters):
         mu, sigma = parameters
+        getitem = lambda x: x.item() if torch.is_tensor(x) else x
 
         if x.dtype.is_floating_point:
             backend = dict(dtype=x.dtype, device=x.device)
-            y = torch.zeros_like(x[0], **backend)
-            mu = mu.to(**backend)
-            sigma = sigma.to(**backend)
+            y = torch.zeros_like(x[0])
             fwhm = ensure_list(self.fwhm or [0], len(x))
             for k in range(len(x)):
+                muk, sigmak = getitem(mu[k]), getitem(sigma[k])
                 if self.background is not None and k == self.background:
                     continue
                 y1 = torch.randn(x.shape[1:], **backend)
                 if fwhm[k]:
                     y1 = smoothnd(y1, fwhm=fwhm[k])
-                y += x[k] * y1.mul_(sigma[k]).add_(mu[k])
+                y += y1.mul_(sigmak).add_(muk).mul_(x[k])
             y = y[None]
         else:
             backend = dict(dtype=self.dtype or torch.get_default_dtype(),
@@ -208,17 +201,18 @@ class GaussianMixtureTransform(Transform):
             nk = x.max().item()+1
             fwhm = ensure_list(self.fwhm or [0], nk)
             for k in range(nk):
+                muk, sigmak = getitem(mu[k]), getitem(sigma[k])
                 if self.background is not None and k == self.background:
                     continue
                 if fwhm[k]:
                     y1 = torch.randn(x.shape[1:], **backend)
                     y1 = smoothnd(y1, fwhm=fwhm[k])
-                    y += (x == k) * y1.mul_(sigma[k]).add_(mu[k])
+                    y += y1.mul_(sigmak).add_(muk).masked_fill_(x == k, 0)
                 else:
                     mask = x == k
                     numel = mask.sum()
                     if numel:
-                        y[mask] = torch.randn(numel, **backend).mul_(sigma[k]).add_(mu[k])
+                        y[mask] = torch.randn(numel, **backend).mul_(sigmak).add_(muk)
         return y
 
 

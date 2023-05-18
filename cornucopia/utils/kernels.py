@@ -16,7 +16,7 @@ def make_separable(ker, channels):
         ker (torch.tensor): Multi-channel group kernel (1, 1, D, H, W).
 
     """
-    ndim = torch.as_tensor(ker.shape).numel()
+    ndim = ker.ndim
     repetitions = (channels,) + (1,)*(ndim-1)
     ker = ker.repeat(repetitions)
     return ker
@@ -236,7 +236,7 @@ def smoothing_kernel(types='gauss', fwhm=1, basis=1, x=None, sep=True,
     # Convert to tensors
     fwhm = torch.as_tensor(fwhm, dtype=dtype, device=device).flatten()
     if not fwhm.is_floating_point():
-        fwhm = fwhm.type(torch.float)
+        fwhm = fwhm.float()
     dtype = fwhm.dtype
     device = fwhm.device
     return_tuple = True

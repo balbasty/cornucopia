@@ -1,36 +1,7 @@
 import torch
-from .py import ensure_list
-
-
-def _bound_circular(i, n):
-    return i % n
-
-
-def _bound_replicate(i, n):
-    return i.clamp(min=0, max=n-1)
-
-
-def _bound_reflect2(i, n):
-    n2 = n*2
-    pre = (i < 0)
-    i[pre] = n2 - 1 - ((-i[pre]-1) % n2)
-    i[~pre] = (i[~pre] % n2)
-    post = (i >= n)
-    i[post] = n2 - i[post] - 1
-    return i
-
-
-def _bound_reflect1(i, n):
-    if n == 1:
-        return torch.zeros(i.size(), dtype=i.dtype, device=i.device)
-    else:
-        n2 = (n-1)*2
-        pre = (i < 0)
-        i[pre] = -i[pre]
-        i = i % n2
-        post = (i >= n)
-        i[post] = n2 - i[post]
-        return i
+from .py import prod
+from .jit import sub2ind_list, meshgrid_list_ij
+from . import bounds
 
 
 def ensure_shape(inp, shape, mode='constant', value=0, side='post'):
@@ -55,8 +26,7 @@ def ensure_shape(inp, shape, mode='constant', value=0, side='post'):
         Padded tensor with shape `shape`
 
     """
-    inp = torch.as_tensor(inp)
-    shape = ensure_list(shape)
+    shape = list(shape)
     shape = shape + [1] * max(0, inp.dim() - len(shape))
     if inp.dim() < len(shape):
         inp = inp.reshape(inp.shape + (1,) * max(0, len(shape) - inp.dim()))
@@ -85,30 +55,6 @@ def ensure_shape(inp, shape, mode='constant', value=0, side='post'):
     inp = pad(inp, tuple(pad_size), mode=mode, value=value, side=side)
 
     return inp
-
-
-_bounds = {
-    'circular': _bound_circular,
-    'replicate': _bound_replicate,
-    'reflect': _bound_reflect1,
-    'reflect1': _bound_reflect1,
-    'reflect2': _bound_reflect2,
-    }
-_bounds['dft'] = _bounds['circular']
-_bounds['dct2'] = _bounds['reflect2']
-_bounds['dct1'] = _bounds['reflect1']
-
-
-_modifiers = {
-    'circular': lambda x, i, n: x,
-    'replicate': lambda x, i, n: x,
-    'reflect': lambda x, i, n: x,
-    'reflect1': lambda x, i, n: x,
-    'reflect2': lambda x, i, n: x,
-    }
-_modifiers['dft'] = _modifiers['circular']
-_modifiers['dct2'] = _modifiers['reflect2']
-_modifiers['dct1'] = _modifiers['reflect1']
 
 
 def pad(inp, padsize, mode='constant', value=0, side=None):
@@ -158,9 +104,9 @@ def pad(inp, padsize, mode='constant', value=0, side=None):
 
     """
     # Argument checking
-    if mode not in tuple(_bounds.keys()) + ('constant', 'zero', 'zeros'):
-        raise ValueError('Padding mode should be one of {}. Got {}.'
-                         .format(tuple(_bounds.keys()) + ('constant',), mode))
+    if mode not in bounds.all_bounds:
+        raise ValueError(f'Padding mode should be one of {bounds.all_bounds}. '
+                         f'Got {mode}.')
     padsize = tuple(padsize)
     if not side:
         if len(padsize) % 2:
@@ -185,23 +131,16 @@ def pad(inp, padsize, mode='constant', value=0, side=None):
     if inp.dim() != len(padpre) or inp.dim() != len(padpost):
         raise ValueError('Padding length too large')
 
-    padpre = torch.as_tensor(padpre)
-    padpost = torch.as_tensor(padpost)
-
     # Pad
-    if mode in ('zero', 'zeros'):
-        mode, value = ('constant', 0)
-    if mode == 'constant':
+    mode = bounds.to_nitorch(mode)
+    if mode == 'zero':
         return _pad_constant(inp, padpre, padpost, value)
     else:
-        bound = _bounds[mode]
-        modifier = _modifiers[mode]
-        return _pad_bound(inp, padpre, padpost, bound, modifier)
+        bound = getattr(bounds, mode + '_')
+        return _pad_bound(inp, padpre, padpost, bound)
 
 
 def _pad_constant(inp, padpre, padpost, value):
-    padpre = padpre.tolist()
-    padpost = padpost.tolist()
     new_shape = [s + pre + post
                  for s, pre, post in zip(inp.shape, padpre, padpost)]
     out = inp.new_full(new_shape, value)
@@ -210,13 +149,21 @@ def _pad_constant(inp, padpre, padpost, value):
     return out
 
 
-def _pad_bound(inp, padpre, padpost, bound, modifier):
-    begin = -padpre
-    end = tuple(d+p for d, p in zip(inp.size(), padpost))
-    idx = tuple(range(b, e) for (b, e) in zip(begin, end))
-    idx = tuple(bound(torch.as_tensor(i, device=inp.device),
-                      torch.as_tensor(n, device=inp.device))
-                for (i, n) in zip(idx, inp.shape))
-    for d in range(inp.dim()):
-        inp = inp.index_select(d, idx[d])
-    return inp
+def _pad_bound(inp, padpre, padpost, bound):
+    begin = list(map(lambda x: -x, padpre))
+    end = tuple(d+p for d, p in zip(inp.shape, padpost))
+
+    grid = [torch.arange(b, e, device=inp.device) for (b, e) in zip(begin, end)]
+    mult = [None] * inp.dim()
+    for d, n in enumerate(inp.shape):
+        grid[d], mult[d] = bound(grid[d], n)
+    grid = list(meshgrid_list_ij(grid))
+    if any(map(torch.is_tensor, mult)):
+        mult = meshgrid_list_ij(mult)
+    mult = prod(mult)
+    grid = sub2ind_list(grid, inp.shape)
+
+    out = inp.flatten()[grid]
+    if torch.is_tensor(mult) or mult != 1:
+        out *= mult
+    return out
