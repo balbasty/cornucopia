@@ -67,7 +67,7 @@ class MultFieldTransform(BaseFieldTransform):
 class RandomMultFieldTransform(RandomizedTransform):
     """Random multiplicative bias field transform"""
 
-    def __init__(self, shape=8, vmax=2, order=3, shared=False):
+    def __init__(self, shape=8, vmax=1, order=3, shared=False):
         """
         Parameters
         ----------

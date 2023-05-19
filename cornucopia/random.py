@@ -4,6 +4,7 @@ __all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal',
 import random
 import copy
 import torch
+from numbers import Number
 from .utils.py import ensure_list
 
 
@@ -82,6 +83,54 @@ class Sampler:
 
         """
         raise NotImplementedError
+
+    def __mul__(self, other):
+        if isinstance(other, Sampler):
+            return ProductOfSamplers(self, other)
+        else:
+            return MultipliedSampler(self, other)
+
+    def __rmul__(self, other):
+        if isinstance(other, Sampler):
+            return ProductOfSamplers(other, self)
+        else:
+            return MultipliedSampler(self, other)
+
+    def __truediv__(self, other):
+        if isinstance(other, Sampler):
+            return RatioOfSamplers(self, other)
+        else:
+            return DividedSampler(self, other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, Sampler):
+            return RatioOfSamplers(other, self)
+        else:
+            return DividingSampler(self, other)
+
+    def __add__(self, other):
+        if isinstance(other, Sampler):
+            return SumOfSamplers(self, other)
+        else:
+            return ShiftedSampler(self, other)
+
+    def __radd__(self, other):
+        if isinstance(other, Sampler):
+            return SumOfSamplers(other, self)
+        else:
+            return ShiftedSampler(self, other)
+
+    def __sub__(self, other):
+        if isinstance(other, Sampler):
+            return DifferenceOfSamplers(self, other)
+        else:
+            return ShiftedSampler(self, -other)
+
+    def __rsub__(self, other):
+        if isinstance(other, Sampler):
+            return DifferenceOfSamplers(other, self)
+        else:
+            return ReverseShiftedSampler(self, other)
 
 
 class Fixed(Sampler):
@@ -249,6 +298,153 @@ class LogNormal(Sampler):
         if isinstance(n, (list, tuple)):
             return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu).exp_()
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
+
+
+class TransformedSampler(Sampler):
+    """A random variable that gets transformed by a deterministic function"""
+
+    def __init__(self, sampler, transform):
+        """
+
+        Parameters
+        ----------
+        sampler : Sampler
+            A random sampler
+        transform : callable(float) -> float
+            A value-wise transformation
+        """
+        super().__init__(sampler=sampler, transform=transform)
+
+    def __call__(self, n=None, **backend):
+        out = self.sampler(n, **backend)
+        if torch.is_tensor(out) or isinstance(out, Number):
+            return self.transform(out)
+        else:
+            return list(map(self.transform, out))
+
+
+class CombinedSamplers(Sampler):
+    """Random variables that get combined by a deterministic function"""
+
+    def __init__(self, samplers, transform):
+        """
+
+        Parameters
+        ----------
+        samplers : list[Sampler]
+            A random sampler
+        transform : callable(*float) -> float
+            A value-wise transformation
+        """
+        super().__init__(samplers=samplers, transform=transform)
+
+    def __call__(self, n=None, **backend):
+        out = [sampler(n, **backend) for sampler in self.samplers]
+        if isinstance(out[0], list):
+            return list(map(lambda x: self.transform(*x), out))
+        else:
+            self.transform(*out)
+
+
+class MultipliedSampler(TransformedSampler):
+
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x * self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class DividedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x / self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class DividingSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return self.value / x
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ShiftedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x + self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ReverseShiftedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return self.value - x
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ProductOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x * y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class RatioOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x / y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class SumOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x + y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class DifferenceOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x - y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
 
 
 def sym_range(x):

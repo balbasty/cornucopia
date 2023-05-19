@@ -12,7 +12,7 @@ from .random import Uniform, RandInt, upper_range
 class GaussianNoiseTransform(Transform):
     """Additive Gaussian noise"""
 
-    def __init__(self, sigma=0.1, shared=False):
+    def __init__(self, sigma=0.1, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -22,7 +22,7 @@ class GaussianNoiseTransform(Transform):
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
 
     def get_parameters(self, x):
@@ -35,7 +35,7 @@ class GaussianNoiseTransform(Transform):
 class RandomGaussianNoiseTransform(RandomizedTransform):
     """Additive Gaussian noise with random standard deviation"""
 
-    def __init__(self, sigma=0.1, shared=False):
+    def __init__(self, sigma=0.1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -45,7 +45,8 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
             Use the same sd for all channels/images
         """
         super().__init__(GaussianNoiseTransform,
-                         dict(sigma=Uniform.make(upper_range(sigma))),
+                         dict(sigma=Uniform.make(upper_range(sigma)),
+                              **kwargs),
                          shared=shared)
 
 
@@ -55,7 +56,7 @@ class ChiNoiseTransform(Transform):
     (Rician is a special case with nb_channels = 2)
     """
 
-    def __init__(self, sigma=0.1, nb_channels=2, shared=False):
+    def __init__(self, sigma=0.1, nb_channels=2, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -66,7 +67,7 @@ class ChiNoiseTransform(Transform):
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
         self.nb_channels = nb_channels
 
@@ -84,7 +85,7 @@ class ChiNoiseTransform(Transform):
 class RandomChiNoiseTransform(RandomizedTransform):
     """Additive Chi noise with random standard deviation and channels"""
 
-    def __init__(self, sigma=0.1, nb_channels=8, shared=False):
+    def __init__(self, sigma=0.1, nb_channels=8, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -97,13 +98,14 @@ class RandomChiNoiseTransform(RandomizedTransform):
         """
         super().__init__(ChiNoiseTransform,
                          dict(sigma=Uniform.make(upper_range(sigma)),
-                              nb_channels=RandInt.make(upper_range(nb_channels, 2))),
+                              nb_channels=RandInt.make(upper_range(nb_channels, 2)),
+                              **kwargs),
                          shared=shared)
 
 
 class GFactorTransform(Transform):
 
-    def __init__(self, noise, shape=5, vmin=1, vmax=4):
+    def __init__(self, noise, shape=5, vmin=1, vmax=4, *, returns=None, **kwargs):
         """
 
         Parameters
@@ -117,7 +119,7 @@ class GFactorTransform(Transform):
         vmax : float
             Maximum g-factor
         """
-        super().__init__()
+        super().__init__(returns=returns, **kwargs)
         self.noise = noise
         self.gfactor = MultFieldTransform(shape, vmin=vmin, vmax=vmax)
 
@@ -136,7 +138,7 @@ class GFactorTransform(Transform):
 class GammaNoiseTransform(Transform):
     """Multiplicative Gamma noise"""
 
-    def __init__(self, mean=1, sigma=0.1, shared=False):
+    def __init__(self, mean=1, sigma=0.1, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -148,7 +150,7 @@ class GammaNoiseTransform(Transform):
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.mean = mean
         self.sigma = sigma
 
@@ -167,7 +169,7 @@ class GammaNoiseTransform(Transform):
 class RandomGammaNoiseTransform(RandomizedTransform):
     """Multiplicative Gamma noise with random standard deviation and mean"""
 
-    def __init__(self, mean=2, sigma=0.1, shared=False):
+    def __init__(self, mean=2, sigma=0.1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -180,5 +182,6 @@ class RandomGammaNoiseTransform(RandomizedTransform):
         """
         super().__init__(GammaNoiseTransform,
                          dict(mean=Uniform.make(upper_range(mean)),
-                              sigma=Uniform.make(upper_range(sigma))),
+                              sigma=Uniform.make(upper_range(sigma)),
+                              **kwargs),
                          shared=shared)

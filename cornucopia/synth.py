@@ -76,13 +76,13 @@ References
 """
 __all__ = ['SynthFromLabelTransform', 'IntensityTransform']
 
-from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform
+from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform, Kwargs
 from .labels import RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
-from .intensity import MultFieldTransform, GammaTransform, QuantileTransform
-from .psf import SmoothTransform, LowResSliceTransform, LowResTransform
-from .noise import ChiNoiseTransform, GFactorTransform
+from .intensity import RandomMultFieldTransform, RandomGammaTransform, QuantileTransform
+from .psf import RandomSmoothTransform, RandomLowResSliceTransform, RandomLowResTransform
+from .noise import RandomChiNoiseTransform, GFactorTransform
 from .geometric import RandomAffineElasticTransform
-from .random import Uniform, RandInt, Fixed
+from .random import Sampler, Uniform, RandInt, Fixed, LogNormal
 from .io import LoadTransform
 import random as pyrandom
 
@@ -120,39 +120,66 @@ class IntensityTransform(SequentialTransform):
         """
         Parameters
         ----------
-        bias : int
+        bias : int or Sampler or False
             Upper bound for the number of control points of the bias field
-        gamma : float
-            Upper bound for the exponent of the Gamma transform
-        motion_fwhm : float
+        gamma : float or Sampler or False
+            Standard deviation for the exponent of the Gamma transform
+        motion_fwhm : float or Sampler or False
             Upper bound of the FWHM of the global (PSF/motion) smoothing kernel
-        resolution : float
+        resolution : float or Sampler or False
             Upper bound for the inter-slice spacing (in voxels)
-        snr : float
+        snr : float or Sampler or False
             Lower bound for the signal-to-noise ratio
-        gfactor : int
-            Upper bound for the number of control points of the g-factor map
-        order : int
+        gfactor : int or Sampler or False
+            Upper bound for the number of control points of the g-factor map.
+            If `False`, do not use.
+        order : {1..7}
             Spline order of the bias field (1 is much faster)
         """
-        noise_sd = 255 / snr
+        steps = []
 
-        bias = RandomizedTransform(MultFieldTransform, RandInt(2, bias), dict(order=order))
-        gamma = RandomizedTransform(GammaTransform, Uniform(0, gamma))
-        smooth = RandomizedTransform(SmoothTransform, Uniform(0, motion_fwhm))
-        noise1 = RandomizedTransform(ChiNoiseTransform, Uniform(0, noise_sd))
-        noise = RandomizedTransform(GFactorTransform, [Fixed(noise1),
-                                                       RandInt(2, gfactor)])
-        lowres2d = RandomizedTransform(LowResSliceTransform,
-                                       dict(resolution=Uniform(1, resolution),
-                                            noise=Fixed(noise)))
-        lowres3d = RandomizedTransform(LowResTransform,
-                                       dict(resolution=Uniform(1, resolution),
-                                            noise=Fixed(noise)))
-        lowres = SwitchTransform([lowres2d, lowres3d])
-        rescale = QuantileTransform()
+        if bias:
+            bias = bias if isinstance(bias, Sampler) else RandInt(2, bias)
+            bias = RandomMultFieldTransform(bias, vmax=Fixed(1), order=order)
+            steps += [bias]
 
-        super().__init__([bias, gamma, smooth, lowres, rescale])
+        if gamma:
+            gamma = gamma if isinstance(gamma, Sampler) else LogNormal(0, gamma)
+            gamma = RandomGammaTransform(gamma)
+            steps += [gamma]
+
+        if motion_fwhm:
+            motion_fwhm = motion_fwhm if isinstance(motion_fwhm, Sampler) else Uniform(0, motion_fwhm)
+            smooth = RandomSmoothTransform(motion_fwhm)
+            steps += [smooth]
+
+        if snr:
+            noise_sd = 1 / snr
+            noise_sd = noise_sd if isinstance(noise_sd, Sampler) else Uniform(0, noise_sd)
+            noise1 = RandomChiNoiseTransform(noise_sd)
+            if gfactor:
+                gfactor = gfactor if isinstance(gfactor, Sampler) else RandInt(2, gfactor)
+                noise = RandomizedTransform(GFactorTransform, [Fixed(noise1), gfactor])
+            else:
+                noise = noise1
+        else:
+            noise = None
+
+        if resolution:
+            resolution = resolution if isinstance(resolution, Sampler) else Uniform(1, resolution)
+            lowres2d = RandomLowResSliceTransform(resolution, noise=noise)
+            lowres3d = RandomLowResTransform(resolution, noise=noise)
+            lowres = SwitchTransform([lowres2d, lowres3d])
+            steps += [lowres]
+        elif snr:
+            steps += [noise]
+
+        # Quantile transform
+        # Maps intensity percentiles (pmin, pmax) to intensities (vmin, vmax).
+        # If `clamp`, then clip values inside (vmin, vmax).
+        # Default: pmin=0.01, pmax=0.99, vmin=0, vmax=1, clamp=False
+        steps += [QuantileTransform()]
+        super().__init__(steps)
 
 
 class SynthFromLabelTransform(Transform):
@@ -241,32 +268,32 @@ class SynthFromLabelTransform(Transform):
 
         Other Parameters
         ----------------
-        rotation : float
+        rotation : float or Sampler or False
             Upper bound for rotations, in degree.
-        shears : float
+        shears : float or Sampler or False
             Upper bound for shears
-        zooms : float
+        zooms : float or Sampler or False
             Upper bound for zooms (about one)
-        elastic : float
+        elastic : float or Sampler or False
             Upper bound for elastic displacements, in percent of the FOV.
-        elastic_nodes : int
+        elastic_nodes : int or Sampler
             Upper bound for number of control points in the elastic field.
 
         Other Parameters
         ----------------
-        gmm_fwhm : float
+        gmm_fwhm : float or Sampler or False
             Upper bound for the FWHM of the intra-tissue smoothing kernel
-        bias : int
+        bias : int or Sampler or False
             Upper bound for the number of control points of the bias field
-        gamma : float
+        gamma : float or Sampler or False
             Upper bound for the exponent of the Gamma transform
-        motion_fwhm : float
+        motion_fwhm : float or Sampler or False
             Upper bound of the FWHM of the global (PSF/motion) smoothing kernel
-        resolution : float
+        resolution : float or Sampler or False
             Upper bound for the inter-slice spacing (in voxels)
-        snr : float
+        snr : float or Sampler or False
             Lower bound for the signal-to-noise ratio
-        gfactor : int
+        gfactor : int or Sampler or False
             Upper bound for the number of control points of the g-factor map
         """
         super().__init__(shared=False)
@@ -283,9 +310,10 @@ class SynthFromLabelTransform(Transform):
             postproc = None
         self.postproc_labels = postproc
         self.deform = RandomAffineElasticTransform(
-            elastic, elastic_nodes, order=order,
-            rotations=rotation, shears=shears, zooms=zooms, patch=patch)
-        self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
+            elastic or 0, elastic_nodes, order=order,
+            rotations=rotation or 0, shears=shears or 0,
+            zooms=zooms or 0, patch=patch)
+        self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm or 0, background=0)
         self.intensity = IntensityTransform(
             bias, gamma, motion_fwhm, resolution, snr, gfactor, order)
 
@@ -315,6 +343,6 @@ class SynthFromLabelTransform(Transform):
         img = gmm(preproc(lab))
         img = self.intensity(img)
         lab = postproc(lab)
-        return img, lab
+        return Kwargs(image=img, label=lab)
 
 

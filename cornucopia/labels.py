@@ -168,19 +168,20 @@ class GaussianMixtureTransform(Transform):
         self.dtype = dtype
 
     def get_parameters(self, x):
+        nk = len(x) if x.is_floating_point() else x.unique().numel()
         mu = self.mu
         sigma = self.sigma
         if mu is None:
-            mu = torch.rand([len(x)]).mul_(255)
+            mu = torch.rand([nk]).tolist()
         if sigma is None:
-            sigma = torch.full([len(x)], 255 / len(x))
+            sigma = [1 / nk] * nk
         return mu, sigma
 
     def apply_transform(self, x, parameters):
         mu, sigma = parameters
         getitem = lambda x: x.item() if torch.is_tensor(x) else x
 
-        if x.dtype.is_floating_point:
+        if x.is_floating_point():
             backend = dict(dtype=x.dtype, device=x.device)
             y = torch.zeros_like(x[0])
             fwhm = ensure_list(self.fwhm or [0], len(x))
@@ -197,7 +198,6 @@ class GaussianMixtureTransform(Transform):
             backend = dict(dtype=self.dtype or torch.get_default_dtype(),
                            device=x.device)
             y = torch.zeros_like(x, **backend)
-            mu, sigma = mu.to(y), sigma.to(y)
             nk = x.max().item()+1
             fwhm = ensure_list(self.fwhm or [0], nk)
             for k in range(nk):
@@ -205,7 +205,7 @@ class GaussianMixtureTransform(Transform):
                 if self.background is not None and k == self.background:
                     continue
                 if fwhm[k]:
-                    y1 = torch.randn(x.shape[1:], **backend)
+                    y1 = torch.randn(x.shape, **backend)
                     y1 = smoothnd(y1, fwhm=fwhm[k])
                     y += y1.mul_(sigmak).add_(muk).masked_fill_(x == k, 0)
                 else:
@@ -221,7 +221,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=255, sigma=16, fwhm=2, background=None, shared='channels'):
+    def __init__(self, mu=1, sigma=0.6, fwhm=2, background=None, shared='channels'):
         """
 
         Parameters
