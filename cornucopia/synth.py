@@ -159,7 +159,10 @@ class IntensityTransform(SequentialTransform):
             noise1 = RandomChiNoiseTransform(noise_sd)
             if gfactor:
                 gfactor = gfactor if isinstance(gfactor, Sampler) else RandInt(2, gfactor)
-                noise = RandomizedTransform(GFactorTransform, [Fixed(noise1), gfactor])
+                noise = RandomizedTransform(
+                    GFactorTransform,
+                    dict(noise=Fixed(noise1), shape=gfactor),
+                )
             else:
                 noise = noise1
         else:

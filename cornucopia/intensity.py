@@ -8,15 +8,15 @@ __all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
 import torch
 from torch.nn.functional import interpolate
 import interpol
-from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform, RandInt, Fixed, \
-                    sym_range, upper_range, lower_range
+from .base import Transform, RandomizedTransform, prepare_output
+from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list
 
 
 class BaseFieldTransform(Transform):
 
-    def __init__(self, shape=5, vmin=0, vmax=1, order=3, shared=False):
+    def __init__(self, shape=5, vmin=0, vmax=1, order=3,
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -29,10 +29,12 @@ class BaseFieldTransform(Transform):
             Maximum value
         order : int
             Spline order
+        returns : [list or dict of] {'input', 'output', 'field'}
+            Which tensor(s) to return
         shared : bool
             Apply the same field to all channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.shape = shape
         self.vmax = vmax
         self.vmin = vmin
@@ -61,7 +63,9 @@ class MultFieldTransform(BaseFieldTransform):
     """Smooth multiplicative (bias) field"""
 
     def apply_transform(self, x, parameters):
-        return x * parameters
+        y = x * parameters
+        return prepare_output(dict(input=x, output=y, field=parameters),
+                              self.returns)
 
 
 class RandomMultFieldTransform(RandomizedTransform):
@@ -80,8 +84,8 @@ class RandomMultFieldTransform(RandomizedTransform):
         shared : bool
             Whether to share random parameters across channels
         """
-        kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
-                      shape=RandInt.make(upper_range(shape, 2)),
+        kwargs = dict(vmax=Uniform.make(make_range(0, vmax)),
+                      shape=RandInt.make(make_range(2, shape)),
                       order=Fixed.make(order))
         super().__init__(MultFieldTransform, kwargs, shared=shared)
 
@@ -90,13 +94,16 @@ class AddFieldTransform(BaseFieldTransform):
     """Smooth additive (bias) field"""
 
     def apply_transform(self, x, parameters):
-        return x + parameters
+        y = x + parameters
+        return prepare_output(dict(input=x, output=y, field=parameters),
+                              self.returns)
 
 
 class RandomAddFieldTransform(RandomizedTransform):
     """Random additive bias field transform"""
 
-    def __init__(self, shape=8, vmin=-1, vmax=1, order=3, shared=False):
+    def __init__(self, shape=8, vmin=-1, vmax=1, order=3,
+                 *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -111,17 +118,18 @@ class RandomAddFieldTransform(RandomizedTransform):
         shared : bool
             Whether to share random parameters across channels
         """
-        kwargs = dict(vmax=Uniform.make(upper_range(vmax)),
-                      vmin=Uniform.make(lower_range(vmin)),
-                      shape=RandInt.make(upper_range(shape, 2)),
-                      order=Fixed.make(order))
+        kwargs = dict(vmax=Uniform.make(make_range(0, vmax)),
+                      vmin=Uniform.make(make_range(vmin, 0)),
+                      shape=RandInt.make(make_range(2, shape)),
+                      order=Fixed.make(order),
+                      **kwargs)
         super().__init__(AddFieldTransform, kwargs, shared=shared)
 
 
 class GlobalMultTransform(Transform):
     """Global multiplicative transform"""
 
-    def __init__(self, value=1, shared=False):
+    def __init__(self, value=1, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -131,11 +139,14 @@ class GlobalMultTransform(Transform):
         shared : bool
             Apply the same field to all channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.value = value
 
     def apply_transform(self, x, parameters):
-        return x * self.value
+        y = x * self.value
+        value = x.new_full([1]*x.ndim, self.value)
+        return prepare_output(dict(input=x, output=y, value=value),
+                              self.returns)
 
 
 class RandomGlobalMultTransform(RandomizedTransform):
@@ -143,7 +154,7 @@ class RandomGlobalMultTransform(RandomizedTransform):
     Random multiplicative transform.
     """
 
-    def __init__(self, value=(0.5, 2), shared=True):
+    def __init__(self, value=(0.5, 2), *, shared=True, **kwargs):
         """
 
         Parameters
@@ -153,16 +164,8 @@ class RandomGlobalMultTransform(RandomizedTransform):
         shared : bool
             Apply same transform to all images/channels
         """
-        def to_range(value):
-            if not isinstance(value, Sampler):
-                if not isinstance(value, (list, tuple)):
-                    value = (0, value)
-                value = tuple(value)
-            return value
-
-        super().__init__(GlobalMultTransform,
-                         Uniform.make(to_range(value)),
-                         shared=shared)
+        kwargs['value'] = Uniform.make(make_range(0, value))
+        super().__init__(GlobalMultTransform, kwargs, shared=shared)
 
 
 class GlobalAdditiveTransform(Transform):
@@ -182,7 +185,10 @@ class GlobalAdditiveTransform(Transform):
         self.value = value
 
     def apply_transform(self, x, parameters):
-        return x + self.value
+        y = x + self.value
+        value = x.new_full([1]*x.ndim, self.value)
+        return prepare_output(dict(input=x, output=y, value=value),
+                              self.returns)
 
 
 class RandomGlobalAdditiveTransform(RandomizedTransform):
@@ -200,15 +206,8 @@ class RandomGlobalAdditiveTransform(RandomizedTransform):
         shared : bool
             Apply same transform to all images/channels
         """
-        def to_range(value):
-            if not isinstance(value, Sampler):
-                if not isinstance(value, (list, tuple)):
-                    value = (-value, value)
-                value = tuple(value)
-            return value
-
         super().__init__(GlobalAdditiveTransform,
-                         Uniform.make(to_range(value)),
+                         Uniform.make(make_range(value)),
                          shared=shared)
 
 
@@ -220,7 +219,8 @@ class GammaTransform(Transform):
     .. https://en.wikipedia.org/wiki/Gamma_correction
     """
 
-    def __init__(self, gamma=1, vmin=None, vmax=None, shared=False):
+    def __init__(self, gamma=1, vmin=None, vmax=None,
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -231,10 +231,12 @@ class GammaTransform(Transform):
             Value to use as the minimum (default: x.min())
         vmax : float
             Value to use as the maximum (default: x.max())
+        returns : [list or dict of] {'input', 'output', 'vmin', 'vmax', 'gamma'}
+            Which tensors to return
         shared : bool
             Use the same vmin/vmax for all channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.gamma = gamma
         self.vmin = vmin
         self.vmax = vmax
@@ -258,11 +260,20 @@ class GammaTransform(Transform):
     def apply_transform(self, x, parameters):
         vmin, vmax = parameters
 
-        x = x.sub(vmin).div_(vmax - vmin)
-        x = x.pow_(self.gamma)
-        x = x.mul_(vmax - vmin).add_(vmin)
+        y = x.sub(vmin).div_(vmax - vmin)
+        y = y.pow_(self.gamma)
+        y = y.mul_(vmax - vmin).add_(vmin)
 
-        return x
+        vmin = torch.as_tensor(vmin, dtype=x.dtype, device=x.device)
+        vmax = torch.as_tensor(vmax, dtype=x.dtype, device=x.device)
+        gamma = torch.as_tensor(vmax, dtype=x.dtype, device=x.device)
+        vmin = vmin.reshape([-1] + [1] * (x.ndim-1))
+        vmax = vmin.reshape([-1] + [1] * (x.ndim-1))
+        gamma = gamma.reshape([-1] + [1] * (x.ndim-1))
+
+        return prepare_output(
+            dict(input=x, output=y, vmin=vmin, vmax=vmax, gamma=gamma),
+            self.returns)
 
 
 class RandomGammaTransform(RandomizedTransform):
@@ -289,7 +300,7 @@ class ZTransform(Transform):
     Z-transform the data -> zero mean, unit standard deviation
     """
 
-    def __init__(self, mu=0, sigma=1, shared=False):
+    def __init__(self, mu=0, sigma=1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -300,7 +311,7 @@ class ZTransform(Transform):
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(shared)
+        super().__init__(shared=shared, **kwargs)
         self.mu = mu
         self.sigma = sigma
 
@@ -323,7 +334,7 @@ class QuantileTransform(Transform):
     """Match lower and upper quantiles to (0, 1)"""
 
     def __init__(self, pmin=0.01, pmax=0.99, vmin=0, vmax=1,
-                 clamp=False, shared=False):
+                 clamp=False, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -339,7 +350,7 @@ class QuantileTransform(Transform):
         clamp : bool
             Clamp values outside (vmin, vmax)
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.pmin = pmin
         self.pmax = pmax
         self.vmin = vmin

@@ -29,7 +29,7 @@ class ContrastMixtureTransform(Transform):
 
     """
 
-    def __init__(self, nk=16, keep_background=True, shared='channels'):
+    def __init__(self, nk=16, keep_background=True, *, shared='channels', **kwargs):
         """
 
         Parameters
@@ -40,7 +40,7 @@ class ContrastMixtureTransform(Transform):
             Do not change background mean/cov.
             The background class is the class with minimum mean value.
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.keep_background = keep_background
         self.nk = nk
 
@@ -115,7 +115,7 @@ class ContrastLookupTransform(Transform):
     Segment intensities into equidistant bins and change their mean value.
     """
 
-    def __init__(self, nk=16, keep_background=True, shared=False):
+    def __init__(self, nk=16, keep_background=True, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -126,7 +126,7 @@ class ContrastLookupTransform(Transform):
             Do not change background mean/cov.
             The background class is the class with minimum mean value.
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.keep_background = keep_background
         self.nk = nk
 

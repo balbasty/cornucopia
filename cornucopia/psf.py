@@ -5,7 +5,7 @@ __all__ = ['SmoothTransform', 'RandomSmoothTransform',
 from .base import Transform, RandomizedTransform, prepare_output
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from .random import Uniform, RandInt, Fixed, upper_range, lower_range
+from .random import Uniform, RandInt, Fixed, make_range
 from torch.nn.functional import interpolate
 import math
 
@@ -13,7 +13,7 @@ import math
 class SmoothTransform(Transform):
     """Apply Gaussian smoothing"""
 
-    def __init__(self, fwhm=1, *, returns=None):
+    def __init__(self, fwhm=1, **kwargs):
         """
 
         Parameters
@@ -23,18 +23,17 @@ class SmoothTransform(Transform):
         returns : [list or dict of] {'input', 'output'}, default='output'
             Which tensors to return.
         """
-        super().__init__(returns=returns)
+        super().__init__(**kwargs)
         self.fwhm = fwhm
 
     def apply_transform(self, x, parameters):
-        y = smoothnd(x, fwhm=ensure_list(self.fwhm, x.dim()-1))
-        return prepare_output(dict(input=x, output=y), self.returns)
+        return smoothnd(x, fwhm=ensure_list(self.fwhm, x.dim()-1))
 
 
 class RandomSmoothTransform(RandomizedTransform):
     """Apply Gaussian smoothing with random FWHM"""
 
-    def __init__(self, fwhm=2, *, returns=None, shared=False):
+    def __init__(self, fwhm=2, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -47,8 +46,8 @@ class RandomSmoothTransform(RandomizedTransform):
             Use the same fwhm for all channels/tensors
         """
         super().__init__(SmoothTransform,
-                         dict(fwhm=Uniform.make(upper_range(fwhm)),
-                              returns=returns),
+                         dict(fwhm=Uniform.make(make_range(0, fwhm)),
+                              **kwargs),
                          shared=shared)
 
 
@@ -58,7 +57,7 @@ class LowResSliceTransform(Transform):
     """
 
     def __init__(self, resolution=3, thickness=0.8, axis=-1, noise=None,
-                 *, returns=None):
+                 **kwargs):
         """
 
         Parameters
@@ -74,7 +73,7 @@ class LowResSliceTransform(Transform):
         returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
             Which tensors to return.
         """
-        super().__init__(returns=returns)
+        super().__init__(**kwargs)
         self.resolution = resolution
         self.noise = noise
         self.axis = axis
@@ -115,7 +114,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
     """Random low-resolution slice direction, with Gaussian profile"""
 
     def __init__(self, resolution=3, thickness=0.1, axis=None, noise=None,
-                 *, returns=None, shared=False):
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -136,28 +135,28 @@ class RandomLowResSliceTransform(RandomizedTransform):
             Use the same resolution for all channels/tensors
         """
         super().__init__(RandomLowResSliceTransform,
-                         dict(resolution=Uniform.make(upper_range(resolution, min=1)),
-                              thickness=Uniform.make(lower_range(thickness, 1)),
+                         dict(resolution=Uniform.make(make_range(1, resolution)),
+                              thickness=Uniform.make(make_range(thickness, 1)),
                               axis=Fixed.make(axis),
                               noise=noise,
-                              returns=returns),
+                              **kwargs),
                          shared=shared)
 
     def get_parameters(self, x):
-        resolution = self.sample['resolution']()
-        thickness = self.sample['thickness']()
-        axis = self.sample['axis']()
-        noise = self.sample['noise']
-        returns = self.sample['returns']
-        if axis is None:
-            axis = -(RandInt(1, x.dim()-1)())
-        return LowResSliceTransform(resolution, thickness, axis, noise, returns)
+        if self.sample['axis'] is None:
+            sample = self.sample
+            self.sample = dict(sample)
+            self.sample['axis'] = RandInt(-x.dim(), 1)
+            out = super().get_parameters(x)
+            self.sample = sample
+            return out
+        return super().get_parameters(x)
 
 
 class LowResTransform(Transform):
     """Model a lower-resolution image"""
 
-    def __init__(self, resolution=2, noise=None, *, returns=None):
+    def __init__(self, resolution=2, noise=None, **kwargs):
         """
 
         Parameters
@@ -169,7 +168,7 @@ class LowResTransform(Transform):
         returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
             Which tensors to return.
         """
-        super().__init__(returns=returns)
+        super().__init__(**kwargs)
         self.resolution = resolution
         self.noise = noise
 
@@ -203,7 +202,7 @@ class LowResTransform(Transform):
 class RandomLowResTransform(RandomizedTransform):
     """Random lower-resolution image"""
 
-    def __init__(self, resolution=2, noise=None, *, returns=None, shared=False):
+    def __init__(self, resolution=2, noise=None, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -218,7 +217,7 @@ class RandomLowResTransform(RandomizedTransform):
             Use the same resolution for all channels/tensors
         """
         super().__init__(LowResTransform,
-                         dict(resolution=Uniform.make(upper_range(resolution, min=1)),
+                         dict(resolution=Uniform.make(make_range(1, resolution)),
                               noise=noise,
-                              returns=returns),
+                              **kwargs),
                          shared=shared)
