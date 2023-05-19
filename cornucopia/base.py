@@ -8,6 +8,7 @@ import torch
 from torch import nn
 import random
 from .utils.py import ensure_list, cumsum
+from .random import Sampler
 
 
 def _get_first_element(x):
@@ -35,9 +36,9 @@ def _recursive_cat(x, **kwargs):
         if isinstance(x[0], (list, tuple)):
             return type(x[0])(_rec(*x1) for x1 in zip(*x))
         if hasattr(x[0], 'items'):
-            return {k: _rec(*x2)
-                    for k in x[0].keys()
-                    for x2 in zip(x1[k] for x1 in x)}
+            return type(x[0])(**{k: _rec(*x2)
+                                 for k in x[0].keys()
+                                 for x2 in zip(x1[k] for x1 in x)})
         raise TypeError(f'What should I do with a {type(x[0])}?')
     return _rec(*x)
 
@@ -71,6 +72,13 @@ class ArgsAndKwargs(Arguments):
             yield a
         for v in self.kwargs:
             yield v
+
+
+class Returned:
+    """Internal object used to mark that this is an object returned
+    by `transform_tensor` at the most nested level"""
+    def __init__(self, obj):
+        self.obj = obj
 
 
 class include:
@@ -188,22 +196,88 @@ class Transform(nn.Module):
 
     """
 
-    def __init__(self, shared=False):
+    def __init__(self, *, returns=None, append=False, shared=False):
         """
 
         Parameters
         ----------
+        returns : [list or dict of] str
+            Which tensors to return.
+            Most transforms accept `'input'` and `'output'` as valid
+            returns.
+        append : bool
+            Append the (structure of) returned tensors to the parent
+            structure.
         shared : bool or 'channels' or 'tensors'
 
             - If `True`: shared across tensors and channels
-            - If `channels`: shared across channels
-            - If `tensors`: shared across tensors
+            - If `'channels'`: shared across channels
+            - If `'tensors'`: shared across tensors
             - If `False`: independent across tensors and channels
         """
         super().__init__()
+        self.returns = returns
+        self.append = append
         self.shared = shared
         self._include = None
         self._exclude = tuple()
+
+    def _apply_list(self, x, forward):
+        """Apply forward pass to elements of a list"""
+        y = []
+        for elem in x:
+            elem = forward(elem)
+            if isinstance(elem, Returned):
+                elem = elem.obj
+                if self.append:
+                    if isinstance(elem, dict):
+                        y.extend(elem.values())
+                        continue
+                    elif isinstance(elem, (list, tuple)):
+                        y.extend(elem)
+                        continue
+            y.append(elem)
+        print(y)
+        return type(x)(y)
+
+    def _get_valid_keys(self, x):
+        valid_keys = x.keys()
+        if self._include is not None:
+            valid_keys = [k for k in valid_keys if k in self._include]
+        if self._exclude:
+            valid_keys = [k for k in valid_keys if k not in self._exclude]
+        return valid_keys
+
+    def _apply_dict(self, x, forward):
+        """Apply forward pass to elements of a dict"""
+        valid_keys = self._get_valid_keys(x)
+        y = {key: value for key, value in x.items() if key not in valid_keys}
+        for key, value in x.items():
+            if key not in valid_keys:
+                continue
+            value = forward(value)
+            if isinstance(value, Returned):
+                value = value.obj
+                if self.append:
+                    if isinstance(y, dict) and isinstance(value, dict):
+                        y.update(value)
+                        continue
+                    elif isinstance(y, list) and isinstance(value, dict):
+                        y.extend(value.values())
+                        continue
+                    elif isinstance(y, dict):
+                        y = list(y.values())
+                        if isinstance(value, (list, tuple)):
+                            y.extend(value)
+                            continue
+            if isinstance(y, dict):
+                y[key] = value
+            else:
+                y.append(value)
+        if isinstance(y, dict):
+            return type(x)(y)
+        else:
+            return y
 
     def forward(self, *a, **k):
         """Apply the transform recursively.
@@ -220,11 +294,16 @@ class Transform(nn.Module):
 
         """
         # DEV: this function should in general not be overloaded
+        out = self._forward(*a, **k)
+        if isinstance(out, Returned):
+            out = out.obj
+        return out
 
+    def _forward(self, *a, **k):
         if k:
-            return self.forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
+            return self._forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
         elif len(a) > 1:
-            return self.forward(Args(a))
+            return self._forward(Args(a))
         elif not a:
             return None
 
@@ -245,26 +324,36 @@ class Transform(nn.Module):
             if torch.is_tensor(x0) and self.shared is True:
                 x0 = x0[0, None]
             theta = self.get_parameters(x0)
-            x = self.forward_with_parameters(x, parameters=theta)
+            x = self._forward_with_parameters(x, parameters=theta)
             return outtype(x)
 
         # not shared across images -> unfold
         if isinstance(x, (list, tuple)):
-            return type(x)(self(elem) for elem in x)
+            return outtype(self._apply_list(x, self._forward))
         if hasattr(x, 'items'):
-            valid_keys = x.keys()
-            if self._include is not None:
-                valid_keys = [k for k in valid_keys if k in self._include]
-            if self._exclude:
-                valid_keys = [k for k in valid_keys if k not in self._exclude]
-            return {key: self(value) if key in valid_keys else value
-                    for key, value in x.items()}
+            x = self._apply_dict(x, self._forward)
+            if not isinstance(x, dict) and outtype in (Kwargs, ArgsAndKwargs):
+                return Args(x)
+            else:
+                return x
 
         # now we're working with a single tensor (or str)
         if self.shared is False:
-            return outtype(self.transform_tensor_perchannel(x))
+            y = self.transform_tensor_perchannel(x)
         else:
-            return outtype(self.transform_tensor(x))
+            y = self.transform_tensor(x)
+        if not isinstance(y, type(self.returns)):
+            y = dict(input=x, output=y)
+            y = prepare_output(y, self.returns)
+        elif isinstance(self.returns, dict):
+            for key, target in self.returns.items():
+                if target == 'input':
+                    y[key] = x
+        elif isinstance(self.returns, (list, tuple)):
+            for i, target in enumerate(self.returns):
+                if target == 'input':
+                    y[i] = x
+        return Returned(y)
 
     def forward_with_parameters(self, x, parameters=None):
         """Apply the transform with pre-computed parameters
@@ -283,19 +372,19 @@ class Transform(nn.Module):
 
         """
         # DEV: this function should in general not be overloaded
-        if hasattr(x, 'items'):
-            valid_keys = x.keys()
-            if self._include is not None:
-                valid_keys = [k for k in valid_keys if k in self._include]
-            if self._exclude:
-                valid_keys = [k for k in valid_keys if k not in self._exclude]
-            return {key: self.forward_with_parameters(value, parameters=parameters)
-                    if key in valid_keys else value
-                    for key, value in x.items()}
+        x = self._forward_with_parameters(x, parameters)
+        if isinstance(x, Returned):
+            x = x.obj
+        return x
+
+    def _forward_with_parameters(self, x, parameters=None):
+        forward = lambda elem: self._forward_with_parameters(elem, parameters=parameters)
         if isinstance(x, (list, tuple)):
-            return type(x)(self.forward_with_parameters(elem, parameters=parameters)
-                           for elem in x)
-        return self.apply_transform(x, parameters=parameters)
+            return self._apply_list(x, forward)
+        if hasattr(x, 'items'):
+            return self._apply_dict(x, forward)
+        x = self._apply_transform(x, parameters=parameters)
+        return x
 
     def transform_tensor(self, x):
         """Apply the transform to a single tensor
@@ -315,6 +404,10 @@ class Transform(nn.Module):
         theta = self.get_parameters(x)
         return self.apply_transform(x, parameters=theta)
 
+    def _transform_tensor(self, x):
+        # This is only for internal use
+        return Returned(self.transform_tensor(x))
+
     def transform_tensor_perchannel(self, x):
         """Apply the transform to each channel of a single tensor
 
@@ -333,6 +426,10 @@ class Transform(nn.Module):
         channels = x.unbind(0)
         channels = [self.transform_tensor(c[None]) for c in channels]
         return _recursive_cat(channels, dim=0)
+
+    def _transform_tensor_perchannel(self, x):
+        # This is only for internal use
+        return Returned(self.transform_tensor_perchannel(x))
 
     def get_parameters(self, x):
         """Compute the parameters of a transform from an input tensor
@@ -369,6 +466,10 @@ class Transform(nn.Module):
         """
         raise NotImplementedError("This function should be implemented "
                                   "in Transforms that handle `shared`.")
+
+    def _apply_transform(self, x, parameters):
+        # This is only for internal use
+        return Returned(self.apply_transform(x, parameters))
 
     def transform_tensor_and_get_parameters(self, x):
         """Apply the transform to a single tensor and return its parameters
@@ -519,7 +620,7 @@ class MaybeTransform(Transform):
         ```
     """
 
-    def __init__(self, transform, prob=0.5, shared=False):
+    def __init__(self, transform, prob=0.5, *, shared=False):
         """
 
         Parameters
@@ -576,7 +677,7 @@ class SwitchTransform(Transform):
         ```
     """
 
-    def __init__(self, transforms, prob=0, shared=False):
+    def __init__(self, transforms, prob=0, *, shared=False):
         """
 
         Parameters
@@ -609,8 +710,7 @@ class SwitchTransform(Transform):
             if parameters > 1 - prob[k]:
                 with include(t, self._include), exclude(t, self._exclude):
                     return t(x)
-            else:
-                return x
+        return x
 
     def get_parameters(self, x):
         return random.random()
@@ -696,7 +796,7 @@ class RandomizedTransform(Transform):
 
     """
 
-    def __init__(self, transform, sample, ksample=None, shared=False):
+    def __init__(self, transform, sample, ksample=None, *, shared=False):
         """
 
         Parameters
@@ -716,14 +816,14 @@ class RandomizedTransform(Transform):
         args = []
         kwargs = {}
         if isinstance(self.sample, (list, tuple)):
-            args += [f() if callable(f) else f for f in self.sample]
+            args += [f() if isinstance(f, Sampler) else f for f in self.sample]
         elif hasattr(self.sample, 'items'):
-            kwargs.update({k: f() if callable(f) else f
+            kwargs.update({k: f() if isinstance(f, Sampler) else f
                            for k, f in self.sample.items()})
         else:
-            args += [self.sample() if callable(self.sample) else self.sample]
+            args += [self.sample() if isinstance(self.sample, Sampler) else self.sample]
         if self.ksample:
-            kwargs.update({k: f() if callable(f) else f
+            kwargs.update({k: f() if isinstance(f, Sampler) else f
                            for k, f in self.ksample.items()})
         return self.subtransform(*args, **kwargs)
 
@@ -1124,3 +1224,80 @@ def batch(transform):
 
     """
     return BatchedTransform(transform)
+
+
+def prepare_output(results, returns):
+    """Prepare object returned by `apply_transform`
+
+    Parameters
+    ----------
+    results : dict[str, tensor]
+        Named results
+    returns : list[str] or dict[str, str] or str
+        Structure describing which results should be returned.
+        The results will be returned in an object of the same type, with
+        the requested results associated to the same keys (if `dict`) or
+        same position (if `list`). If a `str`, the requested tensor is
+        returned.
+
+    Returns
+    -------
+    requested_results : list[tensor] or dict[str, tensor] or tensor
+
+    """
+    if returns is None:
+        if torch.is_tensor(results):
+            return results
+        else:
+            return results.get('output', None)
+    if isinstance(returns, dict):
+        return type(returns)(
+            **{key: results.get(target, None) for key, target in returns.items()})
+    elif isinstance(returns, (list, tuple)):
+        return type(returns)(
+            [results.get(target, None) for target in returns])
+    else:
+        return results.get(returns, None)
+
+
+def flatstruct(x):
+    """Flatten a nested structure of tensors"""
+
+    def _flatten(nested):
+        if isinstance(nested, dict):
+            flat = type(nested)()
+            is_dict = True
+            for key, elem in nested.items():
+                elem = _flatten(elem)
+                if isinstance(elem, dict):
+                    for subkey, subelem in elem.items():
+                        flat[subkey] = subelem
+                elif not isinstance(elem, (dict, list, tuple)):
+                    flat[key] = elem
+                else:
+                    is_dict = False
+                    flat[key] = elem
+            if not is_dict:
+                flat, flatdict = [], flat
+                for elem in flatdict.values():
+                    if not isinstance(elem, (dict, list, tuple)):
+                        flat.append(elem)
+                    else:
+                        flat.extend(elem)
+            return flat
+        elif isinstance(nested, (list, tuple)):
+            flat = []
+            for elem in nested:
+                elem = _flatten(elem)
+                if not isinstance(elem, (dict, list, tuple)):
+                    flat.append(elem)
+                elif isinstance(elem, dict):
+                    flat.extend(elem.values())
+                else:
+                    flat.extend(elem)
+            flat = type(nested)(flat)
+            return flat
+        else:
+            return nested
+
+    return _flatten(x)

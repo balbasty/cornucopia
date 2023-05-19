@@ -13,7 +13,7 @@ from .random import Uniform, RandKFrom
 class FlipTransform(Transform):
     """Flip one or more axes"""
 
-    def __init__(self, axis=None, shared=True):
+    def __init__(self, axis=None, *, shared=True, **kwargs):
         """
 
         Parameters
@@ -22,7 +22,7 @@ class FlipTransform(Transform):
             Axes to flip
         shared : bool or {'channels', 'tensors'}
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.axis = axis
 
     def apply_transform(self, x, parameters):
@@ -36,7 +36,7 @@ class FlipTransform(Transform):
 class RandomFlipTransform(RandomizedTransform):
     """Flip one or more axes"""
 
-    def __init__(self, axis=None, shared=True):
+    def __init__(self, axis=None, *, shared=True, **kwargs):
         """
 
         Parameters
@@ -59,7 +59,7 @@ class RandomFlipTransform(RandomizedTransform):
 class PatchTransform(Transform):
     """Extract a patch from the volume"""
 
-    def __init__(self, shape=64, center=0, bound='dct2', shared=True):
+    def __init__(self, shape=64, center=0, bound='dct2', *, shared=True, **kwargs):
         """
 
         Parameters
@@ -72,7 +72,7 @@ class PatchTransform(Transform):
             Boundary condition in case padding is needed
         shared : bool or {'channels', 'tensors'}
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.shape = shape
         self.center = center
         self.bound = bound
@@ -111,8 +111,8 @@ class RandomPatchTransform(Transform):
     input shape).
     """
 
-    def __init__(self, patch_size, bound='dct2', shared=True):
-        super().__init__(shared=shared)
+    def __init__(self, patch_size, bound='dct2', *, shared=True, **kwargs):
+        super().__init__(shared=shared, **kwargs)
         self.patch_size = patch_size
         self.bound = bound
 
@@ -133,7 +133,7 @@ class RandomPatchTransform(Transform):
 class CropTransform(Transform):
     """Crop a tensor by some amount"""
 
-    def __init__(self, cropping, unit='vox', side='both', shared=True):
+    def __init__(self, cropping, unit='vox', side='both', *, shared=True, **kwargs):
         """
 
         Parameters
@@ -147,7 +147,7 @@ class CropTransform(Transform):
             Side to crop
         shared
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.cropping = cropping
         self.unit = unit
         self.side = side
@@ -179,7 +179,7 @@ class PadTransform(Transform):
     """Pad a tensor by some amount"""
 
     def __init__(self, padding, unit='vox', side='both', bound='dct2', value=0,
-                 shared=True):
+                 *, shared=True, **kwargs):
         """
 
         Parameters
@@ -197,7 +197,7 @@ class PadTransform(Transform):
             Value for case `bound='const'`
         shared
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.padding = padding
         self.unit = unit
         self.side = side
@@ -226,7 +226,7 @@ class PadTransform(Transform):
 class PowerTwoTransform(Transform):
     """Pad the volume such that the tensor shape can be divided by 2**x"""
 
-    def __init__(self, exponent=1, bound='dct2', shared='channels'):
+    def __init__(self, exponent=1, bound='dct2', *, shared='channels', **kwargs):
         """
 
         Parameters
@@ -237,7 +237,7 @@ class PowerTwoTransform(Transform):
             Boundary condition for padding
         shared : bool or {'channels', 'tensors'}
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.exponent = exponent
         self.bound = bound
 

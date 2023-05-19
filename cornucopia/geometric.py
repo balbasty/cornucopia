@@ -2,15 +2,15 @@ __all__ = ['ElasticTransform', 'RandomElasticTransform',
            'AffineTransform', 'RandomAffineTransform',
            'AffineElasticTransform', 'RandomAffineElasticTransform',
            'MakeAffinePair',
-           'Slicewise3DAffineTransform', 'RandomSlicewise3DAffineTransform']
+           'ThroughSliceAffineTransform', 'RandomThroughSliceAffineTransform']
 
 import torch
 from torch.nn.functional import interpolate
 import math
 import random
 import interpol
-from .base import Transform, RandomizedTransform
-from .random import Sampler, Uniform, RandInt, Fixed
+from .base import Transform, RandomizedTransform, prepare_output
+from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils import warps
 from .utils.py import ensure_list
 
@@ -23,7 +23,7 @@ class ElasticTransform(Transform):
     """
 
     def __init__(self, dmax=0.1, unit='fov', shape=5, bound='border',
-                 steps=0, order=3, shared=True):
+                 steps=0, order=3, *, shared=True, **kwargs):
         """
 
         Parameters
@@ -40,10 +40,15 @@ class ElasticTransform(Transform):
             Number of scaling-and-squaring integration steps
         order : int
             Spline order
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'controls': The control points of the displacement field
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
             raise ValueError('Unit must be one of {"fov", "vox"} '
                              f'but got "{unit}".')
@@ -102,9 +107,11 @@ class ElasticTransform(Transform):
 
     def apply_transform(self, x, parameters):
         flow, controls = parameters
-        x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                             padding_mode=self.bound)
-        return x[:, 0]
+        y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+                             padding_mode=self.bound)[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, controls=controls),
+            self.returns)
 
 
 class RandomElasticTransform(RandomizedTransform):
@@ -113,7 +120,7 @@ class RandomElasticTransform(RandomizedTransform):
     """
 
     def __init__(self, dmax=0.15, shape=10, unit='fov', bound='border',
-                 steps=0, order=3, shared=True):
+                 steps=0, order=3, *, shared=True, **kwargs):
         """
 
         Parameters
@@ -121,32 +128,44 @@ class RandomElasticTransform(RandomizedTransform):
         dmax : Sampler or float
             Sampler or Upper bound for maximum displacement
         shape : Sampler or int
-            Sampler or Upper bounds for number of control points
+            Sampler or Upper bound for number of control points
         unit : {'fov', 'vox'}
             Unit of `dmax`
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
         order : int
             Spline order
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'controls': The control points of the displacement field
         shared : bool
             Apply same transform to all images/channels
         """
-        if not isinstance(dmax, Sampler):
-            dmax = (0, dmax)
-        if not isinstance(shape, Sampler):
-            shape = (2, shape)
+        super().__init__(
+            ElasticTransform,
+            dict(dmax=Uniform.make(make_range(0, dmax)),
+                 shape=RandInt.make(make_range(2, shape)),
+                 unit=unit,
+                 bound=bound,
+                 steps=steps,
+                 order=order,
+                 **kwargs),
+            shared=shared)
 
-        self._sample = dict(dmax=Uniform.make(dmax),
-                            shape=RandInt.make(shape))
-        super().__init__(self._build, self._sample, shared=shared)
-        self.unit = unit
-        self.bound = bound
-        self.steps = steps
-        self.order = order
-
-    def _build(self, dmax, shape):
-        return ElasticTransform(dmax=dmax, shape=shape, steps=self.steps,
-                                unit=self.unit, bound=self.bound, order=self.order)
+    def get_parameters(self, x):
+        ndim = x.dim() - 1
+        sample = self.sample
+        keys_nd = ['shape']
+        self.sample = {
+            key: value(ndim)
+            if isinstance(value, Sampler) and key in keys_nd else value
+            for key, value in sample.items()
+        }
+        sub = super().get_parameters(x)
+        self.sample = sample
+        return sub
 
 
 class AffineTransform(Transform):
@@ -161,7 +180,7 @@ class AffineTransform(Transform):
     """
 
     def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
-                 unit='fov', bound='border', shared=True):
+                 unit='fov', bound='border', *, shared=True, **kwargs):
         """
 
         Parameters
@@ -178,10 +197,15 @@ class AffineTransform(Transform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'matrix': The affine matrix
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
             raise ValueError('Unit must be one of {"fov", "vox"} '
                              f'but got "{unit}".')
@@ -269,9 +293,11 @@ class AffineTransform(Transform):
 
     def apply_transform(self, x, parameters):
         flow, matrix = parameters
-        x = warps.apply_flow(x[:, None], flow.movedim(0, -1),
-                             padding_mode=self.bound)
-        return x[:, 0]
+        y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
+                             padding_mode=self.bound)[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, matrix=matrix),
+            self.returns)
 
 
 class RandomAffineTransform(RandomizedTransform):
@@ -284,7 +310,11 @@ class RandomAffineTransform(RandomizedTransform):
                  rotations=15,
                  shears=0.012,
                  zooms=0.15,
-                 unit='fov', bound='border', shared=True):
+                 unit='fov',
+                 bound='border',
+                 *,
+                 shared=True,
+                 **kwargs):
         """
 
         Parameters
@@ -301,40 +331,37 @@ class RandomAffineTransform(RandomizedTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'matrix': The affine matrix
         shared : bool
             Apply same transform to all images/channels
         """
-        def to_range(vmax):
-            if not isinstance(vmax, Sampler):
-                if isinstance(vmax, (list, tuple)):
-                    vmax = ([-v for v in vmax], vmax)
-                else:
-                    vmax = (-vmax, vmax)
-            return vmax
-
-        self._sample = dict(translations=Uniform.make(to_range(translations)),
-                            rotations=Uniform.make(to_range(rotations)),
-                            shears=Uniform.make(to_range(shears)),
-                            zooms=Uniform.make(to_range(zooms)))
-        super().__init__(self._build, self._sample, shared=shared)
-        self.unit = unit
-        self.bound = bound
+        super().__init__(
+            AffineTransform,
+            dict(translations=Uniform.make(make_range(translations)),
+                 rotations=Uniform.make(make_range(rotations)),
+                 shears=Uniform.make(make_range(shears)),
+                 zooms=Uniform.make(make_range(zooms)),
+                 unit=unit,
+                 bound=bound,
+                 **kwargs),
+            shared=shared)
 
     def get_parameters(self, x):
         ndim = x.dim() - 1
-        if isinstance(self.sample, (list, tuple)):
-            return self.subtransform(*[f(ndim) for f in self.sample])
-        if hasattr(self.sample, 'items'):
-            return self.subtransform(**{k: f(ndim) for k, f in self.sample.items()})
-        return self.subtransform(self.sample(ndim))
-
-    def _build(self, translations, rotations, shears, zooms):
-        return AffineTransform(translations=translations,
-                               rotations=rotations,
-                               shears=shears,
-                               zooms=zooms,
-                               unit=self.unit,
-                               bound=self.bound)
+        sample = self.sample
+        affine_keys = ['translations', 'rotations', 'shears', 'zooms']
+        self.sample = {
+            key: value(ndim)
+            if isinstance(value, Sampler) and key in affine_keys else value
+            for key, value in sample.items()
+        }
+        sub = super().get_parameters(x)
+        self.sample = sample
+        return sub
 
 
 class AffineElasticTransform(Transform):
@@ -344,7 +371,8 @@ class AffineElasticTransform(Transform):
 
     def __init__(self, dmax=0.1, shape=5, steps=0,
                  translations=0, rotations=0, shears=0, zooms=0,
-                 unit='fov', bound='border', patch=None, order=3, shared=True):
+                 unit='fov', bound='border', patch=None, order=3,
+                 *, shared=True, **kwargs):
         """
 
         Parameters
@@ -371,14 +399,20 @@ class AffineElasticTransform(Transform):
             Size of random patch to extract
         order : int
             Spline order
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'control': The control points of the nonlinear field
+            - 'matrix': The affine matrix
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.patch = patch
         self.affine = AffineTransform(translations, rotations, shears, zooms,
-                                      unit, bound, shared)
-        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, order, shared)
+                                      unit, bound, shared=shared)
+        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, order, shared=shared)
 
     def get_parameters(self, x):
         """
@@ -422,10 +456,12 @@ class AffineElasticTransform(Transform):
 
     def apply_transform(self, x, parameters):
         flow, controls, affine = parameters
-        x = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+        y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
                              padding_mode=self.elastic.bound,
-                             has_identity=True)
-        return x[:, 0]
+                             has_identity=True)[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, controls=controls, matrix=affine),
+            self.returns)
 
 
 class RandomAffineElasticTransform(RandomizedTransform):
@@ -433,9 +469,10 @@ class RandomAffineElasticTransform(RandomizedTransform):
     Random Affine + Elastic transform.
     """
 
-    def __init__(self, dmax=0.15, shape=10, steps=0,
+    def __init__(self, dmax=0.1, shape=5, steps=0,
                  translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                 unit='fov', bound='border', patch=None, order=3, shared=True):
+                 unit='fov', bound='border', patch=None, order=3,
+                 *, shared=True, **kwargs):
         """
 
         Parameters
@@ -463,44 +500,34 @@ class RandomAffineElasticTransform(RandomizedTransform):
         shared : bool
             Apply same transform to all images/channels
         """
-        def to_range(vmax):
-            if not isinstance(vmax, Sampler):
-                if isinstance(vmax, (list, tuple)):
-                    vmax = ([-v for v in vmax], vmax)
-                else:
-                    vmax = (-vmax, vmax)
-            return vmax
-        if not isinstance(dmax, Sampler):
-            dmax = (0, dmax)
-        if not isinstance(shape, Sampler):
-            shape = (2, shape)
-
-        self._sample = dict(dmax=Uniform.make(dmax),
-                            shape=RandInt.make(shape),
-                            translations=Uniform.make(to_range(translations)),
-                            rotations=Uniform.make(to_range(rotations)),
-                            shears=Uniform.make(to_range(shears)),
-                            zooms=Uniform.make(to_range(zooms)))
-        super().__init__(self._build, self._sample, shared=shared)
-        self.unit = unit
-        self.bound = bound
-        self.steps = steps
-        self.patch = patch
-        self.order = order
+        super().__init__(
+            AffineElasticTransform,
+            dict(dmax=Uniform.make(make_range(0, dmax)),
+                 shape=RandInt.make(make_range(2, shape)),
+                 translations=Uniform.make(make_range(translations)),
+                 rotations=Uniform.make(make_range(rotations)),
+                 shears=Uniform.make(make_range(shears)),
+                 zooms=Uniform.make(make_range(zooms)),
+                 unit=unit,
+                 bound=bound,
+                 steps=steps,
+                 patch=patch,
+                 order=order,
+                 **kwargs),
+            shared=shared)
 
     def get_parameters(self, x):
         ndim = x.dim() - 1
-        if isinstance(self.sample, (list, tuple)):
-            return self.subtransform(*[f(ndim) for f in self.sample])
-        if hasattr(self.sample, 'items'):
-            return self.subtransform(**{k: f(ndim) for k, f in self.sample.items()})
-        return self.subtransform(self.sample(ndim))
-
-    def _build(self, dmax, shape, translations, rotations, shears, zooms):
-        return AffineElasticTransform(
-            dmax=dmax, shape=shape, translations=translations,
-            rotations=rotations, shears=shears, zooms=zooms, unit=self.unit,
-            bound=self.bound, patch=self.patch, order=self.order)
+        sample = self.sample
+        affine_keys = ['shape', 'translations', 'rotations', 'shears', 'zooms']
+        self.sample = {
+            key: value(ndim)
+            if isinstance(value, Sampler) and key in affine_keys else value
+            for key, value in sample.items()
+        }
+        sub = super().get_parameters(x)
+        self.sample = sample
+        return sub
 
 
 class MakeAffinePair(Transform):
@@ -512,8 +539,23 @@ class MakeAffinePair(Transform):
     true_transform is a dictionary with keys 'flow' and 'affine'.
     """
 
-    def __init__(self, transform=None):
-        super().__init__(shared=True)
+    def __init__(self, transform=None, *, returns=('left', 'right'), **kwargs):
+        """
+
+        Parameters
+        ----------
+        transform : RandomAffineTransform, default=`RandomAffineTransform()`
+            An instantiated transform.
+        returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
+
+            - 'input': Input image
+            - 'left': First transformed image
+            - 'right': Second transformed image
+            - 'flow': Displacement field that warps right to left
+            - 'matrix': Affine matrix that warps right to left
+                        (i.e., maps left coordinates to right coordinates)
+        """
+        super().__init__(shared=True, returns=returns, **kwargs)
         self.subtransform = transform or RandomAffineTransform()
 
     def get_parameters(self, x):
@@ -526,27 +568,20 @@ class MakeAffinePair(Transform):
         t1, p1, t2, p2 = parameters
         x1 = t1.apply_transform(x, p1)
         x2 = t2.apply_transform(x, p2)
-        return x1, x2
-
-    def forward(self, *x):
-        numel = len(x)
-        x0 = self._get_first_element(x)
-        theta = self.get_parameters(x0)
-        x = self.forward_with_parameters(*x, parameters=theta)
-        if numel == 1: x = (x,)
-
-        _, (flow1, mat1), _, (flow2, mat2) = theta
-        flow12 = flow1 - flow2
+        mat1, mat2 = p1[1], p2[1]
         mat12 = mat2.inverse() @ mat1
+        flow12 = warps.affine_flow(mat12, x.shape[1:]).movedim(-1, 0)
+        return prepare_output(
+            dict(input=x, left=x1, right=x2, flow=flow12, matrix=mat12),
+            self.returns)
 
-        return (*x, dict(flow=flow12, affine=mat12))
 
-
-class Slicewise3DAffineTransform(Transform):
+class ThroughSliceAffineTransform(Transform):
     """Each slice samples the 3D volume using a different transform"""
 
     def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
-                 slice=-1, unit='fov', bound='border', shared=True):
+                 slice=-1, unit='fov', bound='border',
+                 *, shared=True, **kwargs):
         """
 
         Parameters
@@ -565,10 +600,16 @@ class Slicewise3DAffineTransform(Transform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+
+            - 'input': First transformed image
+            - 'output': Second transformed image
+            - 'flow': Displacement field
+            - 'matrix': Stacked affine matrices (one per slice)
         shared : bool
             Apply same transform to all images/channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
             raise ValueError('Unit must be one of {"fov", "vox"} '
                              f'but got "{unit}".')
@@ -663,19 +704,21 @@ class Slicewise3DAffineTransform(Transform):
 
     def apply_transform(self, x, parameters):
         flow, matrix = parameters
-        x = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
-                             padding_mode=self.bound)
-        return x[0]
+        y = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
+                             padding_mode=self.bound)[0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, matrix=matrix),
+            self.returns)
 
 
-class RandomSlicewise3DAffineTransform(RandomizedTransform):
+class RandomThroughSliceAffineTransform(RandomizedTransform):
     """
     Slicewise3DAffineTransform with random parameters.
     """
 
     def __init__(self, translations=0.1, rotations=15,
                  shears=0, zooms=0, slice=-1, shots=2, nodes=8,
-                 unit='fov', bound='border', shared=True):
+                 unit='fov', bound='border', *, shared=True, **kwargs):
         """
 
         Parameters
@@ -702,50 +745,73 @@ class RandomSlicewise3DAffineTransform(RandomizedTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+
+            - 'input': First transformed image
+            - 'output': Second transformed image
+            - 'flow': Displacement field
+            - 'matrix': Stacked affine matrices (one per slice)
         shared : bool
             Apply same transform to all images/channels
         """
-        def to_range(vmax):
-            if not isinstance(vmax, Sampler):
-                if isinstance(vmax, (list, tuple)):
-                    vmax = ([-v for v in vmax], vmax)
-                else:
-                    vmax = (-vmax, vmax)
-            return vmax
-
-        self._sample = dict(translations=Uniform.make(to_range(translations)),
-                            rotations=Uniform.make(to_range(rotations)),
-                            shears=Uniform.make(to_range(shears)),
-                            zooms=Uniform.make(to_range(zooms)))
-        super().__init__(Slicewise3DAffineTransform, self._sample, shared=shared)
-        self.unit = unit
-        self.bound = bound
-        self.slice = slice
-        self.shots = shots
+        super().__init__(
+            ThroughSliceAffineTransform,
+            dict(translations=Uniform.make(make_range(translations)),
+                 rotations=Uniform.make(make_range(rotations)),
+                 shears=Uniform.make(make_range(shears)),
+                 zooms=Uniform.make(make_range(zooms)),
+                 unit=unit,
+                 bound=bound,
+                 slice=slice,
+                 **kwargs),
+            shared=shared)
         if nodes:
-            nodes = RandInt.make(to_range(nodes))
+            nodes = RandInt.make(make_range(0, nodes))
         self.nodes = nodes
+        self.shots = shots
 
     def get_parameters(self, x):
-        slice = RandInt(0, 3)() if self.slice is None else self.slice
-        nb_slices = x.shape[1:][slice]
+        ndim = x.ndim - 1
+        sample, self.sample = self.sample, dict(self.sample)
+
+        # get slice direction
+        if self.sample['slice'] is None:
+            self.sample['slice'] = RandInt(0, ndim)
+        if isinstance(self.sample['slice'], Sampler):
+            self.sample['slice'] = self.sample['slice']()
+
+        # get number of independent motions
+        nb_slices = x.shape[1:][self.sample['slice']]
         nodes = self.nodes
-        if callable(nodes):
+        if isinstance(nodes, Sampler):
             nodes = nodes()
         nodes = min(nodes or nb_slices, nb_slices)
 
-        kwargs = {key: [val() for _ in range(nb_slices)]
-                  for key, val in self._sample.items()}
+        # sample parameters per slice per XYZ
+        self.sample = {
+            key: [val(ndim) for _ in range(nodes)]
+            if isinstance(val, Sampler) else val
+            for key, val in self.sample.items()
+        }
+
+        # cubic interpolation of motion parameters
         if nodes < nb_slices:
             def node2slice(x):
-                x = torch.as_tensor(x, dtype=torch.float32)
+                x = torch.as_tensor(x, dtype=torch.float32).T  # [3, N]
                 x = interpol.resize(x, shape=[nb_slices],
                                     interpolation=3, bound='replicate',
-                                    prefilter=False).flatten().tolist()
-                y = []
+                                    prefilter=False).T  # [S, 3]
+                y = torch.empty_like(x)
                 for i in range(self.shots):
-                    y += x[i::self.shots]
-                return y
-            kwargs = {key: node2slice(val) for key, val in kwargs.items()}
-        return self.subtransform(slice=slice, **kwargs,
-                                 unit=self.unit, bound=self.bound)
+                    y[i::self.shots] = x[:len(y[i::self.shots])]
+                    x = x[len(y[i::self.shots]):]
+                return y.tolist()
+            affine_keys = ['translations', 'rotations', 'shears', 'zooms']
+            self.sample = {
+                key: node2slice(val) if key in affine_keys else val
+                for key, val in self.sample.items()
+            }
+
+        out = super().get_parameters(x)
+        self.sample = sample
+        return out
