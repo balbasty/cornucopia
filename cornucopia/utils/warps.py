@@ -559,7 +559,7 @@ def exp_velocity(vel, steps=8):
     """
     vel = vel / (2**steps)
     for i in range(steps):
-        vel = vel + apply_flow(vel.movedim(-1, 1), vel).movedim(1, -1)
+        vel = vel + apply_flow(vel, vel.movedim(1, -1))
     return vel
 
 

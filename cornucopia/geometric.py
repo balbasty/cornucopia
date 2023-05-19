@@ -376,6 +376,7 @@ class AffineElasticTransform(Transform):
         """
         super().__init__(shared=shared)
         self.patch = patch
+        self.fullsize = False if steps == 0 or patch is not None else True
         self.affine = AffineTransform(translations, rotations, shears, zooms,
                                       unit, bound, shared)
         self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, order, shared)
@@ -394,11 +395,10 @@ class AffineElasticTransform(Transform):
         affine : (D+1, D+1) tensor
 
         """
-        A = self.affine.get_parameters(x, fullsize=False)   # (D+1, D+1)
-        t = self.elastic.get_parameters(x, fullsize=False)  # (C, D, *shape)
+        A = self.affine.get_parameters(x, fullsize=False)  # (D+1, D+1)
+        ret_e = self.elastic.get_parameters(x, fullsize=self.fullsize)  # (C, D, *shape)
         ndim = A.shape[-1] - 1
         fullshape = x.shape[1:]
-        smallshape = t.shape[2:]
         backend = dict(dtype=x.dtype, device=x.device)
         if not x.dtype.is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
@@ -406,18 +406,24 @@ class AffineElasticTransform(Transform):
             patchshape = ensure_list(self.patch, ndim)
         else:
             patchshape = fullshape
-        ft = warps.identity(patchshape, **backend)          # (*shape, D)
+        ft = warps.identity(patchshape, **backend)  # (*shape, D)
         if self.patch:
             patch_origin = [random.randint(0, s-p)
                             for s, p in zip(fullshape, self.patch)]
             ft += torch.as_tensor(patch_origin, **backend)
         ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
         ft = ft.add_(A[:ndim, -1])
-        scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
-        scale = torch.as_tensor(scale, **backend)
-        dp = warps.apply_flow(t, ft * scale, padding_mode='zeros',
-                              has_identity=True)
-        ft = dp.add_(ft.movedim(-1, 0))
+        if self.fullsize:
+            dp = ret_e[0]
+            t = ret_e[1]
+            ft = dp.add_(ft.movedim(-1, 0))
+        else:
+            t = ret_e
+            smallshape = t.shape[2:]
+            scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
+            scale = torch.as_tensor(scale, **backend)
+            dp = warps.apply_flow(t, ft * scale, padding_mode='zeros',
+                                has_identity=True)
         return ft, t, A
 
     def apply_transform(self, x, parameters):

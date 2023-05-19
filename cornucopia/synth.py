@@ -254,7 +254,7 @@ class SynthFromLabelTransform(Transform):
             Upper bound for number of control points in the elastic field.
         steps : int
             Number of scaling-and-squaring integration steps
-            
+
         Other Parameters
         ----------------
         gmm_fwhm : float
