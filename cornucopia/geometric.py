@@ -444,6 +444,8 @@ class RandomAffineElasticTransform(RandomizedTransform):
             Sampler or Upper bound for maximum displacement
         shape : Sampler or int
             Sampler or Upper bounds for number of control points
+        steps : int
+            Number of scaling-and-squaring integration steps            
         translations : Sampler or [list of] float
             Sampler or Upper bound for translation (per X/Y/Z)
         rotations : Sampler or [list of] float
@@ -498,7 +500,7 @@ class RandomAffineElasticTransform(RandomizedTransform):
 
     def _build(self, dmax, shape, translations, rotations, shears, zooms):
         return AffineElasticTransform(
-            dmax=dmax, shape=shape, translations=translations,
+            dmax=dmax, shape=shape, steps=self.steps, translations=translations,
             rotations=rotations, shears=shears, zooms=zooms, unit=self.unit,
             bound=self.bound, patch=self.patch, order=self.order)
 

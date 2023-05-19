@@ -204,6 +204,7 @@ class SynthFromLabelTransform(Transform):
                  zooms=0.15,
                  elastic=0.05,
                  elastic_nodes=10,
+                 steps=0,
                  gmm_fwhm=10,
                  bias=7,
                  gamma=0.6,
@@ -251,7 +252,9 @@ class SynthFromLabelTransform(Transform):
             Upper bound for elastic displacements, in percent of the FOV.
         elastic_nodes : int
             Upper bound for number of control points in the elastic field.
-
+        steps : int
+            Number of scaling-and-squaring integration steps
+            
         Other Parameters
         ----------------
         gmm_fwhm : float
@@ -283,7 +286,7 @@ class SynthFromLabelTransform(Transform):
             postproc = None
         self.postproc_labels = postproc
         self.deform = RandomAffineElasticTransform(
-            elastic, elastic_nodes, order=order,
+            elastic, elastic_nodes, order=order, steps=steps,
             rotations=rotation, shears=shears, zooms=zooms, patch=patch)
         self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm, background=0)
         self.intensity = IntensityTransform(
