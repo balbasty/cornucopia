@@ -102,7 +102,7 @@ class ElasticTransform(Transform):
             ft = interpol.resize(t, shape=fullshape, interpolation=self.order,
                                  prefilter=False)
         if self.steps:
-            ft = warps.exp_velocity(ft, self.steps)
+            ft = warps.exp_velocity(ft.movedim(1, -1), self.steps).movedim(-1, 1)
         return ft, t
 
     def apply_transform(self, x, parameters):
@@ -410,9 +410,10 @@ class AffineElasticTransform(Transform):
         """
         super().__init__(shared=shared, **kwargs)
         self.patch = patch
-        self.affine = AffineTransform(translations, rotations, shears, zooms,
-                                      unit, bound, shared=shared)
-        self.elastic = ElasticTransform(dmax,  unit, shape, bound, steps, order, shared=shared)
+        self.affine = AffineTransform(
+            translations, rotations, shears, zooms, unit, bound, shared=shared)
+        self.elastic = ElasticTransform(
+            dmax,  unit, shape, bound, steps, order, shared=shared)
 
     def get_parameters(self, x):
         """
@@ -428,31 +429,66 @@ class AffineElasticTransform(Transform):
         affine : (D+1, D+1) tensor
 
         """
-        A = self.affine.get_parameters(x, fullsize=False)   # (D+1, D+1)
-        t = self.elastic.get_parameters(x, fullsize=False)  # (C, D, *shape)
-        ndim = A.shape[-1] - 1
+        ndim = x.ndim - 1
         fullshape = x.shape[1:]
-        smallshape = t.shape[2:]
         backend = dict(dtype=x.dtype, device=x.device)
-        if not x.dtype.is_floating_point:
+        if not x.is_floating_point():
             backend['dtype'] = torch.get_default_dtype()
-        if self.patch:
-            patchshape = ensure_list(self.patch, ndim)
+
+        # get transformation parameters
+        A = self.affine.get_parameters(x, fullsize=False)           # (D+1, D+1)
+        if self.steps:
+            # request the blown up and exponentiated field
+            eslasticflow, control = self.elastic.get_parameters(x, fullsize=True)   # (C, D, *shape)
         else:
-            patchshape = fullshape
-        ft = warps.identity(patchshape, **backend)          # (*shape, D)
+            # request only the spline control points
+            control = self.elastic.get_parameters(x, fullsize=False)
+            eslasticflow = None
+
+        # 1) start from identity
+        patchshape = ensure_list(self.patch or fullshape, ndim)
+        flow = warps.identity(patchshape, **backend)  # (*shape, D)
+
         if self.patch:
+            # 1.b) randomly sample patch location and add offset
             patch_origin = [random.randint(0, s-p)
                             for s, p in zip(fullshape, self.patch)]
-            ft += torch.as_tensor(patch_origin, **backend)
-        ft = A[:ndim, :ndim].matmul(ft.unsqueeze(-1)).squeeze(-1)
-        ft = ft.add_(A[:ndim, -1])
-        scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
-        scale = torch.as_tensor(scale, **backend)
-        dp = warps.apply_flow(t, ft * scale, padding_mode='zeros',
-                              has_identity=True)
-        ft = dp.add_(ft.movedim(-1, 0))
-        return ft, t, A
+            flow += torch.as_tensor(patch_origin, **backend)
+
+        # 2.) apply affine transform
+        flow = A[:ndim, :ndim].matmul(flow.unsqueeze(-1)).squeeze(-1)
+        flow = flow.add_(A[:ndim, -1])
+
+        # 3) compose with elastic transform
+        if eslasticflow is not None:
+            # we sample into the blown up elastic flow,
+            # which has the size of the full image
+            flow = warps.apply_flow(
+                eslasticflow, flow,
+                padding_mode='zeros',
+                has_identity=True,
+            ).add_(flow.movedim(-1, 0))
+        else:
+            # we sample into the spline control points
+            # and must rescale the sampling coordinates accordingly
+            smallshape = control.shape[2:]
+            scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
+            scale = torch.as_tensor(scale, **backend)
+            if self.elastic.order == 1:
+                # we can use pytorch
+                flow = warps.apply_flow(
+                    control, flow * scale,
+                    padding_mode='zeros',
+                    has_identity=True,
+                ).add_(flow.movedim(-1, 0))
+            else:
+                # we must use torch-interpol
+                flow = interpol.grid_pull(
+                    control, flow * scale,
+                    bound='zero',
+                    interpolation=self.elastic.order,
+                ).add_(flow.movedim(-1, 0))
+        return flow, control, A
 
     def apply_transform(self, x, parameters):
         flow, controls, affine = parameters
@@ -481,6 +517,8 @@ class RandomAffineElasticTransform(RandomizedTransform):
             Sampler or Upper bound for maximum displacement
         shape : Sampler or int
             Sampler or Upper bounds for number of control points
+        steps : int
+            Number of scaling-and-squaring integration steps
         translations : Sampler or [list of] float
             Sampler or Upper bound for translation (per X/Y/Z)
         rotations : Sampler or [list of] float
