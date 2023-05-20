@@ -116,7 +116,7 @@ def suffstat(x, z=None):
     else:
         x0 = z.sum(-1)  # [nk]
         x1 = torch.matmul(z, x.T)  # [nk, nc]
-        x2 = torch.matmul(x.T[:, None, :], x.T[:, :, None]).T
+        x2 = torch.matmul(x.T[:, None, :], x.T[:, :, None]).movedim(0, -1)
         x2 = torch.matmul(x2, z.T).movedim(-1, 0)  # [nk, nc, nc]
     return x0, x1, x2
 

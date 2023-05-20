@@ -4,6 +4,7 @@ __all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal',
 import random
 import copy
 import torch
+from numbers import Number
 from .utils.py import ensure_list
 
 
@@ -82,6 +83,54 @@ class Sampler:
 
         """
         raise NotImplementedError
+
+    def __mul__(self, other):
+        if isinstance(other, Sampler):
+            return ProductOfSamplers(self, other)
+        else:
+            return MultipliedSampler(self, other)
+
+    def __rmul__(self, other):
+        if isinstance(other, Sampler):
+            return ProductOfSamplers(other, self)
+        else:
+            return MultipliedSampler(self, other)
+
+    def __truediv__(self, other):
+        if isinstance(other, Sampler):
+            return RatioOfSamplers(self, other)
+        else:
+            return DividedSampler(self, other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, Sampler):
+            return RatioOfSamplers(other, self)
+        else:
+            return DividingSampler(self, other)
+
+    def __add__(self, other):
+        if isinstance(other, Sampler):
+            return SumOfSamplers(self, other)
+        else:
+            return ShiftedSampler(self, other)
+
+    def __radd__(self, other):
+        if isinstance(other, Sampler):
+            return SumOfSamplers(other, self)
+        else:
+            return ShiftedSampler(self, other)
+
+    def __sub__(self, other):
+        if isinstance(other, Sampler):
+            return DifferenceOfSamplers(self, other)
+        else:
+            return ShiftedSampler(self, -other)
+
+    def __rsub__(self, other):
+        if isinstance(other, Sampler):
+            return DifferenceOfSamplers(other, self)
+        else:
+            return ReverseShiftedSampler(self, other)
 
 
 class Fixed(Sampler):
@@ -251,22 +300,211 @@ class LogNormal(Sampler):
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
 
 
-def sym_range(x):
-    if not isinstance(x, Sampler):
-        if isinstance(x, (list, tuple)):
-            x = (tuple(-x1 for x1 in x), x)
+class TransformedSampler(Sampler):
+    """A random variable that gets transformed by a deterministic function"""
+
+    def __init__(self, sampler, transform):
+        """
+
+        Parameters
+        ----------
+        sampler : Sampler
+            A random sampler
+        transform : callable(float) -> float
+            A value-wise transformation
+        """
+        super().__init__(sampler=sampler, transform=transform)
+
+    def __call__(self, n=None, **backend):
+        out = self.sampler(n, **backend)
+        if torch.is_tensor(out) or isinstance(out, Number):
+            return self.transform(out)
         else:
-            x = (-x, x)
-    return x
+            return list(map(self.transform, out))
 
 
-def upper_range(x, min=0):
-    if not isinstance(x, Sampler):
-        x = (min, x)
-    return x
+class CombinedSamplers(Sampler):
+    """Random variables that get combined by a deterministic function"""
+
+    def __init__(self, samplers, transform):
+        """
+
+        Parameters
+        ----------
+        samplers : list[Sampler]
+            A random sampler
+        transform : callable(*float) -> float
+            A value-wise transformation
+        """
+        super().__init__(samplers=samplers, transform=transform)
+
+    def __call__(self, n=None, **backend):
+        out = [sampler(n, **backend) for sampler in self.samplers]
+        if isinstance(out[0], list):
+            return list(map(lambda x: self.transform(*x), out))
+        else:
+            self.transform(*out)
 
 
-def lower_range(x, max=0):
-    if not isinstance(x, Sampler):
-        x = (x, max)
-    return x
+class MultipliedSampler(TransformedSampler):
+
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x * self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class DividedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x / self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class DividingSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return self.value / x
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ShiftedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return x + self.value
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ReverseShiftedSampler(TransformedSampler):
+    class _Op:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, x):
+            return self.value - x
+
+    def __init__(self, sampler, other):
+        super().__init__(sampler, self._Op(other))
+
+
+class ProductOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x * y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class RatioOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x / y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class SumOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x + y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+class DifferenceOfSamplers(CombinedSamplers):
+
+    class _Op:
+        def __call__(self, x, y):
+            return x - y
+
+    def __init__(self, left, right):
+        super().__init__([left, right], self._Op())
+
+
+def make_range(*args, **kwargs):
+    """
+    ```python
+    make_range([min], max, *, offset=0)
+    ```
+
+    If any of the inputs is a Sampler, return the Sampler.
+
+    Else, build a (lower, upper) range.
+
+    !!! examples
+        ```python
+        # full range
+        make_range(x, y) -> (x, y)
+        make_range(x, y, offset=1) -> (1+x, 1+y)
+        # symmetric range
+        make_range(x) -> (-x, x)
+        make_range(x, offset=1) -> (1-x, 1+x)
+        # upper bound
+        make_range(0, x) -> (0, x)
+        make_range(x, min=0) -> (0, x)
+        # lower bound
+        make_range(x, 1) -> (x, 1)
+        make_range(x, max=1) -> (x, 1)
+        ```
+    """
+    for x in args:
+        if isinstance(x, Sampler):
+            return x
+        elif isinstance(x, (list, tuple)):
+            return x
+    for x in kwargs.values():
+        if isinstance(x, Sampler):
+            return x
+        elif isinstance(x, (list, tuple)):
+            return x
+    assert len(args) <= 2
+    vmid = kwargs.get('offset', 0)
+    if len(args) == 2:
+        return (vmid + args[0], vmid + args[1])
+    vmin = kwargs.get('min', None)
+    vmax = kwargs.get('max', None)
+    if vmin is not None and vmax is not None:
+        assert len(args) == 0
+        return vmin + vmin, vmid + vmax
+    elif vmax is not None:
+        assert len(args) <= 1
+        if args:
+            return vmid + args[0], vmid + vmax
+        else:
+            return vmid - vmax, vmid + vmax
+    elif vmin is not None:
+        assert len(args) <= 1
+        if args:
+            return vmid + vmin, vmid + args[0]
+        else:
+            return vmid + vmin, vmid - vmin
+    else:
+        assert len(args) > 0
+        return vmid - args[0], vmid + args[0]
+
