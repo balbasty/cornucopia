@@ -410,6 +410,7 @@ class AffineElasticTransform(Transform):
         """
         super().__init__(shared=shared, **kwargs)
         self.patch = patch
+        self.steps = steps
         self.affine = AffineTransform(
             translations, rotations, shears, zooms, unit, bound, shared=shared)
         self.elastic = ElasticTransform(

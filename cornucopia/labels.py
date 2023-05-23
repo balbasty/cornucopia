@@ -250,7 +250,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
 
         sample = self.sample
         self.sample = {
-            key: lambda x: value(n) if isinstance(value, Sampler) else value
+            key: value(n) if isinstance(value, Sampler) else value
             for key, value in self.sample.items()
         }
 
