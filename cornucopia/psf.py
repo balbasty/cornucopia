@@ -97,8 +97,6 @@ class LowResSliceTransform(Transform):
         fwhm = [0] * ndim
         fwhm[self.axis] = self.resolution * self.thickness
         y = smoothnd(x, fwhm=fwhm)
-        if self.noise is not None:
-            y = self.noise.apply_transform(y, parameters)
         factor = [1] * ndim
         factor[self.axis] = 1/self.resolution
         ishape = x.shape[1:]
@@ -134,10 +132,10 @@ class RandomLowResSliceTransform(RandomizedTransform):
         shared : bool
             Use the same resolution for all channels/tensors
         """
-        super().__init__(RandomLowResSliceTransform,
+        super().__init__(LowResSliceTransform,
                          dict(resolution=Uniform.make(make_range(1, resolution)),
                               thickness=Uniform.make(make_range(thickness, 1)),
-                              axis=Fixed.make(axis),
+                              axis=axis,
                               noise=noise,
                               **kwargs),
                          shared=shared)
@@ -146,7 +144,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
         if self.sample['axis'] is None:
             sample = self.sample
             self.sample = dict(sample)
-            self.sample['axis'] = RandInt(-x.dim(), 1)
+            self.sample['axis'] = RandInt(x.ndim-2)
             out = super().get_parameters(x)
             self.sample = sample
             return out
