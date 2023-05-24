@@ -140,7 +140,7 @@ class IntensityTransform(SequentialTransform):
 
         if bias:
             bias = bias if isinstance(bias, Sampler) else RandInt(2, bias)
-            bias = RandomMultFieldTransform(bias, vmax=Fixed(1), order=order)
+            bias = RandomMultFieldTransform(bias, vmax=Fixed(2), order=order)
             steps += [bias]
 
         if gamma:

@@ -83,7 +83,7 @@ class LowResSliceTransform(Transform):
         ndim = x.dim() - 1
         factor = [1] * ndim
         factor[self.axis] = 1/self.resolution
-        oshape = [math.ceil(s*f) for s, f in zip(x.shape[1:], factor)]
+        oshape = [max(2, math.ceil(s*f)) for s, f in zip(x.shape[1:], factor)]
         if self.noise:
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
             return self.noise.get_parameters(fake_x)
@@ -100,7 +100,7 @@ class LowResSliceTransform(Transform):
         factor = [1] * ndim
         factor[self.axis] = 1/self.resolution
         ishape = x.shape[1:]
-        oshape = [math.ceil(s*f) for s, f in zip(ishape, factor)]
+        oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
         y = interpolate(y[None], size=oshape, align_corners=True, mode=mode)[0]
         if self.noise is not None:
             y = self.noise.apply_transform(y, parameters)
