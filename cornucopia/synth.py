@@ -85,6 +85,7 @@ from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, Fixed, LogNormal
 from .io import LoadTransform
 import random as pyrandom
+from numbers import Number
 
 
 class IntensityTransform(SequentialTransform):
@@ -329,7 +330,10 @@ class SynthFromLabelTransform(Transform):
         if self.synth_labels_maybe:
             for labels, prob in self.synth_labels_maybe.items():
                 if pyrandom.random() > (1 - prob):
-                    synth_labels += list(labels)
+                    if isinstance(labels, Number):
+                        synth_labels += [labels]
+                    else:
+                        synth_labels += list(labels)
         if synth_labels:
             parameters['preproc'] = RelabelTransform(synth_labels)
         parameters['gmm'] = self.gmm.get_parameters(x)
