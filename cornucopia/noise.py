@@ -110,7 +110,7 @@ class RandomChiNoiseTransform(RandomizedTransform):
         """
         super().__init__(ChiNoiseTransform,
                          dict(sigma=Uniform.make(make_range(0, sigma)),
-                              nb_channels=RandInt.make(make_range(nb_channels, 2)),
+                              nb_channels=RandInt.make(make_range(2, nb_channels)),
                               **kwargs),
                          shared=shared)
 

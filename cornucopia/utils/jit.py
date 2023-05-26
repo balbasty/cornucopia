@@ -82,10 +82,10 @@ if torch_version('>=', (1, 10)):
 
 else:
     if not int(os.environ.get('PYTORCH_JIT', '1')):
-        def meshgrid_script_ij(x: List[torch.Tensor]) -> List[torch.Tensor]:
+        def meshgrid_list_ij(x: List[torch.Tensor]) -> List[torch.Tensor]:
             return torch.meshgrid(x)
 
-        def meshgrid_script_xy(x: List[torch.Tensor]) -> List[torch.Tensor]:
+        def meshgrid_list_xy(x: List[torch.Tensor]) -> List[torch.Tensor]:
             grid = torch.meshgrid(*x)
             if len(grid) > 1:
                 grid[0] = grid[0].transpose(0, 1)
@@ -94,11 +94,11 @@ else:
 
     else:
         @torch.jit.script
-        def meshgrid_script_ij(x: List[torch.Tensor]) -> List[torch.Tensor]:
+        def meshgrid_list_ij(x: List[torch.Tensor]) -> List[torch.Tensor]:
             return torch.meshgrid(x)
 
         @torch.jit.script
-        def meshgrid_script_xy(x: List[torch.Tensor]) -> List[torch.Tensor]:
+        def meshgrid_list_xy(x: List[torch.Tensor]) -> List[torch.Tensor]:
             grid = torch.meshgrid(x)
             if len(grid) > 1:
                 grid[0] = grid[0].transpose(0, 1)
