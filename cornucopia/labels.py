@@ -109,7 +109,7 @@ class ArgMaxTransform(Transform):
 class RelabelTransform(Transform):
     """Relabel a label map"""
 
-    def __init__(self, labels, **kwargs):
+    def __init__(self, labels=None, **kwargs):
         """
 
         !!! note
@@ -129,9 +129,16 @@ class RelabelTransform(Transform):
         super().__init__(shared=False, **kwargs)
         self.labels = labels
 
-    def apply_transform(self, x, parameters=None):
+    def get_parameters(self, x):
+        labels = self.labels
+        if labels is None:
+            labels = x.unique().tolist()[1:]
+        return labels
+
+    def apply_transform(self, x, parameters):
+        labels = parameters
         y = torch.zeros_like(x)
-        for out, inp in enumerate(self.labels):
+        for out, inp in enumerate(labels):
             out = out + 1
             if not isinstance(inp, (list, tuple)):
                 inp = [inp]
@@ -207,7 +214,7 @@ class GaussianMixtureTransform(Transform):
                 if fwhm[k]:
                     y1 = torch.randn(x.shape, **backend)
                     y1 = smoothnd(y1, fwhm=fwhm[k])
-                    y += y1.mul_(sigmak).add_(muk).masked_fill_(x == k, 0)
+                    y += y1.mul_(sigmak).add_(muk).masked_fill_(x != k, 0)
                 else:
                     mask = x == k
                     numel = mask.sum()
@@ -221,7 +228,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=1, sigma=0.6, fwhm=2, background=None,
+    def __init__(self, mu=1, sigma=0.05, fwhm=2, background=None,
                  *, shared='channels', **kwargs):
         """
 
@@ -250,7 +257,7 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
 
         sample = self.sample
         self.sample = {
-            key: lambda x: value(n) if isinstance(value, Sampler) else value
+            key: value(n) if isinstance(value, Sampler) else value
             for key, value in self.sample.items()
         }
 

@@ -85,6 +85,7 @@ from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, Fixed, LogNormal
 from .io import LoadTransform
 import random as pyrandom
+from numbers import Number
 
 
 class IntensityTransform(SequentialTransform):
@@ -140,7 +141,7 @@ class IntensityTransform(SequentialTransform):
 
         if bias:
             bias = bias if isinstance(bias, Sampler) else RandInt(2, bias)
-            bias = RandomMultFieldTransform(bias, vmax=Fixed(1), order=order)
+            bias = RandomMultFieldTransform(bias, vmax=Fixed(2), order=order)
             steps += [bias]
 
         if gamma:
@@ -234,6 +235,7 @@ class SynthFromLabelTransform(Transform):
                  zooms=0.15,
                  elastic=0.05,
                  elastic_nodes=10,
+                 elastic_steps=0,
                  gmm_fwhm=10,
                  bias=7,
                  gamma=0.6,
@@ -281,6 +283,8 @@ class SynthFromLabelTransform(Transform):
             Upper bound for elastic displacements, in percent of the FOV.
         elastic_nodes : int or Sampler
             Upper bound for number of control points in the elastic field.
+        elastic_steps : int or Sampler
+            Number of scaling-and-squaring integration steps.
 
         Other Parameters
         ----------------
@@ -315,7 +319,7 @@ class SynthFromLabelTransform(Transform):
         self.deform = RandomAffineElasticTransform(
             elastic or 0, elastic_nodes, order=order,
             rotations=rotation or 0, shears=shears or 0,
-            zooms=zooms or 0, patch=patch)
+            zooms=zooms or 0, patch=patch, steps=elastic_steps)
         self.gmm = RandomGaussianMixtureTransform(fwhm=gmm_fwhm or 0, background=0)
         self.intensity = IntensityTransform(
             bias, gamma, motion_fwhm, resolution, snr, gfactor, order)
@@ -326,7 +330,10 @@ class SynthFromLabelTransform(Transform):
         if self.synth_labels_maybe:
             for labels, prob in self.synth_labels_maybe.items():
                 if pyrandom.random() > (1 - prob):
-                    synth_labels += list(labels)
+                    if isinstance(labels, Number):
+                        synth_labels += [labels]
+                    else:
+                        synth_labels += list(labels)
         if synth_labels:
             parameters['preproc'] = RelabelTransform(synth_labels)
         parameters['gmm'] = self.gmm.get_parameters(x)
