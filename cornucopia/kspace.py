@@ -256,7 +256,7 @@ class IntraScanMotionTransform(Transform):
 
         if self.freq:
             y = torch.fft.ifftshift(y)
-            y = torch.fft.fft(y, dim=1)
+            y = torch.fft.ifft(y, dim=1)
             y = torch.fft.fftshift(y)
         y = y.movedim(1, self.axis)
         x = x.movedim(1, self.axis)
