@@ -1,6 +1,6 @@
 __all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
            'MaybeTransform', 'MappedTransform', 'SwitchTransform',
-           'BatchedTransform',
+           'BatchedTransform', 'MappedKeysTransform', 'MappedExceptKeysTransform',
            'randomize', 'map', 'switch', 'include', 'exclude', 'batch',
            'include_keys', 'exclude_keys']
 
@@ -196,7 +196,8 @@ class Transform(nn.Module):
 
     """
 
-    def __init__(self, *, returns=None, append=False, shared=False):
+    def __init__(self, *, returns=None, append=False, prefix=True, shared=False,
+                 include=None, exclude=None):
         """
 
         Parameters
@@ -208,19 +209,27 @@ class Transform(nn.Module):
         append : bool
             Append the (structure of) returned tensors to the parent
             structure.
+        prefix : bool
+            If `append` and parent is a dict, prefix the child's key with
+            the parent key.
         shared : bool or 'channels' or 'tensors'
 
             - If `True`: shared across tensors and channels
             - If `'channels'`: shared across channels
             - If `'tensors'`: shared across tensors
             - If `False`: independent across tensors and channels
+        include : str or list[str]
+            List of keys to which the transform should apply
+        exclude : str or list[str]
+            List of keys to which the transform should not apply
         """
         super().__init__()
         self.returns = returns
         self.append = append
+        self.prefix = prefix
         self.shared = shared
-        self._include = None
-        self._exclude = tuple()
+        self._include = ensure_list(include) if include is not None else None
+        self._exclude = ensure_list(exclude or tuple())
 
     def _apply_list(self, x, forward):
         """Apply forward pass to elements of a list"""
@@ -260,6 +269,9 @@ class Transform(nn.Module):
                 value = value.obj
                 if self.append:
                     if isinstance(y, dict) and isinstance(value, dict):
+                        if self.prefix:
+                            value = {key + '_' + child_key: child_value
+                                     for child_key, child_value in value.items()}
                         y.update(value)
                         continue
                     elif isinstance(y, list) and isinstance(value, dict):
@@ -493,16 +505,13 @@ class Transform(nn.Module):
         return self.apply_transform(x, parameters=theta), theta
 
     def __add__(self, other):
-        if isinstance(other, SequentialTransform):
-            return other.__radd__(self)
-        else:
-            return SequentialTransform([self, other])
+        return SequentialTransform([self, other])
 
     def __radd__(self, other):
-        if isinstance(other, SequentialTransform):
-            return other.__add__(self)
-        else:
-            return SequentialTransform([other, self])
+        return SequentialTransform([other, self])
+
+    def __iadd__(self, other):
+        return SequentialTransform([self, other])
 
     def __mul__(self, prob):
         return MaybeTransform(self, prob)
@@ -540,14 +549,14 @@ class SequentialTransform(Transform):
 
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms, **kwargs):
         """
         Parameters
         ----------
         transforms : list[Transform]
             A list of transforms to apply sequentially.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.transforms = transforms
 
     def forward(self, *args, **kwargs):
@@ -579,24 +588,6 @@ class SequentialTransform(Transform):
         else:
             return self.transforms[item]
 
-    def __add__(self, other):
-        if isinstance(other, SequentialTransform):
-            return SequentialTransform([*self.transforms, *other.transforms])
-        else:
-            return SequentialTransform([*self.transforms, other])
-
-    def __radd__(self, other):
-        if isinstance(other, SequentialTransform):
-            return SequentialTransform([*other.transforms, *self.transforms])
-        else:
-            return SequentialTransform([other, *self.transforms])
-
-    def __iadd__(self, other):
-        if isinstance(other, SequentialTransform):
-            self.transforms += other.transforms
-        else:
-            self.transforms.append(other)
-
     def __repr__(self):
         return f'{type(self).__name__}({repr(self.transforms)})'
 
@@ -620,7 +611,7 @@ class MaybeTransform(Transform):
         ```
     """
 
-    def __init__(self, transform, prob=0.5, *, shared=False):
+    def __init__(self, transform, prob=0.5, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -632,7 +623,7 @@ class MaybeTransform(Transform):
         shared : bool
             Roll the dice once for all input tensors
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.subtransform = transform
         self.prob = prob
 
@@ -677,7 +668,7 @@ class SwitchTransform(Transform):
         ```
     """
 
-    def __init__(self, transforms, prob=0, *, shared=False):
+    def __init__(self, transforms, prob=0, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -689,7 +680,7 @@ class SwitchTransform(Transform):
         shared : bool
             Roll the dice once for all input tensors
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.transforms = list(transforms)
         if not prob:
             prob = []
@@ -796,7 +787,7 @@ class RandomizedTransform(Transform):
 
     """
 
-    def __init__(self, transform, sample, ksample=None, *, shared=False):
+    def __init__(self, transform, sample, ksample=None, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -807,7 +798,7 @@ class RandomizedTransform(Transform):
             A collection of functions that generate parameter values provided
             to `transform`.
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.sample = sample
         self.ksample = ksample
         self.subtransform = transform
