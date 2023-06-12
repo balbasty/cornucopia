@@ -51,6 +51,7 @@ from .kspace import *
 from .labels import *
 from .noise import *
 from .psf import *
+from .qmri import *
 from .synth import *
 from .utils.patch import patch_apply
 
