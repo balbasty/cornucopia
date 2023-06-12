@@ -1,5 +1,9 @@
-__all__ = ['ArrayCoilTransform', 'SumOfSquaresTransform',
-           'IntraScanMotionTransform', 'SmallIntraScanMotionTransform']
+__all__ = [
+    'ArrayCoilTransform',
+    'SumOfSquaresTransform',
+    'IntraScanMotionTransform',
+    'SmallIntraScanMotionTransform',
+]
 
 import torch
 import math
@@ -7,7 +11,7 @@ import random
 from .base import Transform, prepare_output
 from .intensity import MultFieldTransform
 from .geometric import RandomAffineTransform
-from .random import Fixed
+from .random import Sampler, Fixed
 from .utils.py import cartesian_grid
 
 
@@ -294,3 +298,4 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
         mask = torch.zeros(n, dtype=torch.bool, device=device)
         mask[:k] = 1
         return [mask, ~mask]
+
