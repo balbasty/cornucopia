@@ -18,7 +18,6 @@ from .utils.py import ensure_list
 from .utils.morpho import bounded_distance
 import interpol
 import distmap
-import random as pyrand
 import math as pymath
 
 
@@ -236,9 +235,9 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
         ----------
         mu : Sampler or [list of] float
             Sampling function for cluster means, or upper bound
-        sigma : callable or [list of] float
+        sigma : Sampler or [list of] float
             Sampling function for cluster standard deviations, or upper bound
-        fwhm : callable or [list of] float
+        fwhm : Sampler or [list of] float
             Sampling function for smoothing width, or upper bound
         background : int, optional
             Index of background channel
