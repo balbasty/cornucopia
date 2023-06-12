@@ -117,7 +117,8 @@ class IntensityTransform(SequentialTransform):
                  resolution=8,
                  snr=10,
                  gfactor=5,
-                 order=3):
+                 order=3,
+                 **kwargs):
         """
         Parameters
         ----------
@@ -183,7 +184,7 @@ class IntensityTransform(SequentialTransform):
         # If `clamp`, then clip values inside (vmin, vmax).
         # Default: pmin=0.01, pmax=0.99, vmin=0, vmax=1, clamp=False
         steps += [QuantileTransform()]
-        super().__init__(steps)
+        super().__init__(steps, **kwargs)
 
 
 class SynthFromLabelTransform(Transform):
@@ -354,5 +355,3 @@ class SynthFromLabelTransform(Transform):
         img = self.intensity(img)
         lab = postproc(lab)
         return Kwargs(image=img, label=lab)
-
-
