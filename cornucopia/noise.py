@@ -158,6 +158,10 @@ class GammaNoiseTransform(Transform):
         alpha = self.mean * beta
         alpha = torch.as_tensor(alpha, dtype=x.dtype, device=x.device)
         beta = torch.as_tensor(beta, dtype=x.dtype, device=x.device)
+
+        #alpha = torch.as_tensor(1.25, dtype=x.dtype, device=x.device)
+        #beta = torch.as_tensor(1.25, dtype=x.dtype, device=x.device)
+
         return torch.distributions.Gamma(alpha, beta).sample(x.shape)
 
     def apply_transform(self, x, parameters):
