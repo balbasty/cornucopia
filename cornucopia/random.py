@@ -258,3 +258,65 @@ def lower_range(x, max=0):
     if not isinstance(x, Sampler):
         x = (x, max)
     return x
+
+
+def make_range(*args, **kwargs):
+    """
+    ```python
+    make_range([min], max, *, offset=0)
+    ```
+
+    If any of the inputs is a Sampler, return the Sampler.
+
+    Else, build a (lower, upper) range.
+
+    !!! examples
+        ```python
+        # full range
+        make_range(x, y) -> (x, y)
+        make_range(x, y, offset=1) -> (1+x, 1+y)
+        # symmetric range
+        make_range(x) -> (-x, x)
+        make_range(x, offset=1) -> (1-x, 1+x)
+        # upper bound
+        make_range(0, x) -> (0, x)
+        make_range(x, min=0) -> (0, x)
+        # lower bound
+        make_range(x, 1) -> (x, 1)
+        make_range(x, max=1) -> (x, 1)
+        ```
+    """
+    for x in args:
+        if isinstance(x, Sampler):
+            return x
+        elif isinstance(x, (list, tuple)):
+            return x
+    for x in kwargs.values():
+        if isinstance(x, Sampler):
+            return x
+        elif isinstance(x, (list, tuple)):
+            return x
+    assert len(args) <= 2
+    vmid = kwargs.get('offset', 0)
+    if len(args) == 2:
+        return (vmid + args[0], vmid + args[1])
+    vmin = kwargs.get('min', None)
+    vmax = kwargs.get('max', None)
+    if vmin is not None and vmax is not None:
+        assert len(args) == 0
+        return vmin + vmin, vmid + vmax
+    elif vmax is not None:
+        assert len(args) <= 1
+        if args:
+            return vmid + args[0], vmid + vmax
+        else:
+            return vmid - vmax, vmid + vmax
+    elif vmin is not None:
+        assert len(args) <= 1
+        if args:
+            return vmid + vmin, vmid + args[0]
+        else:
+            return vmid + vmin, vmid - vmin
+    else:
+        assert len(args) > 0
+        return vmid - args[0], vmid + args[0]

@@ -345,3 +345,7 @@ def ind2sub(ind: int, shape: List[int]) -> List[int]:
             sub[d] = remainder(sub[d], stride[d-1])
         sub[d] = sub[d] // stride[d]
     return sub
+
+def positive_index(index, size):
+    """Transform negative indices into positive indices"""
+    return size + index if index < 0 else index

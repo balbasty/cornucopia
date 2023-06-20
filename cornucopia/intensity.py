@@ -3,22 +3,24 @@ __all__ = ['AddFieldTransform', 'MultFieldTransform', 'BaseFieldTransform',
            'GlobalMultTransform', 'RandomGlobalMultTransform',
            'GlobalAdditiveTransform', 'RandomGlobalAdditiveTransform',
            'GammaTransform', 'RandomGammaTransform',
-           'ZTransform', 'QuantileTransform']
+           'ZTransform', 'QuantileTransform', 'RandomSlicewiseMultFieldTransform']
 
 import torch
 from torch.nn.functional import interpolate
+import math
 import interpol
 from .base import Transform, RandomizedTransform
 from .random import Sampler, Uniform, RandInt, Fixed, \
-                    sym_range, upper_range, lower_range
-from .utils.py import ensure_list
+                    sym_range, upper_range, lower_range, make_range
+from .utils.py import ensure_list, positive_index
 
 
 class BaseFieldTransform(Transform):
 
-    def __init__(self, shape=5, vmin=0, vmax=1, order=3, shared=False):
+    def __init__(self, shape=5, vmin=0, vmax=1, order=3,
+                 slice=None, thickness=None,
+                 *, shared=False, **kwargs):
         """
-
         Parameters
         ----------
         shape : [list of] int
@@ -91,6 +93,7 @@ class AddFieldTransform(BaseFieldTransform):
 
     def apply_transform(self, x, parameters):
         return x + parameters
+
 
 
 class RandomAddFieldTransform(RandomizedTransform):
@@ -361,3 +364,74 @@ class QuantileTransform(Transform):
             x = x.clamp_(0, 1)
         x = x.mul_(self.vmax - self.vmin).add_(self.vmin)
         return x
+
+class RandomSlicewiseMultFieldTransform(RandomizedTransform):
+    """Random multiplicative bias field transform, per slice or slab"""
+
+    def __init__(self, shape=8, vmax=1, order=3, slice=None, thickness=32,
+                 shape_through=None, *, shared=False):
+        """
+        Parameters
+        ----------
+        shape : Sampler or int
+            Sampler or Upper bound for number of control points
+        vmax : Sampler or float
+            Sampler or Upper bound for maximum value
+        order : int
+            Spline order
+        slice : int
+            Slice axis. If None, sample one randomly
+        thickness:
+            Sampler or Upper bound for slice thickness
+        shape_through : Sampler or int
+            Sampler or Upper bound for number of control points
+            along the slice direction. If None, same as `shape`.
+        shared : bool
+            Whether to share random parameters across channels
+        """
+        if shape_through is not None:
+            shape_through = RandInt.make(make_range(1, shape_through))
+        kwargs = dict(vmax=Uniform.make(make_range(0, vmax)),
+                      shape=RandInt.make(make_range(2, shape)),
+                      order=Fixed.make(order),
+                      slice=slice,
+                      thickness=RandInt.make(make_range(0, thickness)),
+                      shape_through=shape_through)
+        super().__init__(MultFieldTransform, kwargs, shared=shared)
+
+    def get_parameters(self, x):
+        ndim = x.ndim - 1
+        shape_orig = self.sample['shape']
+        shape_through_orig = self.sample['shape_through']
+        slice_orig = self.sample['slice']
+        thickness_orig = self.sample['thickness']
+
+        if self.sample['slice'] is None:
+            self.sample['slice'] = RandInt(x.ndim-2)
+        if shape_through_orig is not None:
+            if isinstance(self.sample['slice'], Sampler):
+                self.sample['slice'] = self.sample['slice']()
+            self.sample['slice'] = positive_index(self.sample['slice'], ndim)
+            shape = shape_orig
+            if isinstance(shape, Sampler):
+                shape = shape(ndim)
+            shape = list(ensure_list(shape, ndim))
+            thickness = thickness_orig
+            if isinstance(thickness, Sampler):
+                thickness = thickness()
+            shape_through = shape_through_orig
+            if isinstance(shape_through, Sampler):
+                shape_through = shape_through()
+            shape_through *= int(math.ceil(x.shape[1+self.sample['slice']] / thickness))
+            shape[self.sample['slice']] = shape_through
+            print(shape)
+            self.sample['shape'] = shape
+        self.sample.pop('shape_through')
+
+        out = super().get_parameters(x)
+
+        self.sample['shape'] = shape_orig
+        self.sample['shape_through'] = shape_through_orig
+        self.sample['slice'] = slice_orig
+        self.sample['thickness'] = thickness_orig
+        return out
