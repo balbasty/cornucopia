@@ -424,7 +424,7 @@ class RandomSlicewiseMultFieldTransform(RandomizedTransform):
                 shape_through = shape_through()
             shape_through *= int(math.ceil(x.shape[1+self.sample['slice']] / thickness))
             shape[self.sample['slice']] = shape_through
-            print(shape)
+            #print(shape)
             self.sample['shape'] = shape
         self.sample.pop('shape_through')
 
