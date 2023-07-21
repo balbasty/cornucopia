@@ -292,8 +292,10 @@ class RandomAffineTransform(RandomizedTransform):
         """
         def to_range(vmax):
             if not isinstance(vmax, Sampler):
-                if isinstance(vmax, (list, tuple)):
+                if isinstance(vmax, (list)): #, tuple)):
                     vmax = ([-v for v in vmax], vmax)
+                elif isinstance(vmax, (tuple)):
+                    vmax = vmax
                 else:
                     vmax = (-vmax, vmax)
             return vmax
@@ -530,8 +532,9 @@ class SlicewiseAffineTransform(Transform):
     #       motion if False.
 
     def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
+                 bulk_translations=0, bulk_rotations=0, bulk_shears=0, bulk_zooms=0,
                  slice=-1, unit='fov', bound='border',
-                 spacing=1, fwhm=1, shared=True):
+                 spacing=1, subsample=1, fwhm=1, shared=True):
         """
 
         Parameters
@@ -571,10 +574,15 @@ class SlicewiseAffineTransform(Transform):
         self.rotations = rotations
         self.zooms = zooms
         self.shears = shears
+        self.bulk_translations = bulk_translations
+        self.bulk_rotations = bulk_rotations
+        self.bulk_shears = bulk_shears
+        self.bulk_zooms = bulk_zooms
         self.unit = unit
         self.bound = bound
         self.slice = slice
         self.spacing = spacing
+        self.subsample = subsample
         self.fwhm = fwhm
 
     def get_parameters_inplane(self, x, fullsize=True):
@@ -607,6 +615,7 @@ class SlicewiseAffineTransform(Transform):
         oshape = list(fullshape)
         oshape[zindex] = fullshape[zindex] // self.spacing
         nb_slice = oshape[zindex]
+        fullshape[zindex] = nb_slice * self.spacing
 
         backend = dict(dtype=x.dtype, device=x.device)
         if not backend['dtype'].is_floating_point:
@@ -616,16 +625,24 @@ class SlicewiseAffineTransform(Transform):
         shears = [ensure_list(s, ndim * (ndim - 1) // 2) for s in self.shears]
         translations = [ensure_list(t, ndim) for t in self.translations]
         zooms = [ensure_list(z, ndim) for z in self.zooms]
+
+        bulk_rotations = ensure_list(self.bulk_rotations, ndim * (ndim - 1) // 2)
+        bulk_shears = ensure_list(self.bulk_shears, ndim * (ndim - 1) // 2)
+        bulk_translations = ensure_list(self.bulk_translations, ndim)
+        bulk_zooms = ensure_list(self.bulk_zooms, ndim)
+
         offsets = [(n-1)/2 for n in fullshape]
 
         if self.unit == 'fov':
             translations = [[t1 * n for t1, n in zip(t, fullshape)] for t in translations]
+            bulk_translations = [t1 * n for t1, n in zip(bulk_translations, fullshape)]
         rotations = [[r1 * math.pi / 180 for r1 in r] for r in rotations]
+        bulk_rotations = [r1 * math.pi / 180 for r1 in bulk_rotations]
 
-        rotations = torch.as_tensor(rotations, **backend)
-        shears = torch.as_tensor(shears, **backend)
-        translations = torch.as_tensor(translations, **backend)
-        zooms = torch.as_tensor(zooms, **backend)
+        rotations = torch.as_tensor(rotations, **backend) + torch.as_tensor(bulk_rotations, **backend)
+        shears = torch.as_tensor(shears, **backend) + torch.as_tensor(bulk_shears, **backend)
+        translations = torch.as_tensor(translations, **backend) + torch.as_tensor(bulk_translations, **backend)
+        zooms = torch.as_tensor(zooms, **backend) + torch.as_tensor(bulk_zooms, **backend)
         offsets = torch.as_tensor(offsets, **backend)
 
         I = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
@@ -674,53 +691,32 @@ class SlicewiseAffineTransform(Transform):
         if not fullsize:
             return A
 
-        if self.fwhm:
-            kernel = smoothing_kernel('gauss', self.fwhm * self.spacing, basis=0,
-                                      dtype=x.dtype, device=x.device,
-                                      sep=False).squeeze()
-            idshape = list(fullshape)
-            idshape[zindex] += 2*((len(kernel) - 1) // 2)
-            id = warps.identity(idshape, dtype=A.dtype, device=A.device)
-            id[..., zindex] -= (len(kernel) - 1) // 2
-            id[..., zindex].clamp_(0, fullshape[zindex]-1)
-            id = id.unfold(zindex-1, len(kernel), 1).movedim(-1, 0)
-            # id: [K, *ishape, D]
-        else:
-            id = warps.identity(fullshape, dtype=A.dtype, device=A.device)[None]
-
-        if self.spacing != 1:
-            slicer = [slice(None)] * (ndim + 2)
-            slicer[zindex-1] = slice((self.spacing-1)//2, None, self.spacing)
-            id = id[tuple(slicer)]
-            slicer[zindex-1] = slice(nb_slice)
-            id = id[tuple(slicer)]
-            # id: [K, *oshape, D]
-
-        t = id.movedim(-1, 0).movedim(zindex, -1).movedim(0, -1)    # [K, *oshape, Z, D]
+        id = warps.identity(fullshape, dtype=A.dtype, device=A.device) #subsample here
+        id = id[::self.subsample,::self.subsample,::self.subsample]
+        t = id.unfold(zindex-1, self.spacing//self.subsample, self.spacing//self.subsample).movedim(-1, 0) #helper function
+        t = t.movedim(-1, 0).movedim(zindex, -1).movedim(0, -1)    # [K, *oshape, Z, D]
         t = A[:, :-1, :-1].matmul(t.unsqueeze(-1)).squeeze(-1).add_(A[:, :-1, -1])
-        t = t.movedim(-1, 0).movedim(-1, zindex).movedim(0, -1)     # [K, *oshape, D]
-        f = t - id                                                  # flow
-        f[..., zindex] /= self.spacing
-        if self.fwhm:
-            f = f.movedim(0, -1).matmul(kernel.unsqueeze(-1)).squeeze(-1)
-        else:
-            f = f[0]
-        f = f.movedim(-1, 0)
+        t = t.transpose(0,-1).flatten(-2).movedim(-1, zindex).movedim(0,-1)
+        f = (t - id).movedim(-1, 0) * (1 / self.subsample)
+
         return A, f, t
 
     def apply_transform(self, x, parameters):
         matrix, flow, warp = parameters
 
-        x = warps.apply_flow(x[None], warp, padding_mode=self.bound,
-                             has_identity=True)
+        channels, *fullshape = flow.shape
+        ndim = len(fullshape)
+        zindex = self.slice - ndim if self.slice >= 0 else self.slice
 
-        if self.fwhm:
-            kernel = smoothing_kernel('gauss', self.fwhm * self.spacing, basis=0,
-                                      dtype=x.dtype, device=x.device,
-                                      sep=False).squeeze()
-            x = x.movedim(0, -1).matmul(kernel.unsqueeze(-1)).squeeze(-1)
-        else:
-            x = x[0]
+        kernel = torch.ones([self.spacing//self.subsample, 1], device=x.device) * \
+            torch.as_tensor(1/(self.spacing//self.subsample)).sqrt()
+
+        x = warps.apply_flow(x[None], warp, padding_mode=self.bound, has_identity=True)[0]
+        x = x.narrow(zindex, 0, fullshape[zindex])
+
+        if x.is_floating_point():
+            x = x.movedim(zindex, -1).unfold(-1, self.spacing//self.subsample, self.spacing//self.subsample)
+            x = x.matmul(kernel).matmul(kernel.t()).flatten(-2).movedim(-1, zindex)
 
         return x
 
@@ -730,9 +726,12 @@ class RandomSlicewiseAffineTransform(RandomizedTransform):
     SlicewiseAffineTransform with random parameters.
     """
 
-    def __init__(self, translations=0.1, rotations=15,
-                 shears=0, zooms=0, slice=-1, spacing=1, fwhm=1, shots=2,
-                 nodes=8, unit='fov', bound='border', shared=True):
+    def __init__(
+            self, 
+            translations=0.1, rotations=15, shears=0, zooms=0, 
+            bulk_translations=0.05, bulk_rotations=15, bulk_shears=0, bulk_zooms=0,
+            slice=-1, spacing=1, subsample=1, fwhm=1, shots=2,
+            nodes=8, unit='fov', bound='border', shared=True):
         """
 
         Parameters
@@ -780,7 +779,12 @@ class RandomSlicewiseAffineTransform(RandomizedTransform):
                             rotations=Uniform.make(to_range(rotations)),
                             shears=Uniform.make(to_range(shears)),
                             zooms=Uniform.make(to_range(zooms)),
+                            bulk_translations=Uniform.make(to_range(bulk_translations)),
+                            bulk_rotations=Uniform.make(to_range(bulk_rotations)),
+                            bulk_shears=Uniform.make(to_range(bulk_shears)),
+                            bulk_zooms=Uniform.make(to_range(bulk_zooms)),
                             spacing=Fixed.make(spacing),
+                            subsample=Fixed.make(subsample),
                             fwhm=Fixed.make(fwhm))
         super().__init__(SlicewiseAffineTransform, self._sample, shared=shared)
         self.unit = unit
@@ -802,10 +806,12 @@ class RandomSlicewiseAffineTransform(RandomizedTransform):
             nodes = nodes()
         nodes = min(nodes or nb_slices, nb_slices)
 
+        global_keys = ('bulk_translations', 'bulk_rotations', 'bulk_shears', 'bulk_zooms')
         slicewise_keys = ('translations', 'rotations', 'shears', 'zooms')
-        kwargs = {key: [val() for _ in range(nb_slices)]
-                  if key in slicewise_keys else val()
-                  for key, val in kwargs.items()}
+        kwargs = {key: [[val(), val(), val()] for _ in range(nb_slices)]
+                  if key in slicewise_keys 
+                  else [val(), val(), val()] if key in global_keys 
+                  else val() for key, val in kwargs.items()}
         kwargs['spacing'] = spacing
         if nodes < nb_slices:
             def node2slice(x):

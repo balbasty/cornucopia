@@ -39,8 +39,9 @@ class BaseFieldTransform(Transform):
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
         b = torch.rand([batch, *smallshape], **backend)
-        b = interpol.resize(b, shape=fullshape, interpolation=3,
-                            prefilter=False)
+
+        mode = 'trilinear' if len(fullshape) == 3 else 'bilinear' if len(fullshape) == 2 else 'linear'
+        b = torch.nn.functional.interpolate(b[None], fullshape, mode=mode, align_corners=True)[0]
         b.mul_(self.vmax-self.vmin).add_(self.vmin)
         return b
 
@@ -55,7 +56,7 @@ class MultFieldTransform(BaseFieldTransform):
 class RandomMultFieldTransform(RandomizedTransform):
     """Random multiplicative bias field transform"""
 
-    def __init__(self, shape=8, vmax=2, shared=False):
+    def __init__(self, shape=8, vmax=Uniform(0.75,1.25), shared=False):
         """
         Parameters
         ----------
