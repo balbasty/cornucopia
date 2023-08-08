@@ -157,15 +157,15 @@ class GFactorTransform(Transform):
 class GammaNoiseTransform(Transform):
     """Multiplicative Gamma noise"""
 
-    def __init__(self, mean=1, sigma=0.1, *, shared=False, **kwargs):
+    def __init__(self, sigma=0.1, mean=1, *, shared=False, **kwargs):
         """
 
         Parameters
         ----------
-        mean : float
-            Expected value
         sigma : float
             Standard deviation
+        mean : float
+            Expected value
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
         shared : bool
@@ -185,21 +185,21 @@ class GammaNoiseTransform(Transform):
 
     def apply_transform(self, x, parameters):
         y = x * parameters
-        return prepare_output(dict(input=x, outptu=y, noise=parameters),
+        return prepare_output(dict(input=x, output=y, noise=parameters),
                               self.returns)
 
 
 class RandomGammaNoiseTransform(RandomizedTransform):
     """Multiplicative Gamma noise with random standard deviation and mean"""
 
-    def __init__(self, mean=Fixed(1), sigma=0.1, *, shared=False, **kwargs):
+    def __init__(self, sigma=0.1, mean=Fixed(1), *, shared=False, **kwargs):
         """
         Parameters
         ----------
-        mean : Sampler or float
-            Sampler or upper bound for the mean
         sigma : Sampler or float
             Sampler or upper bound for the standard deviation
+        mean : Sampler or float
+            Sampler or upper bound for the mean
         shared : bool
             Use the same mean/sd for all channels/images
         """
