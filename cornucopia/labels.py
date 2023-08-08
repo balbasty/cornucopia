@@ -185,6 +185,7 @@ class GaussianMixtureTransform(Transform):
 
     def apply_transform(self, x, parameters):
         mu, sigma = parameters
+        ndim = x.ndim - 1
         getitem = lambda x: x.item() if torch.is_tensor(x) else x
 
         if x.is_floating_point():
@@ -197,7 +198,7 @@ class GaussianMixtureTransform(Transform):
                     continue
                 y1 = torch.randn(x.shape[1:], **backend)
                 if fwhm[k]:
-                    y1 = smoothnd(y1, fwhm=fwhm[k])
+                    y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
                 y += y1.mul_(sigmak).add_(muk).mul_(x[k])
             y = y[None]
         else:
@@ -212,7 +213,7 @@ class GaussianMixtureTransform(Transform):
                     continue
                 if fwhm[k]:
                     y1 = torch.randn(x.shape, **backend)
-                    y1 = smoothnd(y1, fwhm=fwhm[k])
+                    y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
                     y += y1.mul_(sigmak).add_(muk).masked_fill_(x != k, 0)
                 else:
                     mask = x == k
@@ -310,7 +311,7 @@ class SmoothLabelMap(Transform):
                                      prefilter=False)
                 mask = maxprob < b1
                 b.masked_fill_(mask, k)
-                maxprob[mask] = b1[mask]
+                maxprob = torch.where(mask, b1, maxprob)
         return b
 
     def apply_transform(self, x, parameters):
@@ -415,7 +416,7 @@ class ErodeLabelTransform(Transform):
                 mask = d1 < -radius
             else:
                 mask = d1 < d
-            d[mask] = d1[mask]
+            d = torch.where(mask, d1, d)
             y.masked_fill_(mask, label)
         return y
 
@@ -511,7 +512,7 @@ class DilateLabelTransform(Transform):
             d1 = dist(x0, radius)
             mask = d1 < radius
             mask = mask & (d1 < d)
-            d[mask] = d1[mask]
+            d = torch.where(mask, d1, d)
             y.masked_fill_(mask, label)
         return y
 
@@ -695,8 +696,9 @@ class SmoothMorphoLabelTransform(Transform):
                 radius = 0
             d1 = dist(x0).to(d).sub_(radius)
             mask = d1 < d
-            d[mask] = d1[mask]
-            y.masked_fill_(mask, label)
+            if mask.any():
+                d = torch.where(mask, d1, d)
+                y.masked_fill_(mask, label)
         return prepare_output(dict(input=x, output=y), self.returns)
 
 
@@ -830,7 +832,7 @@ class SmoothShallowLabelTransform(Transform):
             d1 = dist(x0).to(d)
             mask = (d1 < 0) & (d1 > radius)
             m.masked_fill_(d1 < radius, True)
-            d[mask] = d1[mask]
+            d = torch.where(mask, d1, d)
             y.masked_fill_(mask, label)
 
         # elsewhere, use maximum probability labels
@@ -849,7 +851,7 @@ class SmoothShallowLabelTransform(Transform):
             else:
                 d1 = dist(x0).to(d)
                 mask = d1 < d
-                d[mask] = d1[mask]
+                d = torch.where(mask, d1, d)
                 y.masked_fill_(mask, label)
 
         return prepare_output(dict(input=x, output=y), self.returns)
