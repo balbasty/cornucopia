@@ -764,7 +764,7 @@ def switch(map):
     SwitchTransform
 
     """
-    return SwitchTransform(map.keys(), map.values())
+    return SwitchTransform(list(map.keys()), list(map.values()))
 
 
 class RandomizedTransform(Transform):
