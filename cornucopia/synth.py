@@ -78,7 +78,7 @@ __all__ = ['SynthFromLabelTransform', 'IntensityTransform']
 
 from .base import SequentialTransform, RandomizedTransform, SwitchTransform, Transform, Kwargs
 from .labels import RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
-from .intensity import RandomMultFieldTransform, RandomGammaTransform, QuantileTransform
+from .intensity import RandomMulFieldTransform, RandomGammaTransform, QuantileTransform
 from .psf import RandomSmoothTransform, RandomLowResSliceTransform, RandomLowResTransform
 from .noise import RandomChiNoiseTransform, GFactorTransform
 from .geometric import RandomAffineElasticTransform
@@ -142,7 +142,7 @@ class IntensityTransform(SequentialTransform):
 
         if bias:
             bias = bias if isinstance(bias, Sampler) else RandInt(2, bias)
-            bias = RandomMultFieldTransform(bias, vmax=Fixed(2), order=order)
+            bias = RandomMulFieldTransform(bias, vmax=Fixed(2), order=order)
             steps += [bias]
 
         if gamma:

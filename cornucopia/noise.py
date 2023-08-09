@@ -5,7 +5,7 @@ __all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
 
 import torch
 from .base import Transform, RandomizedTransform, prepare_output
-from .intensity import MultFieldTransform
+from .intensity import MulFieldTransform
 from .random import Uniform, RandInt, Fixed, make_range
 
 
@@ -135,7 +135,7 @@ class GFactorTransform(Transform):
         """
         super().__init__(returns=returns, **kwargs)
         self.noise = noise
-        self.gfactor = MultFieldTransform(shape, vmin=vmin, vmax=vmax)
+        self.gfactor = MulFieldTransform(shape, vmin=vmin, vmax=vmax)
 
     def get_parameters(self, x):
         noisetrf, noise = self.noise, self.noise.get_parameters(x)

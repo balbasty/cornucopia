@@ -11,7 +11,13 @@ __all__ = ['OneHotTransform', 'ArgMaxTransform',
 
 import torch
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
-from .base import Transform, RandomizedTransform, prepare_output
+from .base import (
+    Transform,
+    FinalTransform,
+    NonFinalTransform,
+    RandomizedTransform, 
+    prepare_output,
+)
 from .intensity import BaseFieldTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
@@ -105,7 +111,7 @@ class ArgMaxTransform(Transform):
         return x.argmax(0)[None]
 
 
-class RelabelTransform(Transform):
+class RelabelTransform(NonFinalTransform):
     """Relabel a label map"""
 
     def __init__(self, labels=None, **kwargs):
@@ -113,11 +119,12 @@ class RelabelTransform(Transform):
 
         !!! note
 
-            The `labels` are mapped to the range `{1..len(labels)}`.
+            - The `labels` are mapped to the range `{1..len(labels)}`.
 
-            If an element of this list is a sublist of indices, they are merged.
+            - If an element of this list is a sublist of indices,
+              indices in the sublist are merged.
 
-            All labels absent from the list are mapped to `0`.
+            - All labels absent from the list are mapped to `0`.
 
         Parameters
         ----------
@@ -125,19 +132,25 @@ class RelabelTransform(Transform):
             Relabeling scheme.
 
         """
-        super().__init__(shared=False, **kwargs)
+        super().__init__(**kwargs)
         self.labels = labels
 
-    def get_parameters(self, x):
+    def make_final(self, x):
+        if self.is_final:
+            return self
         labels = self.labels
         if labels is None:
             labels = x.unique().tolist()[1:]
-        return labels
+        xform = RelabelTransform(labels, **self.get_prm())
+        xform.is_final = True
+        return xform
 
-    def apply_transform(self, x, parameters):
-        labels = parameters
+    def apply(self, x):
+        if self.labels is None:
+            return self.make_final(x)(x)
+        assert self.labels is not None
         y = torch.zeros_like(x)
-        for out, inp in enumerate(labels):
+        for out, inp in enumerate(self.labels):
             out = out + 1
             if not isinstance(inp, (list, tuple)):
                 inp = [inp]

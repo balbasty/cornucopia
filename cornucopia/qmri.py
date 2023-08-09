@@ -12,7 +12,7 @@ import torch
 import math
 from .base import Transform, RandomizedTransform, prepare_output
 from .labels import GaussianMixtureTransform
-from .intensity import RandomMultFieldTransform
+from .intensity import RandomMulFieldTransform
 from .random import Sampler, Uniform, make_range
 from .utils.py import ensure_list, make_vector
 from .utils import b0
@@ -365,7 +365,7 @@ class RandomGMMGradientEchoTransform(Transform):
     """
 
     def __init__(self, tr=50e-3, te=50e-3, alpha=90, pd=1, t1=10, t2=100, mt=0.1,
-                 b1=RandomMultFieldTransform(vmax=1.5),
+                 b1=RandomMulFieldTransform(vmax=1.5),
                  sigma=0.2, fwhm=2, **kwargs):
         """
         Parameters

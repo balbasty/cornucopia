@@ -9,7 +9,7 @@ import torch
 import math
 import random
 from .base import Transform, prepare_output
-from .intensity import MultFieldTransform
+from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
 from .random import Sampler, Fixed
 from .utils.py import cartesian_grid
@@ -60,7 +60,7 @@ class ArrayCoilTransform(Transform):
         backend = dict(dtype=x.dtype, device=x.device)
         fake_x = torch.zeros([], **backend).expand([2*self.ncoils, *x.shape[1:]])
 
-        smooth_bias = MultFieldTransform(shape=self.shape, vmin=-1, vmax=1)
+        smooth_bias = MulFieldTransform(shape=self.shape, vmin=-1, vmax=1)
         smooth_bias = smooth_bias.get_parameters(fake_x)
         phase = smooth_bias[::2].atan2(smooth_bias[1::2])
         magnitude = (smooth_bias[::2].square() + smooth_bias[1::2].square()).sqrt_()

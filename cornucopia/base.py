@@ -1,205 +1,44 @@
-__all__ = ['Transform', 'SequentialTransform', 'RandomizedTransform',
-           'MaybeTransform', 'MappedTransform', 'SwitchTransform',
-           'BatchedTransform', 'MappedKeysTransform', 'MappedExceptKeysTransform',
-           'randomize', 'map', 'switch', 'include', 'exclude', 'batch',
-           'include_keys', 'exclude_keys']
-
+__all__ = [
+    'Transform',
+    'FinalTransform',
+    'NonFinalTransform',
+    'SpecialMixin',
+    'IdentityTransform',
+    'SequentialTransform',
+    'PerChannelTransform',
+    'MaybeTransform',
+    'SwitchTransform',
+    'IncludeKeysTransform',
+    'ExcludeKeysTransform',
+    'SharedTransform',
+    'ReturningTransform',
+    'MappedTransform',
+    'RandomizedTransform',
+]
 import torch
 from torch import nn
 import random
-from .utils.py import ensure_list, cumsum
 from .random import Sampler
-
-
-def _get_first_element(x):
-    """Return the fist element (tensor or string) in the nested structure"""
-    def _recursive(x):
-        if hasattr(x, 'items'):
-            for k, v in x.items():
-                v, ok = _recursive(v)
-                if ok: return v, True
-            return None, False
-        if isinstance(x, (list, tuple)):
-            for v in x:
-                v, ok = _recursive(v)
-                if ok: return v, True
-            return None, False
-        return x, True
-    return _recursive(x)[0]
-
-
-def _recursive_cat(x, **kwargs):
-    """Concatenate tensors across the channel axis in a nested structure"""
-    def _rec(*x):
-        if all(torch.is_tensor(x1) for x1 in x):
-            return torch.cat(x, **kwargs)
-        if isinstance(x[0], (list, tuple)):
-            return type(x[0])(_rec(*x1) for x1 in zip(*x))
-        if hasattr(x[0], 'items'):
-            return type(x[0])(**{k: _rec(*x2)
-                                 for k in x[0].keys()
-                                 for x2 in zip(x1[k] for x1 in x)})
-        raise TypeError(f'What should I do with a {type(x[0])}?')
-    return _rec(*x)
-
-
-class Arguments:
-    """Base class for returned arguments"""
-    pass
-
-
-class Args(tuple, Arguments):
-    """Tuple-like"""
-    pass
-
-
-class Kwargs(dict, Arguments):
-    """Dict-like, except that unzipping works on values instead of keys"""
-
-    def __iter__(self):
-        for v in self.values():
-            yield v
-
-
-class ArgsAndKwargs(Arguments):
-    """Iterator across both args and kwargs"""
-    def __init__(self, args, kwargs):
-        self.args = Args(args)
-        self.kwargs = Kwargs(kwargs)
-
-    def __iter__(self):
-        for a in self.args:
-            yield a
-        for v in self.kwargs:
-            yield v
-
-
-class Returned:
-    """Internal object used to mark that this is an object returned
-    by `transform_tensor` at the most nested level"""
-    def __init__(self, obj):
-        self.obj = obj
-
-
-class include:
-    """
-    Context manager for keys to include
-
-    !!! example
-        ```python
-        with include(xform, "image"):
-            image, label = xform(image=image, label=label)
-        ```
-    """
-
-    def __init__(self, transform, keys, union=True):
-        """
-        Parameters
-        ----------
-        transform : Transform
-            Transform to apply
-        keys : [sequence of] str
-            Keys to include
-        union : bool
-            Include the union of what was already included and `keys`
-        """
-        if keys and not isinstance(keys, (list, tuple)):
-            keys = [keys]
-        self.transform = transform
-        self.keys = list(keys) if keys else keys
-        self.union = union
-
-    def __enter__(self):
-        self.include = self.transform._include
-        self.transform._include = self.keys
-        if self.union and self.include is not None:
-            if self.transform._include is not None:
-                self.transform._include = self.transform._include + self.include
-            else:
-                self.transform._include = self.include
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.transform._include = self.include
-
-
-class exclude:
-    """
-    Context manager for keys to exclude.
-
-    !!! example
-        ```python
-        with exclude(xform, "image"):
-            image, label = xform(image=image, label=label)
-        ```
-    """
-
-    def __init__(self, transform, keys, union=True):
-        """
-        Parameters
-        ----------
-        transform : Transform
-            Transform to apply
-        keys : [sequence of] str
-            Keys to include
-        union : bool
-            Exclude the union of what was already excluded and `keys`
-        """
-        if keys and not isinstance(keys, (list, tuple)):
-            keys = [keys]
-        self.transform = transform
-        self.keys = list(keys) if keys else keys
-        self.union = union
-
-    def __enter__(self):
-        self.exclude = self.transform._exclude
-        self.transform._exclude = self.keys
-        if self.union and self.exclude:
-            if self.transform._exclude is not None:
-                self.transform._exclude = self.transform._exclude + self.exclude
-            else:
-                self.transform._exclude = self.exclude
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.transform._exclude = self.exclude
+from .utils.py import ensure_list, cumsum
+from .baseutils import (
+    Args, Kwargs, ArgsAndKwargs, Returned, VirtualTensor,
+    get_first_element, prepare_output, recursive_cat, unset,
+)
 
 
 class Transform(nn.Module):
     """
-    Base class for transforms.
-
-    Transforms are parameter-free modules that usually act on tensors
-    without a batch dimension (e.g., `[C, *spatial]`)
-
-    In general, transforms take an argument `shared` that can take values
-    `True`, `False`, `'tensors'` or `'channels'`. If a transform is
-    shared across tensors and/or channels, the parameters of the
-    transform are computed (or sampled) once and applied to all
-    tensors and/or channels.
-
-    Note that in nested transforms (i.e., a `MaybeTransform` or
-    `RandomizedTransform`), the value of `shared` may be different in
-    the parent anf child transform. For example, we may want to randomly
-    decide to apply (or not) a bias field at the parent level but, when
-    applied, let the bias field be different in each channel. Such a
-    transform would be defined as:
-    ```python
-    t = MaybeTransform(MultFieldTransform(shared=False), shared=True)
-    ```
-
-    Furthermore, the addition of two transforms implictly defines
-    (or extends) a `SequentialTransform`:
-    ```python
-    t1 = MultFieldTransform()
-    t2 = GaussianNoiseTransform()
-    seq = t1 + t2
-    ```
-
+    Base class for all transforms
     """
 
-    def __init__(self, *, returns=None, append=False, prefix=True, shared=False,
-                 include=None, exclude=None):
+    def __init__(self, *,
+                 returns=None,
+                 append=False,
+                 prefix=True,
+                 include=None,
+                 exclude=None,
+                 ):
         """
-
         Parameters
         ----------
         returns : [list or dict of] str
@@ -212,12 +51,6 @@ class Transform(nn.Module):
         prefix : bool
             If `append` and parent is a dict, prefix the child's key with
             the parent key.
-        shared : bool or 'channels' or 'tensors'
-
-            - If `True`: shared across tensors and channels
-            - If `'channels'`: shared across channels
-            - If `'tensors'`: shared across tensors
-            - If `False`: independent across tensors and channels
         include : str or list[str]
             List of keys to which the transform should apply
         exclude : str or list[str]
@@ -227,282 +60,24 @@ class Transform(nn.Module):
         self.returns = returns
         self.append = append
         self.prefix = prefix
-        self.shared = shared
-        self._include = ensure_list(include) if include is not None else None
-        self._exclude = ensure_list(exclude or tuple())
+        self.include = ensure_list(include) if include is not None else None
+        self.exclude = ensure_list(exclude or tuple())
+        self.is_final = False
 
-    def _apply_list(self, x, forward):
-        """Apply forward pass to elements of a list"""
-        y = []
-        for elem in x:
-            elem = forward(elem)
-            if isinstance(elem, Returned):
-                elem = elem.obj
-                if self.append:
-                    if isinstance(elem, dict):
-                        y.extend(elem.values())
-                        continue
-                    elif isinstance(elem, (list, tuple)):
-                        y.extend(elem)
-                        continue
-            y.append(elem)
-        print(y)
-        return type(x)(y)
+    def get_prm(self):
+        return dict(
+            returns=self.returns,
+            append=self.append,
+            prefix=self.prefix,
+            include=self.include,
+            exclude=self.exclude,
+        )
 
-    def _get_valid_keys(self, x):
-        valid_keys = x.keys()
-        if self._include is not None:
-            valid_keys = [k for k in valid_keys if k in self._include]
-        if self._exclude:
-            valid_keys = [k for k in valid_keys if k not in self._exclude]
-        return valid_keys
+    def __enter__(self):
+        return self
 
-    def _apply_dict(self, x, forward):
-        """Apply forward pass to elements of a dict"""
-        valid_keys = self._get_valid_keys(x)
-        y = {key: value for key, value in x.items() if key not in valid_keys}
-        for key, value in x.items():
-            if key not in valid_keys:
-                continue
-            value = forward(value)
-            if isinstance(value, Returned):
-                value = value.obj
-                if self.append:
-                    if isinstance(y, dict) and isinstance(value, dict):
-                        if self.prefix:
-                            value = {key + '_' + child_key: child_value
-                                     for child_key, child_value in value.items()}
-                        y.update(value)
-                        continue
-                    elif isinstance(y, list) and isinstance(value, dict):
-                        y.extend(value.values())
-                        continue
-                    elif isinstance(y, dict):
-                        y = list(y.values())
-                        if isinstance(value, (list, tuple)):
-                            y.extend(value)
-                            continue
-            if isinstance(y, dict):
-                y[key] = value
-            else:
-                y.append(value)
-        if isinstance(y, dict):
-            return type(x)(y)
-        else:
-            return y
-
-    def forward(self, *a, **k):
-        """Apply the transform recursively.
-
-        Parameters
-        ----------
-        x : [nested list or dict of] tensor
-            Input tensors, with shape `(C, *shape)`
-
-        Returns
-        -------
-        [nested list or dict of] tensor
-            Output tensors. with shape `(C, *shape)`
-
-        """
-        # DEV: this function should in general not be overloaded
-        out = self._forward(*a, **k)
-        if isinstance(out, Returned):
-            out = out.obj
-        return out
-
-    def _forward(self, *a, **k):
-        if k:
-            return self._forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
-        elif len(a) > 1:
-            return self._forward(Args(a))
-        elif not a:
-            return None
-
-        x = a[0]
-        intype = type(x)
-        outtype = lambda x: (ArgsAndKwargs(*x) if intype is ArgsAndKwargs else
-                             intype(x) if issubclass(intype, (Args, Kwargs))
-                             else x)
-        if isinstance(x, ArgsAndKwargs):
-            x = [tuple(x.args), dict(x.kwargs)]
-        elif isinstance(x, Args):
-            x = tuple(x)
-        elif isinstance(x, Kwargs):
-            x = dict(x)
-
-        if self.shared is True or (self.shared and self.shared[0] == 't'):
-            x0 = _get_first_element(x)
-            if torch.is_tensor(x0) and self.shared is True:
-                x0 = x0[0, None]
-            theta = self.get_parameters(x0)
-            x = self._forward_with_parameters(x, parameters=theta)
-            return outtype(x)
-
-        # not shared across images -> unfold
-        if isinstance(x, (list, tuple)):
-            return outtype(self._apply_list(x, self._forward))
-        if hasattr(x, 'items'):
-            x = self._apply_dict(x, self._forward)
-            if not isinstance(x, dict) and outtype in (Kwargs, ArgsAndKwargs):
-                return Args(x)
-            else:
-                return x
-
-        # now we're working with a single tensor (or str)
-        if self.shared is False:
-            y = self.transform_tensor_perchannel(x)
-        else:
-            y = self.transform_tensor(x)
-        if not isinstance(y, type(self.returns)):
-            y = dict(input=x, output=y)
-            y = prepare_output(y, self.returns)
-        elif isinstance(self.returns, dict):
-            for key, target in self.returns.items():
-                if target == 'input':
-                    y[key] = x
-        elif isinstance(self.returns, (list, tuple)):
-            for i, target in enumerate(self.returns):
-                if target == 'input':
-                    y[i] = x
-        return Returned(y)
-
-    def forward_with_parameters(self, x, parameters=None):
-        """Apply the transform with pre-computed parameters
-
-        Parameters
-        ----------
-        x : [nested list or dict of] tensor
-            Input tensors, with shape `(C, *shape)`
-        parameters : any
-            Pre-computed parameters of the transform
-
-        Returns
-        -------
-        [nested list or dict of] tensor
-            Output tensors, with shape `(C, *shape)`
-
-        """
-        # DEV: this function should in general not be overloaded
-        x = self._forward_with_parameters(x, parameters)
-        if isinstance(x, Returned):
-            x = x.obj
-        return x
-
-    def _forward_with_parameters(self, x, parameters=None):
-        forward = lambda elem: self._forward_with_parameters(elem, parameters=parameters)
-        if isinstance(x, (list, tuple)):
-            return self._apply_list(x, forward)
-        if hasattr(x, 'items'):
-            return self._apply_dict(x, forward)
-        x = self._apply_transform(x, parameters=parameters)
-        return x
-
-    def transform_tensor(self, x):
-        """Apply the transform to a single tensor
-
-        Parameters
-        ----------
-        x : tensor
-            A single input tensor, with shape `(C, *shape)`.
-
-        Returns
-        -------
-        x : tensor
-            A single output tensor, with shape `(C, *shape)`.
-
-        """
-        # DEV: this function can be overloaded if `shared` is not supported
-        theta = self.get_parameters(x)
-        return self.apply_transform(x, parameters=theta)
-
-    def _transform_tensor(self, x):
-        # This is only for internal use
-        return Returned(self.transform_tensor(x))
-
-    def transform_tensor_perchannel(self, x):
-        """Apply the transform to each channel of a single tensor
-
-        Parameters
-        ----------
-        x : tensor
-            A single input tensor, with shape `(C, *shape)`.
-
-        Returns
-        -------
-        x : tensor
-            A single output tensor, with shape `(C, *shape)`.
-
-        """
-        # DEV: This function should usually not be overloaded
-        channels = x.unbind(0)
-        channels = [self.transform_tensor(c[None]) for c in channels]
-        return _recursive_cat(channels, dim=0)
-
-    def _transform_tensor_perchannel(self, x):
-        # This is only for internal use
-        return Returned(self.transform_tensor_perchannel(x))
-
-    def get_parameters(self, x):
-        """Compute the parameters of a transform from an input tensor
-
-        Parameters
-        ----------
-        x : tensor
-            A single input tensor, with shape `(C, *shape)`.
-
-        Returns
-        -------
-        parameters : any
-            Computed parameters
-
-        """
-        # DEV: This function should be overloaded if `shared` is supported
-        return None
-
-    def apply_transform(self, x, parameters):
-        """Apply the transform to a single tensor using precomputed parameters
-
-        Parameters
-        ----------
-        x : tensor
-            A single input tensor, with shape `(C, *shape)`.
-        parameters : any
-            Precomputed parameters
-
-        Returns
-        -------
-        x : tensor
-            A single output tensor, with shape `(C, *shape)`.
-
-        """
-        raise NotImplementedError("This function should be implemented "
-                                  "in Transforms that handle `shared`.")
-
-    def _apply_transform(self, x, parameters):
-        # This is only for internal use
-        return Returned(self.apply_transform(x, parameters))
-
-    def transform_tensor_and_get_parameters(self, x):
-        """Apply the transform to a single tensor and return its parameters
-
-        Parameters
-        ----------
-        x : tensor
-            A single input tensor, with shape `(C, *shape)`.
-
-        Returns
-        -------
-        x : tensor
-            A single output tensor, with shape `(C, *shape)`.
-        parameters : any
-            Computed parameters.
-
-        """
-
-        # DEV: This function should probably not be overloaded
-        theta = self.get_parameters(x)
-        return self.apply_transform(x, parameters=theta), theta
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
 
     def __add__(self, other):
         return SequentialTransform([self, other])
@@ -528,8 +103,289 @@ class Transform(nn.Module):
     def __ior__(self, other):
         return SwitchTransform([self, other])
 
+    def __call__(self, *a, **k):
+        out = super().__call__(*a, **k)
+        if isinstance(out, Returned):
+            out = out.obj
+        return out
 
-class SequentialTransform(Transform):
+    def forward(self, *a, **k):
+        """Apply the transform recursively.
+
+        Parameters
+        ----------
+        x : [nested list or dict of] tensor
+            Input tensors, with shape `(C, *shape)`
+
+        Returns
+        -------
+        [nested list or dict of] tensor
+            Output tensors. with shape `(C, *shape)`
+
+        """
+        if k:
+            return self.forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
+        elif len(a) > 1:
+            return self.forward(Args(a))
+        elif not a:
+            return None
+
+        x = a[0]
+        intype = type(x)
+
+        def outtype(x):
+            return (ArgsAndKwargs(*x) if intype is ArgsAndKwargs
+                    else intype(x) if issubclass(intype, (Args, Kwargs))
+                    else x)
+
+        if isinstance(x, ArgsAndKwargs):
+            x = [tuple(x.args), dict(x.kwargs)]
+        elif isinstance(x, Args):
+            x = tuple(x)
+        elif isinstance(x, Kwargs):
+            x = dict(x)
+
+        # not shared across images -> unfold
+        if isinstance(x, (list, tuple)):
+            return outtype(self._forward_list(x, self.forward))
+        if hasattr(x, 'items'):
+            x = self._forward_dict(x, self.forward)
+            if not isinstance(x, dict) and outtype in (Kwargs, ArgsAndKwargs):
+                return Args(x)
+            else:
+                return x
+
+        # now we're working with a single tensor (or str)
+        y = self.apply(x)
+        if not isinstance(y, type(self.returns)):
+            y = dict(input=x, output=y)
+            y = prepare_output(y, self.returns)
+        elif isinstance(self.returns, dict):
+            for key, target in self.returns.items():
+                if target == 'input':
+                    y[key] = x
+        elif isinstance(self.returns, (list, tuple)):
+            for i, target in enumerate(self.returns):
+                if target == 'input':
+                    y[i] = x
+        return Returned(y)
+
+    def _get_valid_keys(self, x):
+        valid_keys = x.keys()
+        if self.include is not None:
+            valid_keys = [k for k in valid_keys if k in self.include]
+        if self.exclude:
+            valid_keys = [k for k in valid_keys if k not in self.exclude]
+        return valid_keys
+
+    def _forward_list(self, x: list, forward: callable = None):
+        """Apply forward pass to elements of a list"""
+        forward = forward or self.forward
+        y = []
+        for elem in x:
+            elem = forward(elem)
+            if isinstance(elem, Returned):
+                elem = elem.obj
+                if self.append:
+                    if isinstance(elem, dict):
+                        y.extend(elem.values())
+                        continue
+                    elif isinstance(elem, (list, tuple)):
+                        y.extend(elem)
+                        continue
+            y.append(elem)
+        return type(x)(y)
+
+    def _forward_dict(self, x: dict, forward: callable = None):
+        """Apply forward pass to elements of a dict"""
+        forward = forward or self.forward
+        valid_keys = self._get_valid_keys(x)
+        y = {key: value for key, value in x.items() if key not in valid_keys}
+        for key, value in x.items():
+            if key not in valid_keys:
+                continue
+            value = forward(value)
+            if isinstance(value, Returned):
+                value = value.obj
+                if self.append:
+                    if isinstance(y, dict) and isinstance(value, dict):
+                        if self.prefix:
+                            value = {
+                                key + '_' + child_key: child_value
+                                for child_key, child_value in value.items()
+                            }
+                        y.update(value)
+                        continue
+                    elif isinstance(y, list) and isinstance(value, dict):
+                        y.extend(value.values())
+                        continue
+                    elif isinstance(y, dict):
+                        y = list(y.values())
+                        if isinstance(value, (list, tuple)):
+                            y.extend(value)
+                            continue
+            if isinstance(y, dict):
+                y[key] = value
+            else:
+                y.append(value)
+        if isinstance(y, dict):
+            return type(x)(y)
+        else:
+            return y
+
+
+class FinalTransform(Transform):
+    """
+    Mixin for determinstic transforms.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.is_final = True
+
+    def apply(self, x):
+        """Apply the transform to a tensor
+
+        Parameters
+        ----------
+        x : (C_inp, *spatial_inp) tensor
+
+        Returns
+        -------
+        y : (C_out, *spatial_out) tensor
+        """
+        raise NotImplementedError()
+
+    def make_inverse(self):
+        """Generate the inverse transform"""
+        return IdentityTransform()
+
+    def inverse(self, *a, **k):
+        """Apply the inverse transform recursively
+
+        Parameters
+        ----------
+        x : [nested list or dict of] tensor
+            Input tensors, with shape `(C, *shape)`
+
+        Returns
+        -------
+        [nested list or dict of] tensor
+            Output tensors. with shape `(C, *shape)`
+
+        """
+        return self.make_inverse()(*a, **k)
+
+    def make_final(self, x, max_depth=float('inf')):
+        return self
+
+
+class IdentityTransform(FinalTransform):
+    """Identity transform"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def apply(x):
+        return x
+
+    def make_inverse(self):
+        return self
+
+
+class SharedMixin:
+
+    @classmethod
+    def _prepare_shared(cls, shared):
+        if shared is True:
+            shared = 'channels+tensors'
+        if shared is False or shared is None:
+            shared = ''
+        return shared
+
+    def apply(self, x):
+        if 'channels' in self.shared:
+            xform = self.make_final(x[:1])
+            return xform(x)
+        else:
+            return recursive_cat([self.make_final(x[i:i+1])(x)
+                                  for i in range(len(x))])
+
+    def forward(self, *a, **k):
+        return self._shared_forward(*a, **k)
+
+    def _shared_forward(self, *a, _fallback=None, **k):
+        _fallback = _fallback or super().forward
+        if 'tensors' in self.shared:
+            first_tensor = get_first_element(
+                [a, k], include=self.include, exclude=self.exclude)
+            if 'channels' in self.shared:
+                transform = self.make_final(first_tensor[:1])
+            else:
+                transform = self.make_final(first_tensor)
+            return transform(*a, **k)
+        return _fallback(*a, **k)
+
+
+class NonFinalTransform(SharedMixin, Transform):
+    """
+    Mixin for transforms whose parameters depend on features
+    of the input transform (shape, dtype, etc)
+
+    Parameters
+    ----------
+    shared : {'channels', 'tensors', 'channels+tensor', None}
+
+        - 'channel': the same transform is applied to all channels
+            in a tensor, but different transforms are used in different
+            tensors.
+        - 'tensors': the same transform is applied to all tensors,
+            but with a different transform for each channel.
+        - 'channels+tensors' or True: the same transform is applied
+            to all channels of all tensors.
+        - None or False: A different transform is applied to each
+            channel and each tensor.
+    """
+    def __init__(self, *, shared=False, **kwargs):
+        super().__init__(**kwargs)
+        self.shared = self._prepare_shared(shared)
+
+    def make_final(self, x, max_depth=float('inf')):
+        if self.is_final or max_depth == 0:
+            return self
+        return NotImplemented
+
+
+class SpecialMixin:
+    """Mixin for special transforms (i.e. transforms of transforms)"""
+
+    def make_inverse(self):
+        """Generate the inverse transform"""
+        return IdentityTransform()
+
+    def inverse(self, *a, **k):
+        """Apply the inverse transform recursively
+
+        Parameters
+        ----------
+        x : [nested list or dict of] tensor
+            Input tensors, with shape `(C, *shape)`
+
+        Returns
+        -------
+        [nested list or dict of] tensor
+            Output tensors. with shape `(C, *shape)`
+
+        """
+        return self.make_inverse()(*a, **k)
+
+    def make_final(self, x, max_depth=float('inf')):
+        if x.is_final or max_depth == 0:
+            return self
+        return NotImplemented
+
+
+class SequentialTransform(SpecialMixin, SharedMixin, Transform):
     """A sequence of transforms
 
     !!! example
@@ -555,11 +411,53 @@ class SequentialTransform(Transform):
         ----------
         transforms : list[Transform]
             A list of transforms to apply sequentially.
+
+        Keyword Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensor', None}
+
+            - 'channel': the same sequence is applied to all channels
+                in a tensor, but different transforms are used in different
+                tensors.
+            - 'tensors': the same transform is applied to all tensors,
+                but with a different transform for each channel.
+            - 'channels+tensors' or True: the same transform is applied
+                to all channels of all tensors.
+            - None or False: A different transform is applied to each
+                channel and each tensor.
+        include : str or list[str]
+            List of keys to which the transform should apply
+        exclude : str or list[str]
+            List of keys to which the transform should not apply
         """
+        shared = kwargs.pop('shared', False)
         super().__init__(**kwargs)
+        self.shared = self._prepare_shared(shared)
         self.transforms = transforms
 
-    def forward(self, *args, **kwargs):
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        x = VirtualTensor.from_any(x, compute_stats=True)
+        trf = []
+        for t in self:
+            t = t.make_final(x, max_depth=max_depth-1)
+            x = t.apply(x)
+            trf.append(t)
+        trf = SequentialTransform(trf, **self.get_prm())
+        return trf
+
+    @property
+    def is_final(self):
+        return all(t.is_final for t in self)
+
+    def make_inverse(self):
+        return SequentialTransform([t.make_inverse() for t in self])
+
+    def forward(self, *a, **k):
+        return self._shared_forward(*a, **k, _fallback=self.forward_impl)
+
+    def _forward_impl(self, *args, **kwargs):
         if kwargs and args:
             x = ArgsAndKwargs(args, kwargs)
         elif kwargs:
@@ -571,7 +469,8 @@ class SequentialTransform(Transform):
         else:
             return None
         for trf in self.transforms:
-            with include(trf, self._include), exclude(trf, self._exclude):
+            with IncludeKeysTransform(trf, self.include), \
+                 ExcludeKeysTransform(trf, self.exclude):
                 x = trf(x)
         return x
 
@@ -592,7 +491,38 @@ class SequentialTransform(Transform):
         return f'{type(self).__name__}({repr(self.transforms)})'
 
 
-class MaybeTransform(Transform):
+class PerChannelTransform(SpecialMixin, Transform):
+    """Apply a different transform to each channel"""
+
+    def __init__(self, transforms, **kwargs):
+        """
+        Parameters
+        ----------
+        transforms : list[Transform]
+            A list of transforms to apply to each channel.
+        """
+        super().__init__(**kwargs)
+        self.transforms = transforms
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        trf = []
+        for i, t in enumerate(self):
+            t = t.make_final(x[i:i+1], max_depth=max_depth-1)
+            trf.append(t)
+        trf = PerChannelTransform(trf, **self.get_prm())
+        return trf
+
+    def apply(self, x):
+        return torch.stack([t(x[i:i+1]) for i, t in enumerate(self)])
+
+    @property
+    def is_final(self):
+        return all(t.is_final for t in self)
+
+
+class MaybeTransform(SpecialMixin, SharedMixin, Transform):
     """Randomly apply a transform
 
     !!! example "20% chance of adding noise"
@@ -623,20 +553,24 @@ class MaybeTransform(Transform):
         shared : bool
             Roll the dice once for all input tensors
         """
-        super().__init__(shared=shared, **kwargs)
+        super().__init__(**kwargs)
+        self.shared = self._prepare_shared(shared)
         self.subtransform = transform
         self.prob = prob
 
-    def apply_transform(self, x, parameters):
-        if parameters > 1 - self.prob:
-            trf = self.subtransform
-            with include(trf, self._include), exclude(trf, self._exclude):
-                return trf(x)
-        else:
-            return x
+    def throw_dice(self):
+        return random.random() > 1 - self.prob
 
-    def get_parameters(self, x):
-        return random.random()
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        if self.throw_dice():
+            trf = self.subtransform
+            with IncludeKeysTransform(trf, self.include), \
+                 ExcludeKeysTransform(trf, self.exclude):
+                return trf.make_final(x, max_depth=max_depth-1)
+        else:
+            return IdentityTransform()
 
     def __repr__(self):
         s = f'{repr(self.subtransform)}?'
@@ -645,7 +579,7 @@ class MaybeTransform(Transform):
         return s
 
 
-class SwitchTransform(Transform):
+class SwitchTransform(SpecialMixin, SharedMixin, Transform):
     """Randomly choose a transform to apply
 
     !!! example "Randomly apply either Gaussian or Chi noise"
@@ -680,7 +614,8 @@ class SwitchTransform(Transform):
         shared : bool
             Roll the dice once for all input tensors
         """
-        super().__init__(shared=shared, **kwargs)
+        super().__init__(**kwargs)
+        self.shared = self._prepare_shared(shared)
         self.transforms = list(transforms)
         if not prob:
             prob = []
@@ -695,16 +630,22 @@ class SwitchTransform(Transform):
             prob = [x / sumprob for x in prob]
         return prob
 
-    def apply_transform(self, x, parameters):
+    def throw_dice(self):
         prob = cumsum(self._make_prob())
-        for k, t in enumerate(self.transforms):
-            if parameters > 1 - prob[k]:
-                with include(t, self._include), exclude(t, self._exclude):
-                    return t(x)
-        return x
+        dice = random.random()
+        for k in range(len(self.transforms)):
+            if dice > 1 - prob[k]:
+                return k
+        return len(self.transforms) - 1
 
-    def get_parameters(self, x):
-        return random.random()
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        t = self.transforms[self.throw_dice()]
+        t = t.make_final(x, max_depth=max_depth-1)
+        with IncludeKeysTransform(t, self.include), \
+             ExcludeKeysTransform(t, self.exclude):
+            return t
 
     def __or__(self, other):
         if isinstance(other, SwitchTransform) \
@@ -731,143 +672,264 @@ class SwitchTransform(Transform):
         s = f'({s})'
         return s
 
+    def __enter__(self):
+        return self
 
-def switch(map):
-    """Randomly choose a transform to apply
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
 
-    !!! example "Randomly apply either Gaussian or Chi noise"
-        ```python
-        import cornucopia as cc
-        gauss = cc.GaussianNoiseTransform()
-        chi = cc.ChiNoiseTransform()
-        ```
-        Explicit call to the class:
-        ```python
-        img = cc.SwitchTransform([gauss, chi])(img)
-        ```
-        Implicit call using syntactic sugar:
-        ```python
-        img = (gauss | chi)(img)
-        ```
-        Functional call:
-        ```python
-        img = cc.switch({gauss: 0.5, chi: 0.5})(img)
-        ```
 
-    Parameters
-    ----------
-    map : dict(Transform -> float)
-        A dictionary that maps transforms to probabilities of being chosen
-
-    Returns
-    -------
-    SwitchTransform
-
+class IncludeKeysTransform(SpecialMixin, Transform):
     """
-    return SwitchTransform(list(map.keys()), list(map.values()))
+    Context manager for keys to include
 
-
-class RandomizedTransform(Transform):
-    """
-    Transform generated by randomizing some parameters of another transform.
-
-    !!! example "Gaussian noise with randomized variance"
-        Object call
+    !!! example "Use as a transform"
         ```python
-        import cornucopia as cc
-        hypernoise = RandomizedTransform(cc.GaussianNoise, [cc.Uniform(0, 10)])
-        img = hypernoise(img)
-        ```
-        Functional call
-        ```python
-        import cornucopia as cc
-        hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
-        img = hypernoise(img)
+        from cornucopia import IncludeKeysTransform
+        newxform = IncludeKeysTransform(xform, "image)
+        image, label = newxform(image=image, label=label)
         ```
 
+    !!! example "Use as a context manager `with as`"
+        ```python
+        from cornucopia import IncludeKeysTransform
+        with IncludeKeysTransform(xform, "image") as newxform:
+            image, label = newxform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager `with`"
+        ```python
+        from cornucopia import IncludeKeysTransform
+        with IncludeKeysTransform(xform, "image"):
+            image, label = xform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager (alias)"
+        ```python
+        from cornucopia import context as ctx
+        with ctx.include(xform, "image") as newxform:
+            image, label = newxform(image=image, label=label)
+        ```
     """
 
-    def __init__(self, transform, sample, ksample=None, *, shared=False, **kwargs):
+    def __init__(self, transform, keys, union=True):
         """
-
         Parameters
         ----------
-        transform : callable(...) -> Transform
-            A Transform subclass or a function that constructs a Transform.
-        sample : [list or dict of] callable
-            A collection of functions that generate parameter values provided
-            to `transform`.
+        transform : Transform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to include
+        union : bool
+            Include the union of what was already included and `keys`
         """
-        super().__init__(shared=shared, **kwargs)
-        self.sample = sample
-        self.ksample = ksample
-        self.subtransform = transform
+        if keys and not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        self.transform = transform
+        self.keys = list(keys) if keys else keys
+        self.union = union
 
-    def get_parameters(self, x):
-        args = []
-        kwargs = {}
-        if isinstance(self.sample, (list, tuple)):
-            args += [f() if isinstance(f, Sampler) else f for f in self.sample]
-        elif hasattr(self.sample, 'items'):
-            kwargs.update({k: f() if isinstance(f, Sampler) else f
-                           for k, f in self.sample.items()})
-        else:
-            args += [self.sample() if isinstance(self.sample, Sampler) else self.sample]
-        if self.ksample:
-            kwargs.update({k: f() if isinstance(f, Sampler) else f
-                           for k, f in self.ksample.items()})
-        return self.subtransform(*args, **kwargs)
+    def forward(self, *a, **k):
+        with self as transform:
+            return transform.forward(*a, **k)
 
-    def apply_transform(self, x, parameters):
-        with include(parameters, self._include), \
-             exclude(parameters, self._exclude):
-            return parameters(x)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        with self as trf:
+            final_trf = trf.make_final(x, max_depth)
+            with IncludeKeysTransform(final_trf) as final_final_trf:
+                return final_final_trf
 
-    def __repr__(self):
-        if type(self) is RandomizedTransform:
-            try:
-                if issubclass(self.subtransform, Transform):
-                    return f'Randomized{self.subtransform.__name__}()'
-            except TypeError:
-                pass
-        return super().__repr__()
+    def make_inverse(self):
+        with self as trf:
+            inv_trf = trf.make_inverse()
+            with IncludeKeysTransform(inv_trf) as final_inv_trf:
+                return final_inv_trf
+
+    def __enter__(self):
+        self.include = self.transform.include
+        self.transform.include = self.keys
+        if self.union and self.include is not None:
+            if self.transform.include is not None:
+                self.transform.include = \
+                    self.transform.include + self.include
+            else:
+                self.transform.include = self.include
+        return self.transform
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.transform.include = self.include
+        delattr(self, 'include')
 
 
-def randomize(klass, shared=False):
-    """Decorator to convert a Transform into a RandomizedTransform
-
-    !!! example "Gaussian noise with randomized variance"
-        Object call
-        ```python
-        import cornucopia as cc
-        hypernoise = RandomizedTransform(cc.GaussianNoise, [cc.Uniform(0, 10)])
-        img = hypernoise(img)
-        ```
-        Functional call
-        ```python
-        import cornucopia as cc
-        hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
-        img = hypernoise(img)
-        ```
-
-    Parameters
-    ----------
-    klass : subclass(Transform)
-        Transform type to randomize
-    shared : bool, default=False
-        Shared random parameters across channels
-
-    Returns
-    -------
-    init : callable
-        Function that initializes a RandomizedTransform
+class ExcludeKeysTransform(SpecialMixin, Transform):
     """
-    def init(*args, **kwargs):
-        return RandomizedTransform(klass, args, kwargs, shared=shared)
-    return init
+    Context manager for keys to exclude.
+    Can also be used as a transform.
+
+    !!! example "Use as a transform"
+        ```python
+        from cornucopia import ExcludeKeysTransform
+        newxform = ExcludeKeysTransform(xform, "image)
+        image, label = newxform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager `with as`"
+        ```python
+        from cornucopia import ExcludeKeysTransform
+        with ExcludeKeysTransform(xform, "image") as newxform:
+            image, label = newxform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager `with`"
+        ```python
+        from cornucopia import ExcludeKeysTransform
+        with ExcludeKeysTransform(xform, "image"):
+            image, label = xform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager (alias)"
+        ```python
+        from cornucopia import context as ctx
+        with ctx.exclude(xform, "image") as newxform:
+            image, label = newxform(image=image, label=label)
+        ```
+    """
+
+    def __init__(self, transform, keys, union=True):
+        """
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to include
+        union : bool
+            Exclude the union of what was already excluded and `keys`
+        """
+        if keys and not isinstance(keys, (list, tuple)):
+            keys = [keys]
+        self.transform = transform
+        self.keys = list(keys) if keys else keys
+        self.union = union
+
+    def forward(self, *a, **k):
+        with self as transform:
+            return transform.forward(*a, **k)
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        with self as trf:
+            final_trf = trf.make_final(x, max_depth)
+            with ExcludeKeysTransform(final_trf) as final_final_trf:
+                return final_final_trf
+
+    def make_inverse(self):
+        with self as trf:
+            inv_trf = trf.make_inverse()
+            with ExcludeKeysTransform(inv_trf) as final_inv_trf:
+                return final_inv_trf
+
+    def __enter__(self):
+        self.exclude = self.transform.exclude
+        self.transform.exclude = self.keys
+        if self.union and self.exclude:
+            if self.transform.exclude is not None:
+                self.transform.exclude = \
+                    self.transform.exclude + self.exclude
+            else:
+                self.transform.exclude = self.exclude
+        return self.transform
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.transform.exclude = self.exclude
+        delattr(self, 'exclude')
 
 
-class MappedTransform(Transform):
+class SharedTransform(SpecialMixin, SharedMixin, Transform):
+    """
+    Context manager for sharing transforms across channels / tensors.
+    Can also be used as a transform.
+
+    !!! example "Use as a context manager (alias)"
+        ```python
+        from cornucopia import context as ctx
+        with ctx.shared(xform, "channels") as newxform:
+            image = newxform(image)
+        ```
+    """
+
+    def __init__(self, transform, mode=unset):
+        """
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply
+        mode : {'channels', 'tensors', 'channels+tensor', None}
+
+        - 'channel': the same transform is applied to all channels
+            in a tensor, but different transforms are used in different
+            tensors.
+        - 'tensors': the same transform is applied to all tensors,
+            but with a different transform for each channel.
+        - 'channels+tensors' or True: the same transform is applied
+            to all channels of all tensors.
+        - None or False: A different transform is applied to each
+            channel and each tensor.
+
+        """
+        self.transform = transform
+        self.mode = mode
+
+    def forward(self, *a, **k):
+        with self as transform:
+            return transform.forward(*a, **k)
+
+    def __enter__(self):
+        self.hasattr = hasattr(self.transform, 'shared')
+        self.saved_mode = getattr(self.transform, 'shared', None)
+        if self.mode is not unset:
+            self.transform.shared = self.mode
+        return self.transform
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.hasattr:
+            self.transform.shared = self.saved_mode
+        elif hasattr(self.transform, 'shared'):
+            delattr(self.transform, 'shared')
+        delattr(self, 'hasattr')
+        delattr(self, 'saved_mode')
+
+
+class ReturningTransform(SpecialMixin, Transform):
+    """
+    Context manager for sharing transforms across channels / tensors
+
+    !!! example "Use as a context manager (alias)"
+        ```python
+        from cornucopia import context as ctx
+        with ctx.returns(xform, "channels") as newxform:
+            image = newxform(image)
+        ```
+    """
+
+    def __init__(self, transform, returns=None):
+        self.transform = transform
+        self.returns = returns
+
+    def __enter__(self):
+        self.saved_returns = self.transform.returns
+        self.transform.returns = self.returns
+        return self.transform
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.transform.returns = self.saved_returns
+        delattr(self, 'saved_returns')
+
+
+class MappedTransform(SpecialMixin, Transform):
     """
     Transforms that are applied to specific positional or arguments
 
@@ -902,28 +964,36 @@ class MappedTransform(Transform):
         mapkwargs : dict[str, Transform]
             Transform to apply to keyword arguments
         nested : bool, default=False
-            Recursively traverse the inputs until we find matching dictionaries.
-            Only `mapkwargs` are accepted if "nested"
+            Recursively traverse the inputs until we find matching
+            dictionaries. Only `mapkwargs` are accepted if "nested".
         default : Transform
             Transform to apply if nothing is specifically mapped
         """
-        super().__init__(shared='channels')
+        super().__init__(
+            shared=mapkwargs.pop('shared', False),
+            include=mapkwargs.pop('include', None),
+            exclude=mapkwargs.pop('exclude', None),
+        )
         self.mapargs = mapargs
         self.mapkwargs = mapkwargs
         self.nested = nested
         self.default = default
         if nested and mapargs:
-            raise ValueError('Cannot have both `nested` and positional transforms')
+            raise ValueError(
+                'Cannot have both `nested` and positional transforms'
+            )
 
     def forward(self, *args, **kwargs):
-        if self._include is not None or self._exclude:
+        if self.include is not None or self.exclude:
             def wrap(f):
                 def ff(*a, **k):
-                    with include(f, self._include), exclude(f, self._exclude):
+                    with IncludeKeysTransform(f, self.include), \
+                         ExcludeKeysTransform(f, self.exclude):
                         return f(*a, **k)
                 return ff
         else:
-            wrap = lambda f: f
+            def wrap(f):
+                return f
 
         if args:
             a0 = args[0]
@@ -944,10 +1014,14 @@ class MappedTransform(Transform):
             mapargs = tuple(wrap(f) if f else None for f in self.mapargs)
             mapargs += (default,) * max(0, len(args) - len(mapargs))
             args = tuple(f(a) if f else a for f, a in zip(mapargs, args))
+
         if kwargs:
             mapkwargs = {k: wrap(f) if f else None
                          for k, f in self.mapkwargs.items()}
-            func = lambda key: mapkwargs.get(key, default) or (lambda x: x)
+
+            def func(key):
+                return mapkwargs.get(key, default) or (lambda x: x)
+
             kwargs = {key: func(key)(value) for key, value in kwargs.items()}
 
         if args and kwargs:
@@ -959,9 +1033,6 @@ class MappedTransform(Transform):
         else:
             return args[0]
 
-    def apply_transform(self, x, parameters):
-        return x
-
     def __repr__(self):
         s = []
         for v in self.mapargs:
@@ -972,323 +1043,68 @@ class MappedTransform(Transform):
         return f'{type(self).__name__}({s})'
 
 
-class MappedKeysTransform(Transform):
-    """Apply a transform to a set of keys"""
+class RandomizedTransform(NonFinalTransform):
+    """
+    Transform generated by randomizing some parameters of another transform.
 
-    def __init__(self, transform, keys):
+    !!! example "Gaussian noise with randomized variance"
+        Object call
+        ```python
+        import cornucopia as cc
+        hypernoise = RandomizedTransform(cc.GaussianNoise, [cc.Uniform(0, 10)])
+        img = hypernoise(img)
+        ```
+        Functional call
+        ```python
+        import cornucopia as cc
+        hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
+        img = hypernoise(img)
+        ```
+
+    """
+
+    def __init__(self, transform, sample, ksample=None, **kwargs):
         """
 
         Parameters
         ----------
-        transform : Transform
-            Transform to apply
-        keys : [sequence of] str
-            Keys to which to apply the transform
+        transform : callable(...) -> Transform
+            A Transform subclass or a function that constructs a Transform.
+        sample : [list or dict of] callable
+            A collection of functions that generate parameter values provided
+            to `transform`.
         """
-        super().__init__()
-        self.transform = transform
-        self.keys = keys
+        kwargs.setdefault('shared', False)
+        super().__init__(**kwargs)
+        self.sample = sample
+        self.ksample = ksample
+        self.subtransform = transform
 
-    def forward(self, *a, **k):
-        with include(self.transform, self.keys):
-            return self.transform.forward(*a, **k)
-
-
-class MappedExceptKeysTransform(MappedTransform):
-    """Apply a transform to all but a set of keys"""
-
-    def __init__(self, transform, keys):
-        """
-
-        Parameters
-        ----------
-        transform : Transform
-            Transform to apply
-        keys : [sequence of] str
-            Keys to which *not* to apply the transform
-        """
-        super().__init__()
-        self.transform = transform
-        self.keys = keys
-
-    def forward(self, *a, **k):
-        with exclude(self.transform, self.keys):
-            return self.transform.forward(*a, **k)
-
-
-def map(*mapargs, nested=False, default=None, **mapkwargs):
-    """Alias for MappedTransform
-
-    !!! example
-        ```python
-        import cornucopia as cc
-        import torch
-
-        img = torch.randn([1, 32, 32])
-        seg = torch.randn([3, 32, 32]).softmax(0)
-
-        # positional variant
-        trf = cc.map(GaussianNoise(), None)
-        img, seg = trf(img, seg)
-
-        # keyword variant
-        trf = cc.map(image=GaussianNoise())
-        img, seg = trf(image=img, label=seg)
-
-        # alternative version
-        dat = {'img': torch.randn([1, 32, 32]),
-               'seg': torch.randn([3, 32, 32]).softmax(0)}
-        dat = cc.map(img=GaussianNoise(), nested=True)(dat)
-        ```
-    """
-    return MappedTransform(*mapargs, nested=nested, default=default, **mapkwargs)
-
-
-def include_keys(transform, keys):
-    """Alias for MappedKeysTransform
-
-    !!! example
-        Apply `geom` to all images, and apply `noise` to `img` only.
-        ```python
-        import cornucopia as cc
-
-        geom = cc.RandomElasticTransform()
-        noise = cc.GaussianNoiseTransform()
-        trf = geom + cc.include_keys(noise, "image")
-        img, lab = trf(image=img, label=lab)
-        ```
-    """
-    return MappedKeysTransform(transform, keys)
-
-
-def exclude_keys(transform, keys):
-    """Alias for MappedExceptKeysTransform
-
-    !!! example
-        Apply `geom` to all images, and apply `noise` to all images
-        except `lab`.
-        ```python
-        import cornucopia as cc
-
-        geom = cc.RandomElasticTransform()
-        noise = cc.GaussianNoiseTransform()
-        trf = geom + cc.exclude_keys(noise, "label")
-        img, lab = trf(image=img, label=lab)
-        ```
-    """
-    return MappedExceptKeysTransform(transform, keys)
-
-
-class SplitChannels(Transform):
-    """Unbind tensors across first dimension (without collapsing it)"""
-    def __init__(self):
-        super().__init__(shared='channels')
-
-    def transform_tensor(self, x):
-        return x.chunk(len(x))
-
-
-class CatChannels(Transform):
-    """
-    Concatenate tensors across first dimension
-    Assumes that the nested-most level in the structure is the one to
-    concatenate.
-    """
-    def __init__(self):
-        super().__init__(shared='channels')
-
-    def forward(self, *args, **kwargs):
-        args = tuple(_recursive_cat(x) for x in args)
-        valid_keys = kwargs.keys()
-        if self._include is not None:
-            valid_keys = [k for k in valid_keys if k in self._include]
-        if self._exclude:
-            valid_keys = [k for k in valid_keys if k not in self._exclude]
-        kwargs = {k: _recursive_cat(v) if k in valid_keys else v
-                  for k, v in kwargs.items()}
-        if args and kwargs:
-            return ArgsAndKwargs(args, kwargs)
-        elif kwargs:
-            return Kwargs(kwargs)
-        elif len(args) > 1:
-            return Args(args)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        args = []
+        kwargs = {}
+        if isinstance(self.sample, (list, tuple)):
+            args += [f() if isinstance(f, Sampler) else f for f in self.sample]
+        elif hasattr(self.sample, 'items'):
+            kwargs.update({k: f() if isinstance(f, Sampler) else f
+                           for k, f in self.sample.items()})
         else:
-            return args[0]
+            args += [self.sample() if isinstance(self.sample, Sampler)
+                     else self.sample]
+        if self.ksample:
+            kwargs.update({k: f() if isinstance(f, Sampler) else f
+                           for k, f in self.ksample.items()})
+        xform = self.subtransform(*args, **kwargs)
+        xform = xform.make_final(x, max_depth-1)
+        return xform
 
-
-class BatchedTransform(nn.Module):
-    """Apply a transform to a batch
-
-    !!! example
-        Functional call:
-        ```python
-        batched_transform = cc.batch(transform)
-        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
-        ```
-        Object call:
-        ```python
-        batched_transform = c.BatchedTransform(transform)
-        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
-        ```
-    """
-
-    def __init__(self, transform):
-        """
-        Parameters
-        ----------
-        transform : Transform
-            Transform to apply to a batched tensor or to a nested
-            structure of batched tensors
-        """
-        super().__init__()
-        self.transform = transform
-
-    def forward(self, *args):
-
-        class UnpackError(ValueError):
-            pass
-
-        def _unpack(x, i):
-            if isinstance(x, (list, tuple)):
-                return type(x)(_unpack(x1, i) for x1 in x)
-            elif hasattr(x, 'items'):
-                return {key: _unpack(val, i) for key, val in x.items()}
-            elif torch.is_tensor(x):
-                if len(x) <= i:
-                    raise UnpackError(f'Trying to unpack index {i} of '
-                                      f'tensor with shape {list(x.shape)}')
-                return x[i]
-            else:
-                raise TypeError(f'Don\'t know what to do with type {type(x)}')
-
-        def unpack(x):
-            i = 0
-            while True:
-                try:
-                    yield _unpack(x, i)
-                    i += 1
-                except UnpackError:
-                    return
-
-        def pack(x):
-            x0 = x[0]
-            if isinstance(x0, (list, tuple)):
-                return type(x0)(pack([x1[i] for x1 in x]) for i in range(len(x0)))
-            elif hasattr(x0, 'items'):
-                return {key: pack([x1[key] for x1 in x]) for key in x0.keys()}
-            elif torch.is_tensor(x0):
-                return torch.stack(x)
-            else:
-                raise TypeError(f'Don\'t know what to do with type {type(x0)}')
-
-        batch = []
-        for elem in unpack(args):
-            batch.append(self.transform(*elem))
-        batch = pack(batch)
-        return batch[0] if len(args) == 1 else tuple(batch)
-
-
-def batch(transform):
-    """Apply a transform to a batch
-
-    !!! example
-        Functional call:
-        ```python
-        batched_transform = cc.batch(transform)
-        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
-        ```
-        Object call:
-        ```python
-        batched_transform = c.BatchedTransform(transform)
-        img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
-        ```
-
-    Parameters
-    ----------
-    transform : Transform
-        Transform to apply to a batched tensor or to a nested
-        structure of batched tensors
-
-    Returns
-    -------
-    trf : BatchedTransform
-
-    """
-    return BatchedTransform(transform)
-
-
-def prepare_output(results, returns):
-    """Prepare object returned by `apply_transform`
-
-    Parameters
-    ----------
-    results : dict[str, tensor]
-        Named results
-    returns : list[str] or dict[str, str] or str
-        Structure describing which results should be returned.
-        The results will be returned in an object of the same type, with
-        the requested results associated to the same keys (if `dict`) or
-        same position (if `list`). If a `str`, the requested tensor is
-        returned.
-
-    Returns
-    -------
-    requested_results : list[tensor] or dict[str, tensor] or tensor
-
-    """
-    if returns is None:
-        if torch.is_tensor(results):
-            return results
-        else:
-            return results.get('output', None)
-    if isinstance(returns, dict):
-        return type(returns)(
-            **{key: results.get(target, None) for key, target in returns.items()})
-    elif isinstance(returns, (list, tuple)):
-        return type(returns)(
-            [results.get(target, None) for target in returns])
-    else:
-        return results.get(returns, None)
-
-
-def flatstruct(x):
-    """Flatten a nested structure of tensors"""
-
-    def _flatten(nested):
-        if isinstance(nested, dict):
-            flat = type(nested)()
-            is_dict = True
-            for key, elem in nested.items():
-                elem = _flatten(elem)
-                if isinstance(elem, dict):
-                    for subkey, subelem in elem.items():
-                        flat[subkey] = subelem
-                elif not isinstance(elem, (dict, list, tuple)):
-                    flat[key] = elem
-                else:
-                    is_dict = False
-                    flat[key] = elem
-            if not is_dict:
-                flat, flatdict = [], flat
-                for elem in flatdict.values():
-                    if not isinstance(elem, (dict, list, tuple)):
-                        flat.append(elem)
-                    else:
-                        flat.extend(elem)
-            return flat
-        elif isinstance(nested, (list, tuple)):
-            flat = []
-            for elem in nested:
-                elem = _flatten(elem)
-                if not isinstance(elem, (dict, list, tuple)):
-                    flat.append(elem)
-                elif isinstance(elem, dict):
-                    flat.extend(elem.values())
-                else:
-                    flat.extend(elem)
-            flat = type(nested)(flat)
-            return flat
-        else:
-            return nested
-
-    return _flatten(x)
+    def __repr__(self):
+        if type(self) is RandomizedTransform:
+            try:
+                if issubclass(self.subtransform, Transform):
+                    return f'Randomized{self.subtransform.__name__}()'
+            except TypeError:
+                pass
+        return super().__repr__()

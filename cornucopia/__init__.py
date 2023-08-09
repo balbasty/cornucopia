@@ -41,7 +41,9 @@ image pairs with a random affine deformation between them::
 #           data (currently we loop across channels in the base class)
 
 from . import random
+from . import ctx
 from .base import *
+from .special import *
 from .contrast import *
 from .geometric import *
 from .intensity import *
