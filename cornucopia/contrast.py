@@ -71,7 +71,7 @@ class ContrastMixtureTransform(NonFinalTransform):
 
             return x
 
-    def __init__(self, nk=16, keep_background=True, 
+    def __init__(self, nk=16, keep_background=True,
                  *, shared=False, **kwargs):
         """
 
@@ -82,8 +82,11 @@ class ContrastMixtureTransform(NonFinalTransform):
         keep_background : bool
             Do not change background mean/cov.
             The background class is the class with minimum mean value.
-        shared : {'channels', 'tensors', 'channels+tensors', None}
-            Apply the same flip to all channels and/or tensors
+
+        Keyword Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Apply the same contrast offset to all channels and/or tensors
         """
         super().__init__(shared=shared, **kwargs)
         self.keep_background = keep_background
@@ -160,7 +163,7 @@ class ContrastLookupTransform(NonFinalTransform):
                 new_x[mask] += mu[k] - mu0[k]
             return new_x
 
-    def __init__(self, nk=16, keep_background=True, 
+    def __init__(self, nk=16, keep_background=True,
                  *, shared=False, **kwargs):
         """
 
@@ -185,7 +188,7 @@ class ContrastLookupTransform(NonFinalTransform):
 
         if max_depth == 0:
             return self
-        
+
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)
         new_mu = torch.rand(self.nk) * (vmax - vmin) + vmin

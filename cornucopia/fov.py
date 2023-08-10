@@ -53,7 +53,7 @@ class RandomFlipTransform(NonFinalTransform):
         ----------
         axes : [list of] int
             Axes that can be flipped (default: all)
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same flip to all channels and/or tensors
         """
         kwargs.setdefault('shared', True)
@@ -109,7 +109,7 @@ class RandomPermuteAxesTransform(NonFinalTransform):
         ----------
         axes : [list of] int
             Axes that can be permuted (default: all)
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same permutation to all channels and/or tensors
         """
         kwargs.setdefault('shared', True)
@@ -165,7 +165,8 @@ class CropPadTransform(FinalTransform):
 class PatchTransform(NonFinalTransform):
     """Extract a patch from the volume"""
 
-    def __init__(self, shape=64, center=0, bound='zero', **kwargs):
+    def __init__(self, shape=64, center=0, bound='zero',
+                 *, shared='channels', **kwargs):
         """
         Parameters
         ----------
@@ -175,8 +176,12 @@ class PatchTransform(NonFinalTransform):
             Patch center, in relative coordinates -1..1
         bound : str
             Boundary condition in case padding is needed
+
+        Keyword Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensor', ''}
         """
-        kwargs.setdefault('shared', 'channels')
+        kwargs.setdefault('shared', shared)
         super().__init__(**kwargs)
         self.shape = shape
         self.center = center
@@ -214,7 +219,7 @@ class RandomPatchTransform(NonFinalTransform):
     input shape).
     """
 
-    def __init__(self, patch_size, bound='zero', **kwargs):
+    def __init__(self, patch_size, bound='zero', *, shared=True, **kwargs):
         """
 
         Parameters
@@ -223,10 +228,13 @@ class RandomPatchTransform(NonFinalTransform):
             Patch shape
         bound : str
             Boundary condition in case padding is needed
+
+        Keyword Parameters
+        ------------------
         shared : {'channels', 'tensors', 'channels+tensors', None}
             Extract the same patch from all channels and/or tensors
         """
-        kwargs.setdefault('shared', True)
+        kwargs.setdefault('shared', shared)
         super().__init__(**kwargs)
         self.patch_size = patch_size
         self.bound = bound

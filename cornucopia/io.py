@@ -2,11 +2,11 @@ __all__ = ['ToTensorTransform', 'LoadTransform']
 
 import torch
 import os.path
-from .base import Transform
+from .base import FinalTransform
 from .utils.io import loaders
 
 
-class ToTensorTransform(Transform):
+class ToTensorTransform(FinalTransform):
     """Convert to Tensor (or to other dtype/device)"""
 
     def __init__(self, dim=None, dtype=None, device=None, **kwargs):
@@ -21,7 +21,7 @@ class ToTensorTransform(Transform):
         self.dtype = dtype
         self.device = device
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         x = torch.as_tensor(x, dtype=self.dtype, device=self.device).squeeze()
         if self.dim:
             for _ in range(max(0, self.dim + 1 - x.dim())):
@@ -32,7 +32,7 @@ class ToTensorTransform(Transform):
         return x
 
 
-class LoadTransform(Transform):
+class LoadTransform(FinalTransform):
     """
     Load data from disk
     """
@@ -67,7 +67,7 @@ class LoadTransform(Transform):
         self.device = device
         self.kwargs = kwargs
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         try:
             return torch.as_tensor(x, dtype=self.dtype, device=self.device)
         except Exception:
@@ -101,6 +101,3 @@ class LoadTransform(Transform):
         message = [f'Could not load {x}:'] + exceptions
         message = '\n'.join(message)
         raise ValueError(message)
-
-
-

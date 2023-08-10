@@ -24,6 +24,16 @@ def ensure_list(x, size=None, crop=True, **kwargs):
     return x
 
 
+def cast_like(input, like, **kwargs):
+    """Cast to same backend as another tensor, but preserve 'integerness'"""
+    if input is None:
+        return input
+    dtype = like.dtype
+    if input.is_floating_point != like.is_floating_point:
+        dtype = input.dtype
+    return input.to(dtype=dtype, device=like.device, **kwargs)
+
+
 def make_vector(input, n=None, crop=True, *args,
                 dtype=None, device=None, **kwargs):
     """Ensure that the input is a (tensor) vector and pad/crop if necessary.

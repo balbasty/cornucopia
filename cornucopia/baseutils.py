@@ -75,6 +75,17 @@ def prepare_output(results, returns):
         return results.get(returns, None)
 
 
+def return_requires(returns):
+    """Return all requires fields in a flat structure"""
+    returns = flatstruct(returns)
+    if isinstance(returns, dict):
+        return list(returns.values())
+    elif isinstance(returns, (list, tuple)):
+        return list(returns)
+    else:
+        return [returns]
+
+
 def flatstruct(x):
     """Flatten a nested structure of tensors"""
 

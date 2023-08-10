@@ -299,7 +299,7 @@ class SharedMixin:
     def _prepare_shared(cls, shared):
         if shared is True:
             shared = 'channels+tensors'
-        if shared is False or shared is None:
+        if shared is False:
             shared = ''
         return shared
 
@@ -334,7 +334,7 @@ class NonFinalTransform(SharedMixin, Transform):
 
     Parameters
     ----------
-    shared : {'channels', 'tensors', 'channels+tensor', None}
+    shared : {'channels', 'tensors', 'channels+tensor', ''}
 
         - 'channel': the same transform is applied to all channels
             in a tensor, but different transforms are used in different
@@ -343,7 +343,7 @@ class NonFinalTransform(SharedMixin, Transform):
             but with a different transform for each channel.
         - 'channels+tensors' or True: the same transform is applied
             to all channels of all tensors.
-        - None or False: A different transform is applied to each
+        - '' or False: A different transform is applied to each
             channel and each tensor.
     """
     def __init__(self, *, shared=False, **kwargs):
@@ -414,7 +414,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensor', None}
+        shared : {'channels', 'tensors', 'channels+tensor', ''}
 
             - 'channel': the same sequence is applied to all channels
                 in a tensor, but different transforms are used in different
@@ -550,7 +550,7 @@ class MaybeTransform(SpecialMixin, SharedMixin, Transform):
             A transform to randomly apply
         prob : float
             Probability to apply the transform
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensor', ''}
             Roll the dice once for all input tensors
         """
         super().__init__(**kwargs)
@@ -611,7 +611,7 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
             A list of transforms to sample from
         prob : list[float]
             Probability of applying each transform
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensor', ''}
             Roll the dice once for all input tensors
         """
         super().__init__(**kwargs)
@@ -867,7 +867,7 @@ class SharedTransform(SpecialMixin, SharedMixin, Transform):
         ----------
         transform : Transform
             Transform to apply
-        mode : {'channels', 'tensors', 'channels+tensor', None}
+        mode : {'channels', 'tensors', 'channels+tensor', ''}
 
         - 'channel': the same transform is applied to all channels
             in a tensor, but different transforms are used in different

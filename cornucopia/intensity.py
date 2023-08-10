@@ -156,7 +156,7 @@ class RandomMulTransform(RandomizedTransform):
         ----------
         value : Sampler or [pair of] float
             Bound for multiplicative value
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
         kwargs['value'] = Uniform.make(make_range(0, value))
@@ -180,7 +180,7 @@ class RandomAddTransform(RandomizedTransform):
         ----------
         value : Sampler or [pair of] float
             Bound for additive value
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
         super().__init__(
@@ -246,7 +246,7 @@ class BaseFieldTransform(NonFinalTransform):
             so that the number of nodes is approximately preserved.
         returns : [list or dict of] {'input', 'output', 'field'}
             Which tensor(s) to return
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same field to all channels
 
         """
@@ -390,9 +390,9 @@ class RandomMulFieldTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
@@ -443,9 +443,9 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
@@ -536,9 +536,9 @@ class RandomAddFieldTransform(RandomizedTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
@@ -616,7 +616,7 @@ class GammaTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same vmin/vmax for all channels
 
         """
@@ -665,9 +665,9 @@ class RandomGammaTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same gamma for all images/channels
-        shared_minmax : {'channels', 'tensors', 'channels+tensors', None}
+        shared_minmax : {'channels', 'tensors', 'channels+tensors', '', None}
             Use the same vmin/vmax for all channels. Default: same as `shared`.
 
         """
@@ -703,7 +703,7 @@ class ZTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same mean/sigma for all images/channels
         """
         super().__init__(shared=shared, **kwargs)
