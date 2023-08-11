@@ -1,7 +1,7 @@
 __all__ = [
     'AddValueTransform',
     'MulValueTransform',
-    'AffineTransform',
+    'AddMulTransform',
     'ClipTransform',
     'BaseFieldTransform',
     'AddFieldTransform',
@@ -11,7 +11,7 @@ __all__ = [
     'RandomSlicewiseMulFieldTransform',
     'RandomMulTransform',
     'RandomAddTransform',
-    'RandomAffineTransform',
+    'RandomAddMulTransform',
     'GammaTransform',
     'RandomGammaTransform',
     'ZTransform',
@@ -52,7 +52,6 @@ class OpConstTransform(FinalTransform):
         super().__init__(**kwargs)
         self.value = value
         self.op = op or self._op
-        self.invklass = globals()[self._invklass[self.op]]
         self.value_name = value_name
 
     def apply(self, x):
@@ -81,8 +80,8 @@ class MulValueTransform(OpConstTransform):
     _op = torch.mul
 
 
-class AffineTransform(FinalTransform):
-    """Constant affine transform"""
+class AddMulTransform(FinalTransform):
+    """Constant intensity affine transform"""
 
     def __init__(self, slope=1, offset=0, **kwargs):
         """
@@ -110,7 +109,7 @@ class AffineTransform(FinalTransform):
         )
 
     def make_inverse(self):
-        return AffineTransform(
+        return AddMulTransform(
             1/self.slope, -self.offset/self.slope, **self.get_prm()
         )
 
@@ -191,9 +190,9 @@ class RandomAddTransform(RandomizedTransform):
         )
 
 
-class RandomAffineTransform(RandomizedTransform):
+class RandomAddMulTransform(RandomizedTransform):
     """
-    Random affine transform.
+    Random intensity affine transform.
     """
 
     def __init__(self, slope=1, offset=0.5, *, shared=True, **kwargs):
@@ -209,12 +208,47 @@ class RandomAffineTransform(RandomizedTransform):
             Apply same transform to all images/channels
         """
         super().__init__(
-            AffineTransform,
+            AddMulTransform,
             Uniform.make(make_range(slope)),
             Uniform.make(make_range(offset)),
             shared=shared,
             **kwargs
         )
+
+
+class SplineUpsampleTransform(FinalTransform):
+    """Upsample a field using spline interpolation"""
+
+    def __init__(self, order=3, prefilter=False, **kwargs):
+        """
+        Parameters
+        ----------
+        order : int
+            Spline interpolation order
+        prefilter : bool
+            Splie prefiltering
+            (True for interpolation, False for spline evaluation)
+        """
+        super().__init__(**kwargs)
+        self.order = order
+        self.prefilter = prefilter
+
+    def apply(self, x):
+        fullshape = x.shape[1:]
+        if self.order == 1:
+            mode = ('trilinear' if len(fullshape) == 3 else
+                    'bilinear' if len(fullshape) == 2 else
+                    'linear')
+            y = interpolate(
+                x.unsqueeze(0), fullshape, mode=mode,
+                align_corners=True
+            ).squeeze(-0)
+        else:
+            y = interpol.resize(
+                x, shape=fullshape, interpolation=self.order,
+                prefilter=self.prefilter
+            )
+        return y
 
 
 class BaseFieldTransform(NonFinalTransform):
@@ -258,23 +292,32 @@ class BaseFieldTransform(NonFinalTransform):
         self.slice = slice
         self.thickness = thickness
 
-    def make_field(self, batch, fullshape, smallshape, **backend):
+    def make_field(self, batch, smallshape, fullshape=None, **backend):
+        """Generate the random coefficients"""
         smallshape = ensure_list(smallshape, len(fullshape))
         smallshape = [min(small, full) for small, full
                       in zip(smallshape, fullshape)]
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
         b = torch.rand([batch, *smallshape], **backend)
+        if fullshape:
+            b = self.upsample_field(b, fullshape)
+        return b
+
+    def upsample_field(self, coeff, fullshape):
+        """Resize spline coefficients to full size"""
         if self.order == 1:
             mode = ('trilinear' if len(fullshape) == 3 else
                     'bilinear' if len(fullshape) == 2 else
                     'linear')
             b = interpolate(
-                b.unsqueeze(0), fullshape, mode=mode, align_corners=True
+                coeff.unsqueeze(0), fullshape, mode=mode,
+                align_corners=True
             ).squeeze(-0)
         else:
             b = interpol.resize(
-                b, shape=fullshape, interpolation=self.order, prefilter=False
+                coeff, shape=fullshape, interpolation=self.order,
+                prefilter=False
             )
         return b
 
@@ -303,7 +346,7 @@ class BaseFieldTransform(NonFinalTransform):
                 batch1 = batch * fullshape[slice]
                 del smallshape[slice]
                 del fullshape[slice]
-                b = self.make_field(batch1, fullshape, smallshape, **backend)
+                b = self.make_field(batch1, smallshape, fullshape, **backend)
                 b = b.reshape([batch, -1, *b.shape[1:]])
                 b = b.movedim(1, 1+slice)
 
@@ -313,7 +356,7 @@ class BaseFieldTransform(NonFinalTransform):
                 _, *fullshape = x.shape
                 batch1 = batch * nb_slices
                 fullshape[slice] = thickness
-                b = self.make_field(batch1, fullshape, smallshape, **backend)
+                b = self.make_field(batch1, smallshape, fullshape, **backend)
                 b = b.reshape([batch, -1, *b.shape[1:]])
                 b = b.movedim(1, 1+slice)
                 b = b.reshape([batch, *fullshape0])
@@ -328,7 +371,7 @@ class BaseFieldTransform(NonFinalTransform):
                 batch1 = batch * (nb_slices - 1)
                 fullshape[slice] = thickness
                 fullshape0[slice] = (nb_slices - 1) * thickness
-                b1 = self.make_field(batch1, fullshape, smallshape, **backend)
+                b1 = self.make_field(batch1, smallshape, fullshape, **backend)
                 b1 = b1.reshape([batch, -1, *b.shape[1:]])
                 b1 = b1.movedim(1, 1+slice)
                 b1 = b1.reshape([batch, *fullshape0])
@@ -339,13 +382,13 @@ class BaseFieldTransform(NonFinalTransform):
 
                 # process last slice
                 fullshape[slice] = b.shape[1+slice] - len(b1)
-                b1 = self.make_field(batch, fullshape, smallshape, **backend)
+                b1 = self.make_field(batch, smallshape, fullshape, **backend)
                 b1 = b1.movedim(1+slice, 0)
                 b.movedim(1+slice, 0)[-len(b1):].copy_(b1)
 
         else:
             # global bias
-            b = self.make_field(batch, fullshape, self.shape, **backend)
+            b = self.make_field(batch, self.shape, fullshape, **backend)
 
         # rescale intensities
         batch = len(b)
@@ -718,7 +761,7 @@ class ZTransform(NonFinalTransform):
         else:
             opt = dict(dim=list(range(1, x.ndim)), keepdim=True)
         mu, sigma = x.mean(**opt), x.std(**opt)
-        return AffineTransform(
+        return AddMulTransform(
             1/sigma, -mu.sigma, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -768,10 +811,10 @@ class QuantileTransform(NonFinalTransform):
 
         if self.clip:
             return SequentialTransform(
-                AffineTransform(slope, offset, **self.get_prm()),
+                AddMulTransform(slope, offset, **self.get_prm()),
                 ClipTransform(self.vmin, self.vmax, **self.get_prm()),
             ).make_final(x, max_depth-1)
         else:
-            return AffineTransform(
+            return AddMulTransform(
                 slope, offset, **self.get_prm()
             ).make_final(x, max_depth-1)

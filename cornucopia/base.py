@@ -243,7 +243,7 @@ class FinalTransform(Transform):
         super().__init__(**kwargs)
         self.is_final = True
 
-    def apply(self, x):
+    def apply(self, x,):
         """Apply the transform to a tensor
 
         Parameters
@@ -286,7 +286,7 @@ class IdentityTransform(FinalTransform):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def apply(x):
+    def apply(self, x):
         return x
 
     def make_inverse(self):
@@ -306,10 +306,11 @@ class SharedMixin:
     def apply(self, x):
         if 'channels' in self.shared:
             xform = self.make_final(x[:1])
-            return xform(x)
         else:
-            return recursive_cat([self.make_final(x[i:i+1])(x)
-                                  for i in range(len(x))])
+            xform = self.make_final(x)
+        return xform(x)
+        # return recursive_cat([self.make_final(x[i:i+1])(x)
+        #                       for i in range(len(x))])
 
     def forward(self, *a, **k):
         return self._shared_forward(*a, **k)
@@ -325,6 +326,13 @@ class SharedMixin:
                 transform = self.make_final(first_tensor)
             return transform(*a, **k)
         return _fallback(*a, **k)
+
+    def make_per_channel(self, x, max_depth=float('inf'), *args, **kwargs):
+        return PerChannelTransform(
+            [self.make_final(x[i:i+1], max_depth, *args, **kwargs)
+                for i in range(len(x))],
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class NonFinalTransform(SharedMixin, Transform):
@@ -350,7 +358,7 @@ class NonFinalTransform(SharedMixin, Transform):
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x, max_depth=float('inf'), *args, **kwargs):
         if self.is_final or max_depth == 0:
             return self
         return NotImplemented

@@ -180,14 +180,13 @@ class ContrastLookupTransform(NonFinalTransform):
         self.nk = nk
 
     def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
         if 'channels' not in self.shared and len(x) > 1:
             return PerChannelTransform(
                 [self.make_final(x[i:i+1], max_depth) for i in range(len(x))],
                 **self.get_prm()
             ).make_final(x, max_depth-1)
-
-        if max_depth == 0:
-            return self
 
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)

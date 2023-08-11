@@ -77,6 +77,8 @@ def prepare_output(results, returns):
 
 def return_requires(returns):
     """Return all requires fields in a flat structure"""
+    if returns is None:
+        return ['output']
     returns = flatstruct(returns)
     if isinstance(returns, dict):
         return list(returns.values())

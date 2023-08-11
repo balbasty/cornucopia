@@ -1,7 +1,6 @@
 from types import GeneratorType as generator
 from typing import List
 import torch
-from torch import Tensor
 from .version import torch_version
 
 
@@ -175,6 +174,7 @@ def cumsum(sequence, reverse=False, exclusive=False):
         seq = list(reversed(seq))
     return seq
 
+
 if torch_version('>=', (1, 10)):
     def meshgrid_ij(*x):
         return torch.meshgrid(*x, indexing='ij')
@@ -228,8 +228,8 @@ def move_to_permutation(length, source, destination):
         raise ValueError(f'Expected source positions to be unique but got '
                          f'{source}')
     if len(set(destination)) != len(destination):
-        raise ValueError(f'Expected destination positions to be unique but got '
-                         f'{destination}')
+        raise ValueError(f'Expected destination positions to be unique '
+                         f'but got {destination}')
 
     # compute permutation
     positions_in = list(range(length))
