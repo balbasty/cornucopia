@@ -22,7 +22,7 @@ from .random import Sampler
 from .utils.py import ensure_list, cumsum
 from .baseutils import (
     Args, Kwargs, ArgsAndKwargs, Returned, VirtualTensor,
-    get_first_element, prepare_output, recursive_cat, unset,
+    get_first_element, prepare_output, unset,
 )
 
 
@@ -62,7 +62,10 @@ class Transform(nn.Module):
         self.prefix = prefix
         self.include = ensure_list(include) if include is not None else None
         self.exclude = ensure_list(exclude or tuple())
-        self.is_final = False
+
+    @property
+    def is_final(self):
+        return False
 
     def get_prm(self):
         return dict(
@@ -241,7 +244,10 @@ class FinalTransform(Transform):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.is_final = True
+
+    @property
+    def is_final(self):
+        return True
 
     def apply(self, x,):
         """Apply the transform to a tensor
@@ -307,8 +313,8 @@ class SharedMixin:
         if 'channels' in self.shared:
             xform = self.make_final(x[:1])
         else:
-            xform = self.make_final(x)
-        return xform(x)
+            xform = self.make_final(x, 1)
+        return xform.apply(x)
         # return recursive_cat([self.make_final(x[i:i+1])(x)
         #                       for i in range(len(x))])
 
@@ -321,9 +327,9 @@ class SharedMixin:
             first_tensor = get_first_element(
                 [a, k], include=self.include, exclude=self.exclude)
             if 'channels' in self.shared:
-                transform = self.make_final(first_tensor[:1])
+                transform = self.make_final(first_tensor[:1], max_depth=1)
             else:
-                transform = self.make_final(first_tensor)
+                transform = self.make_final(first_tensor, max_depth=1)
             return transform(*a, **k)
         return _fallback(*a, **k)
 
@@ -463,7 +469,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         return SequentialTransform([t.make_inverse() for t in self])
 
     def forward(self, *a, **k):
-        return self._shared_forward(*a, **k, _fallback=self.forward_impl)
+        return self._shared_forward(*a, **k, _fallback=self._forward_impl)
 
     def _forward_impl(self, *args, **kwargs):
         if kwargs and args:
@@ -731,6 +737,7 @@ class IncludeKeysTransform(SpecialMixin, Transform):
         union : bool
             Include the union of what was already included and `keys`
         """
+        super().__init__()
         if keys and not isinstance(keys, (list, tuple)):
             keys = [keys]
         self.transform = transform
@@ -816,6 +823,7 @@ class ExcludeKeysTransform(SpecialMixin, Transform):
         union : bool
             Exclude the union of what was already excluded and `keys`
         """
+        super().__init__()
         if keys and not isinstance(keys, (list, tuple)):
             keys = [keys]
         self.transform = transform
@@ -888,6 +896,7 @@ class SharedTransform(SpecialMixin, SharedMixin, Transform):
             channel and each tensor.
 
         """
+        super().__init__()
         self.transform = transform
         self.mode = mode
 
@@ -924,6 +933,7 @@ class ReturningTransform(SpecialMixin, Transform):
     """
 
     def __init__(self, transform, returns=None):
+        super().__init__()
         self.transform = transform
         self.returns = returns
 
@@ -1071,7 +1081,8 @@ class RandomizedTransform(NonFinalTransform):
 
     """
 
-    def __init__(self, transform, sample, ksample=None, **kwargs):
+    def __init__(self, transform, sample, ksample=None,
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -1081,9 +1092,13 @@ class RandomizedTransform(NonFinalTransform):
         sample : [list or dict of] callable
             A collection of functions that generate parameter values provided
             to `transform`.
+
+        Keyword Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Share random parameters across tensors and/or channels
         """
-        kwargs.setdefault('shared', False)
-        super().__init__(**kwargs)
+        super().__init__(shared=shared, **kwargs)
         self.sample = sample
         self.ksample = ksample
         self.subtransform = transform
@@ -1091,6 +1106,8 @@ class RandomizedTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
+        if 'channels' not in self.shared and len(x) > 1:
+            return self.make_per_channel(x, max_depth)
         args = []
         kwargs = {}
         if isinstance(self.sample, (list, tuple)):

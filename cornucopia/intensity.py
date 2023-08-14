@@ -433,6 +433,8 @@ class RandomMulFieldTransform(NonFinalTransform):
 
         Keyword Parameters
         ------------------
+        returns : [list or dict of] {'input', 'output', 'field'}
+            Which tensor(s) to return
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
         shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
@@ -629,9 +631,9 @@ class GammaTransform(NonFinalTransform):
         def apply(self, x):
             vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
             vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
-            gamma = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
+            gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
             vmin = vmin.reshape([-1] + [1] * (x.ndim-1))
-            vmax = vmin.reshape([-1] + [1] * (x.ndim-1))
+            vmax = vmax.reshape([-1] + [1] * (x.ndim-1))
             gamma = gamma.reshape([-1] + [1] * (x.ndim-1))
 
             y = x.sub(vmin).div_(vmax - vmin)
@@ -796,15 +798,14 @@ class QuantileTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        if 'channels' in self.shared:
-            opt = dict()
-        else:
-            opt = dict(dim=list(range(1, x.ndim)), keepdim=True)
+        if 'channels' not in self.shared and len(x) > 1:
+            return self.make_per_channel(x, max_depth)
+
         nmax = 10000
         x = x[x != 0]
         x = x[torch.rand_like(x) < (nmax / x.numel())]
-        pmin = torch.quantile(x, q=self.pmin, **opt)
-        pmax = torch.quantile(x, q=self.pmax, **opt)
+        pmin = torch.quantile(x, self.pmin)
+        pmax = torch.quantile(x, self.pmax)
 
         slope = (self.vmax - self.vmin) / (pmax - pmin)
         offset = self.vmin - pmin * slope

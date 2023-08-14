@@ -40,22 +40,22 @@ image pairs with a random affine deformation between them::
 #       [ ] By default (non shared), let Transforms handle multi-channel
 #           data (currently we loop across channels in the base class)
 
-from . import random
-from . import ctx
-from .base import *
-from .special import *
-from .contrast import *
-from .geometric import *
-from .intensity import *
-from .io import *
-from .fov import *
-from .kspace import *
-from .labels import *
-from .noise import *
-from .psf import *
-from .qmri import *
-from .synth import *
-from .utils.patch import patch_apply
+from . import random                        # noqa: F401
+from . import ctx                           # noqa: F401
+from .base import *                         # noqa: F401,F403
+from .special import *                      # noqa: F401,F403
+from .contrast import *                     # noqa: F401,F403
+from .geometric import *                    # noqa: F401,F403
+from .intensity import *                    # noqa: F401,F403
+from .io import *                           # noqa: F401,F403
+from .fov import *                          # noqa: F401,F403
+from .kspace import *                       # noqa: F401,F403
+from .labels import *                       # noqa: F401,F403
+from .noise import *                        # noqa: F401,F403
+from .psf import *                          # noqa: F401,F403
+from .qmri import *                         # noqa: F401,F403
+from .synth import *                        # noqa: F401,F403
+from .utils.patch import patch_apply        # noqa: F401,F403
 
 from . import _version
 __version__ = _version.get_versions()['version']

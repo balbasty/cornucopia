@@ -37,8 +37,9 @@ class LoadTransform(FinalTransform):
     Load data from disk
     """
 
-    def __init__(self, ndim=None, dtype=None,
-                 *, device=None, returns=None, append=False, **kwargs):
+    def __init__(self, ndim=None, dtype=None, *, device=None,
+                 returns=None, append=False, include=None, exclude=None,
+                 **kwargs):
         """
         Parameters
         ----------
@@ -61,7 +62,12 @@ class LoadTransform(FinalTransform):
             Field to load from a npz file.
             Only used by Numpy reader.
         """
-        super().__init__(shared='channels', returns=returns, append=append)
+        super().__init__(
+            returns=returns,
+            append=append,
+            include=include,
+            exclude=exclude,
+        )
         self.ndim = ndim
         self.dtype = dtype
         self.device = device

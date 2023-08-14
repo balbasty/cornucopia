@@ -88,6 +88,28 @@ def return_requires(returns):
         return [returns]
 
 
+def returns_find(flag, returned, returns):
+    """Find tensor corresponding to flag in returned structure"""
+    if returns is None:
+        if flag == 'output':
+            return returned
+        else:
+            return None
+    if isinstance(returns, dict):
+        return returned.get(flag, None)
+    elif isinstance(returns, (list, tuple)):
+        if flag in returns:
+            return returned[returns.index(flag)]
+        else:
+            return None
+    else:
+        assert isinstance(returns, str)
+        if returns == flag:
+            return returned
+        else:
+            return None
+
+
 def flatstruct(x):
     """Flatten a nested structure of tensors"""
 
