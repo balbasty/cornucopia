@@ -379,7 +379,7 @@ class GradientEchoTransform(FinalTransform):
 
     def __init__(self, tr=25e-3, te=7e-3, alpha=20,
                  pd=None, t1=None, t2=None, b1=1, mt=0,
-                 *, shared='channels', **kwargs):
+                 **kwargs):
         """
 
         Parameters
@@ -407,7 +407,7 @@ class GradientEchoTransform(FinalTransform):
             If None, the fifth input channel is MTsat.
 
         """
-        super().__init__(shared=shared, **kwargs)
+        super().__init__(**kwargs)
         self.te = te
         self.tr = tr
         self.alpha = alpha
@@ -494,11 +494,12 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             self.mask = mask
 
         def apply(self, x):
-            y = self.prm.apply(x)
-            y = self.fwd.apply(y)
-            out = returns_find(y, self.returns)
+            y = self.prm(x)
+            y = self.fwd(y)
+
+            out = returns_find('output', y, self.fwd.returns)
             if out is not None:
-                out = self.mask(out)
+                out.copy_(self.mask(out))
             return y
 
     def __init__(self, tr=50e-3, te=50e-3, alpha=90,
@@ -574,7 +575,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         )
         if self.b1:
             b1 = self.b1.make_final(x)
-            b1 = b1.apply(x.new_ones([], dtype=dtype).expand(x.shape))
+            b1 = b1(x.new_ones([], dtype=dtype).expand(x.shape))
         else:
             b1 = 1
         return tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm

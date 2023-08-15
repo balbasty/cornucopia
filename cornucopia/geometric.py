@@ -317,11 +317,6 @@ class AffineTransform(NonFinalTransform):
             self.bound = bound
 
         def make_flow(self, matrix, shape):
-            """Build affine flow from matrix
-
-            Parameters
-            ----------
-            """
             return warps.affine_flow(matrix, shape).movedim(-1, 0)
 
         def apply(self, x):
@@ -853,8 +848,8 @@ class MakeAffinePair(NonFinalTransform):
             self.right = right
 
         def apply(self, x):
-            x1 = self.left.apply(x)
-            x2 = self.right.apply(x)
+            x1 = self.left(x)
+            x2 = self.right(x)
             mat1, mat2 = self.left.matrix, self.right.matrix
             mat1, mat2 = cast_like(mat1, x), cast_like(mat2, x)
             mat12 = mat2.inverse() @ mat1
@@ -891,7 +886,7 @@ class MakeAffinePair(NonFinalTransform):
         left = self.subtransform.make_final(x)
         right = self.subtransform.make_final(x)
         return self.Final(
-            left, right, **self.get_prm
+            left, right, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -1002,11 +997,15 @@ class ThroughSliceAffineTransform(NonFinalTransform):
             [r1 * math.pi / 180 for r1 in r] for r in rotations
         ]
 
-        rotations = torch.as_tensor(rotations, **backend)
-        shears = torch.as_tensor(shears, **backend)
-        translations = torch.as_tensor(translations, **backend)
-        zooms = torch.as_tensor(zooms, **backend)
-        offsets = torch.as_tensor(offsets, **backend)
+        try:
+            rotations = torch.as_tensor(rotations, **backend)
+            shears = torch.as_tensor(shears, **backend)
+            translations = torch.as_tensor(translations, **backend)
+            zooms = torch.as_tensor(zooms, **backend)
+            offsets = torch.as_tensor(offsets, **backend)
+        except Exception as e:
+            print(e)
+            pass
 
         E = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
         F = torch.eye(ndim+1, **backend)
@@ -1128,7 +1127,7 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
             nodes = RandInt.make(make_range(0, nodes))
         self.nodes = nodes
         self.shots = shots
-        self.share_matrix = shared_matrix
+        self.shared_matrix = shared_matrix
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -1158,21 +1157,21 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
         shears = self.shears
         zooms = self.zooms
         if isinstance(translations, Sampler):
-            translations = translations(ndim)
+            translations = translations([nodes, ndim])
         if isinstance(rotations, Sampler):
-            rotations = rotations((ndim*(ndim-1))//2)
+            rotations = rotations([nodes, (ndim*(ndim-1))//2])
         if isinstance(shears, Sampler):
-            shears = shears((ndim*(ndim-1))//2)
+            shears = shears([nodes, (ndim*(ndim-1))//2])
         if isinstance(zooms, Sampler):
-            zooms = zooms(ndim)
+            zooms = zooms([nodes, ndim])
 
         # cubic interpolation of motion parameters
         if nodes < nb_slices:
             def node2slice(x):
-                x = torch.as_tensor(x, dtype=torch.float32).T  # [3, N]
+                x = torch.as_tensor(x, dtype=torch.float32).T  # [D, N]
                 x = interpol.resize(x, shape=[nb_slices],
                                     interpolation=3, bound='replicate',
-                                    prefilter=False).T  # [S, 3]
+                                    prefilter=False).T  # [S, D]
                 y = torch.empty_like(x)
                 for i in range(self.shots):
                     y[i::self.shots] = x[:len(y[i::self.shots])]
@@ -1182,6 +1181,15 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
             rotations = node2slice(rotations)
             shears = node2slice(shears)
             zooms = node2slice(zooms)
+        else:
+            if torch.is_tensor(translations):
+                translations = translations.tolist()
+            if torch.is_tensor(rotations):
+                rotations = rotations.tolist()
+            if torch.is_tensor(shears):
+                shears = shears.tolist()
+            if torch.is_tensor(zooms):
+                zooms = zooms.tolist()
 
         shared_matrix = self.shared_matrix
         if shared_matrix is None:

@@ -160,18 +160,20 @@ class Transform(nn.Module):
 
         # now we're working with a single tensor (or str)
         y = self.apply(x)
-        if not isinstance(y, type(self.returns)):
-            y = dict(input=x, output=y)
-            y = prepare_output(y, self.returns)
-        elif isinstance(self.returns, dict):
-            for key, target in self.returns.items():
-                if target == 'input':
-                    y[key] = x
-        elif isinstance(self.returns, (list, tuple)):
-            for i, target in enumerate(self.returns):
-                if target == 'input':
-                    y[i] = x
-        return Returned(y)
+        if not isinstance(y, Returned):
+            if not isinstance(y, type(self.returns)):
+                y = dict(input=x, output=y)
+                y = prepare_output(y, self.returns).obj
+            elif isinstance(self.returns, dict):
+                for key, target in self.returns.items():
+                    if target == 'input':
+                        y[key] = x
+            elif isinstance(self.returns, (list, tuple)):
+                for i, target in enumerate(self.returns):
+                    if target == 'input':
+                        y[i] = x
+            y = Returned(y)
+        return y
 
     def _get_valid_keys(self, x):
         valid_keys = x.keys()
@@ -315,8 +317,6 @@ class SharedMixin:
         else:
             xform = self.make_final(x, 1)
         return xform.apply(x)
-        # return recursive_cat([self.make_final(x[i:i+1])(x)
-        #                       for i in range(len(x))])
 
     def forward(self, *a, **k):
         return self._shared_forward(*a, **k)
@@ -456,7 +456,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         trf = []
         for t in self:
             t = t.make_final(x, max_depth=max_depth-1)
-            x = t.apply(x)
+            x = t(x)
             trf.append(t)
         trf = SequentialTransform(trf, **self.get_prm())
         return trf

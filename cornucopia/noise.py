@@ -231,9 +231,9 @@ class GFactorTransform(NonFinalTransform):
             noisetrf = self.noisetrf.make_final(x)
             noise = noisetrf.noise.to(x)
             with ctx.returns(self.gfactor, ['output', 'field']):
-                scalednoise, gfactor = self.gfactor.apply(noise)
+                scalednoise, gfactor = self.gfactor(noise)
             self.noisetrf.noise = scalednoise
-            y = self.noisetrf.apply(x)
+            y = self.noisetrf(x)
             self.noisetrf.noise = noise
             return prepare_output(
                 dict(input=x, output=y, noise=noise,

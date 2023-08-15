@@ -849,7 +849,7 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
                     label_index = foreground_labels.index(label)
                     min_radius = foreground_min_radius[label_index]
                     max_radius = foreground_max_radius[label_index]
-                    radius = self.fields.apply(z)
+                    radius = self.fields(z)
                     radius.mul_(max_radius - min_radius).add_(min_radius)
                 else:
                     radius = 0
@@ -1041,7 +1041,7 @@ class SmoothShallowLabelTransform(NonFinalTransform):
                     foreground_min_width,
                     foreground_max_width):
                 x0 = x == label
-                radius = self.fields.apply(z)
+                radius = self.fields(z)
                 radius.mul_(min_width-max_width).sub_(min_width)
                 d1 = dist(x0).to(d)
                 mask = (d1 < 0) & (d1 > radius)
@@ -1265,8 +1265,7 @@ class SmoothBernoulliTransform(NonFinalTransform):
         z = x.new_zeros([], dtype=dtype, device=x.device)
         z = z.expand([batch, *shape])
 
-        prob = AddFieldTransform(self.shape, shared=self.shared)
-        prob = prob.apply(z)
+        prob = AddFieldTransform(self.shape, shared=self.shared)(z)
         prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
         prob *= self.prob * x.shape[1:].numel()
 

@@ -61,18 +61,19 @@ def prepare_output(results, returns):
     """
     if returns is None:
         if torch.is_tensor(results):
-            return results
+            pass
         else:
-            return results.get('output', None)
-    if isinstance(returns, dict):
-        return type(returns)(
+            results = results.get('output', None)
+    elif isinstance(returns, dict):
+        results = type(returns)(
             **{key: results.get(target, None)
                for key, target in returns.items()})
     elif isinstance(returns, (list, tuple)):
-        return type(returns)(
+        results = type(returns)(
             [results.get(target, None) for target in returns])
     else:
-        return results.get(returns, None)
+        results = results.get(returns, None)
+    return Returned(results)
 
 
 def return_requires(returns):

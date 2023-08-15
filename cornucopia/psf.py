@@ -91,7 +91,7 @@ class LowResSliceTransform(NonFinalTransform):
             oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
             y = interpol(y, oshape)
             if self.noise:
-                y = self.noise.apply(y)
+                y = self.noise(y)
             z = interpol(y, ishape)
             return prepare_output(
                 dict(input=x, lowres=y, output=z),
@@ -239,7 +239,7 @@ class LowResTransform(NonFinalTransform):
             oshape = [math.ceil(s*f) for s, f in zip(ishape, factor)]
             y = interpol(y, oshape)
             if self.noise is not None:
-                y = self.noise.apply(y)
+                y = self.noise(y)
             z = interpol(y, ishape)
             return prepare_output(
                 dict(input=x, lowres=y, output=z),

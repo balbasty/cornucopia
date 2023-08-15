@@ -9,11 +9,12 @@ import torch
 import math
 import random
 from .base import NonFinalTransform, FinalTransform
-from .baseutils import prepare_output
+from .baseutils import prepare_output, return_requires
 from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
 from .random import Fixed
 from .utils.py import cartesian_grid
+from . import ctx
 
 
 class ArrayCoilTransform(NonFinalTransform):
@@ -82,11 +83,11 @@ class ArrayCoilTransform(NonFinalTransform):
 
         ndim = x.dim() - 1
         backend = dict(dtype=x.dtype, device=x.device)
-        fake_x = torch.zeros([], **backend)
+        fake_x = torch.ones([], **backend)
         fake_x = fake_x.expand([2*self.ncoils, *x.shape[1:]])
 
         smooth_bias = MulFieldTransform(shape=self.shape, vmin=-1, vmax=1)
-        smooth_bias = smooth_bias.get_parameters(fake_x)
+        smooth_bias = smooth_bias(fake_x)
         phase = smooth_bias[::2].atan2(smooth_bias[1::2])
         magnitude = (smooth_bias[0::2].square() +
                      smooth_bias[1::2].square()).sqrt_()
@@ -128,7 +129,8 @@ class IntraScanMotionTransform(NonFinalTransform):
 
     class FinalIntraScanMotionTransform(FinalTransform):
 
-        def __init__(self, motion, patterns, sens=None, axis=-1, **kwargs):
+        def __init__(self, motion, patterns, sens=None, axis=-1, freq=False,
+                     **kwargs):
             """
             Parameters
             ----------
@@ -142,15 +144,18 @@ class IntraScanMotionTransform(NonFinalTransform):
             self.patterns = patterns
             self.sens = sens
             self.axis = axis
+            self.freq = freq
 
         def apply(self, x):
-            motions = self.motion.to(x)
+            motions = self.motion
             patterns = self.patterns.to(x.device)
 
-            if self.sens is not None:
+            if self.sens:
                 assert len(x) == 1
-                sens = self.sens.to(x.device)
-                netsens = sens.abs().square_().sum(0).sqrt_()[None]
+                with ctx.returns(self.sens, ['sens', 'netsens']):
+                    sens, netsens = self.sens(x)
+                # sens = self.sens.to(x.device)
+                # netsens = sens.abs().square_().sum(0).sqrt_()[None]
                 y = x.new_empty([len(sens), *x.shape[1:]],
                                 dtype=torch.complex64)
             else:
@@ -160,10 +165,19 @@ class IntraScanMotionTransform(NonFinalTransform):
             x = x.movedim(self.axis, 1)
             y = y.movedim(self.axis, 1)
 
-            matrix = torch.stack(list(map(lambda x: x[1][1], motions)))
-            flow = torch.stack(list(map(lambda x: x[1][0], motions)))
-            for (motion_trf, motion_prm), pattern in zip(motions, patterns):
-                moved = motion_trf.apply_transform(x, motion_prm)
+            matrix, flow = [], []
+            returned = return_requires(self.returns)
+            returns = dict(moved='output')
+            if 'matrix' in returned:
+                returns['matrix'] = 'matrix'
+            if 'flow' in returned:
+                returns['flow'] = 'flow'
+            for motion_trf, pattern in zip(motions, patterns):
+                with ctx.returns(motion_trf, returns):
+                    moved = motion_trf(x)
+                matrix.append(moved.get('matrix', None))
+                flow.append(moved.get('flow', None))
+                moved = moved['moved']
                 if sens is not None:
                     moved = moved * sens
                 if self.freq:
@@ -180,6 +194,15 @@ class IntraScanMotionTransform(NonFinalTransform):
             x = x.movedim(1, self.axis)
 
             sos = y.abs().square_().sum(0, keepdim=True).sqrt_()
+
+            if 'matrix' in returned:
+                matrix = torch.stack(matrix)
+            else:
+                matrix = None
+            if 'flow' in returned:
+                flow = torch.stack(flow)
+            else:
+                flow = None
 
             return prepare_output(
                 dict(input=x, sos=sos, output=sos, uncombined=y, sens=sens,
@@ -312,7 +335,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             sens = self.coils.make_final(x)
 
         return self.FinalIntraScanMotionTransform(
-            motion, pattern, sens, self.axis, **self.get_prm()
+            motion, pattern, sens, self.axis, self.freq, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -340,4 +363,4 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
         k = random.randint(0, n-1)
         mask = torch.zeros(n, dtype=torch.bool, device=device)
         mask[:k] = 1
-        return [mask, ~mask]
+        return torch.stack([mask, ~mask])
