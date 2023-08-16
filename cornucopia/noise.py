@@ -261,6 +261,8 @@ class GFactorTransform(NonFinalTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'gfactor', 'noise', 'scalednoise'}
             Which tensors to return
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Use the same field for all channels/tensors
         """  # noqa: 501
         super().__init__(shared=shared, **kwargs)
         self.noise = noise

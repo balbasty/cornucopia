@@ -104,7 +104,7 @@ from .noise import (
     GFactorTransform,
 )
 from .geometric import RandomAffineElasticTransform
-from .random import Sampler, Uniform, RandInt, Fixed, LogNormal
+from .random import Sampler, Uniform, RandInt, LogNormal
 from .io import LoadTransform
 from numbers import Number
 import random as pyrandom
@@ -144,6 +144,7 @@ class IntensityTransform(SequentialTransform):
 
     def __init__(self,
                  bias=7,
+                 bias_strength=0.5,
                  gamma=0.6,
                  motion_fwhm=3,
                  resolution=8,
@@ -158,6 +159,11 @@ class IntensityTransform(SequentialTransform):
             The sampled value controls the smoothness of the intensity
             bias field (smaller values yield smoother fields).
             If a `float`, sample from `RandInt(2, value)`.
+        bias_strength : (0..1) or Sampler
+            The maximum magnitude of the bias field (about 1).
+            If a `float`, sample from `Uniform(0, value)`.
+            The minimum and maximum values of the bias field will be
+            `1 - bias_strength` and `1 + bias_strength`.
         gamma : float or Sampler or False
             The Gamma transform squeezes intensities such that the contrast
             to noise ratio is decreased (positive values lead to less
@@ -197,7 +203,10 @@ class IntensityTransform(SequentialTransform):
         if bias:
             if not isinstance(bias, Sampler):
                 bias = RandInt(2, bias)
-            bias = RandomMulFieldTransform(bias, vmax=Fixed(2), order=order)
+            if not isinstance(bias_strength, Sampler):
+                bias_strength = Uniform(0, bias_strength)
+            bias = RandomMulFieldTransform(
+                bias, vmax=bias_strength, symmetric=1, order=order)
             steps += [bias]
 
         if gamma:
@@ -222,7 +231,7 @@ class IntensityTransform(SequentialTransform):
                     gfactor = RandInt(2, gfactor)
                 noise = RandomizedTransform(
                     GFactorTransform,
-                    dict(noise=Fixed(noise1), shape=gfactor),
+                    dict(noise=noise1, shape=gfactor),
                 )
             else:
                 noise = noise1
@@ -348,6 +357,7 @@ class SynthFromLabelTransform(NonFinalTransform):
                  elastic_steps=0,
                  gmm_fwhm=10,
                  bias=7,
+                 bias_strength=0.5,
                  gamma=0.6,
                  motion_fwhm=3,
                  resolution=8,
@@ -429,6 +439,11 @@ class SynthFromLabelTransform(NonFinalTransform):
             The sampled value controls the smoothness of the intensity
             bias field (smaller values yield smoother fields).
             If a `float`, sample from `RandInt(2, value)`.
+        bias_strength : (0..1) or Sampler
+            The maximum magnitude of the bias field (about 1).
+            If a `float`, sample from `Uniform(0, value)`.
+            The minimum and maximum values of the bias field will be
+            `1 - bias_strength` and `1 + bias_strength`.
         gamma : float or Sampler or False
             The Gamma transform squeezes intensities such that the contrast
             to noise ratio is decreased (positive values lead to less
@@ -491,7 +506,14 @@ class SynthFromLabelTransform(NonFinalTransform):
             background=0,
         )
         self.intensity = IntensityTransform(
-            bias, gamma, motion_fwhm, resolution, snr, gfactor, order
+            bias=bias, 
+            bias_strength=bias_strength, 
+            gamma=gamma, 
+            motion_fwhm=motion_fwhm,
+            resolution=resolution, 
+            snr=snr, 
+            gfactor=gfactor, 
+            order=order,
         )
 
     def make_final(self, x, max_depth=float('inf')):

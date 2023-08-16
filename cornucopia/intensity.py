@@ -456,7 +456,7 @@ class MulFieldTransform(BaseFieldTransform):
 class RandomMulFieldTransform(NonFinalTransform):
     """Random multiplicative bias field transform"""
 
-    def __init__(self, shape=8, vmax=1, order=3, *,
+    def __init__(self, shape=8, vmax=1, order=3, symmetric=False, *,
                  shared=False, shared_field=None, **kwargs):
         """
         Parameters
@@ -467,6 +467,11 @@ class RandomMulFieldTransform(NonFinalTransform):
             Sampler or Upper bound for maximum value
         order : int
             Spline order
+        symmetric : bool or float
+            If a float, the bias field will take values in
+            `(symmetric-vmax, symmetric+vmax)`.
+            If False, it will take values in `(0, vmax)`.
+            If True, it will take values in `(1-vmax, 1+vmax)`.
 
         Other Parameters
         ------------------
@@ -482,6 +487,7 @@ class RandomMulFieldTransform(NonFinalTransform):
         self.vmax = Uniform.make(make_range(0, vmax))
         self.shape = RandInt.make(make_range(2, shape))
         self.order = Fixed.make(order)
+        self.symmetric = symmetric
         self.shared_field = self._prepare_shared(shared_field)
 
     def make_final(self, x, max_depth=float('inf')):
@@ -495,8 +501,13 @@ class RandomMulFieldTransform(NonFinalTransform):
             order = order()
         if shared_field is None:
             shared_field = self.shared
+        if self.symmetric is False:
+            vmin = 0
+        else:
+            mid = self.symmetric
+            vmin, vmax = mid - vmax, mid + vmax
         return MulFieldTransform(
-            shape, 0, vmax, order, shared=shared_field, **self.get_prm()
+            shape, vmin, vmax, order, shared=shared_field, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
