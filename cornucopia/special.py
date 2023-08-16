@@ -80,7 +80,7 @@ class BatchedTransform(nn.Module):
         for elem in unpack(args):
             batch.append(self.transform(*elem))
         batch = pack(batch)
-        return batch[0] if len(args) == 1 else tuple(batch)
+        return batch
 
     def __enter__(self):
         return self

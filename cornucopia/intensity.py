@@ -532,7 +532,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
-        super().__init__(hareds=shared, **kwargs)
+        super().__init__(shared=shared, **kwargs)
         if shape_through is not None:
             shape_through = RandInt.make(make_range(1, shape_through))
         self.vmax = Uniform.make(make_range(0, vmax))
@@ -541,7 +541,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         self.slice = slice
         self.thickness = RandInt.make(make_range(0, thickness))
         self.shape_through = shape_through
-        shared_field = self._prepare_shared(shared_field)
+        self.shared_field = self._prepare_shared(shared_field)
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
