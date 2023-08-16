@@ -1,9 +1,12 @@
 import torch
 from .utils.indexing import guess_shape
+from .utils.py import ensure_list
 
 
-def get_first_element(x, include=None, exclude=None):
+def get_first_element(x, include=None, exclude=None, types=None):
     """Return the fist element (tensor or string) in the nested structure"""
+    types = ensure_list(types or [])
+
     def _recursive(x):
         if hasattr(x, 'items'):
             for k, v in x.items():
@@ -21,7 +24,10 @@ def get_first_element(x, include=None, exclude=None):
                 if ok:
                     return v, True
             return None, False
-        return x, True
+        if torch.is_tensor(x) or isinstance(x, types):
+            return x, True
+        return x, False
+
     return _recursive(x)[0]
 
 

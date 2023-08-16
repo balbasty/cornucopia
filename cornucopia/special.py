@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from .base import Transform
 from .baseutils import Args, Kwargs, ArgsAndKwargs
-from .baseutils import recursive_cat
+from .baseutils import recursive_cat, get_first_element
 
 
 class BatchedTransform(nn.Module):
@@ -16,7 +16,7 @@ class BatchedTransform(nn.Module):
     !!! example
         Functional call:
         ```python
-        batched_transform = cc.batch(transform)
+        batched_transform = cc.ctx.batch(transform)
         img, lab = batched_transform(img, lab)  # input shapes: [B, C, X, Y, Z]
         ```
         Object call:
@@ -37,7 +37,7 @@ class BatchedTransform(nn.Module):
         super().__init__()
         self.transform = transform
 
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
 
         class UnpackError(ValueError):
             pass
@@ -53,7 +53,8 @@ class BatchedTransform(nn.Module):
                                       f'tensor with shape {list(x.shape)}')
                 return x[i]
             else:
-                raise TypeError(f'Don\'t know what to do with type {type(x)}')
+                # let's assume it is a nontensor (None, number, etc)
+                return x
 
         def unpack(x):
             i = 0
@@ -77,8 +78,8 @@ class BatchedTransform(nn.Module):
                 raise TypeError(f'Don\'t know what to do with type {type(x0)}')
 
         batch = []
-        for elem in unpack(args):
-            batch.append(self.transform(*elem))
+        for elem, kelem in zip(unpack(args), unpack(kwargs)):
+            batch.append(self.transform(*elem, **kelem))
         batch = pack(batch)
         return batch
 
