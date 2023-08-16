@@ -40,7 +40,7 @@ The default value for `shared` can differ from transform to transform.
 For example, the default for `ElasticTransform` is `True` (since we expect
 that most people want to apply the same deformation to different channels),
 whereas the default for `GaussianNoiseTransform` is `False` (since we want
-to resample noise in each channel).
+to re-sample noise in each channel).
 
 ### Random transforms
 

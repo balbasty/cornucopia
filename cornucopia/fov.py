@@ -56,6 +56,7 @@ class RandomFlipTransform(NonFinalTransform):
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same flip to all channels and/or tensors
         """
+        axes = kwargs.pop('axis', axes)
         kwargs.setdefault('shared', True)
         super().__init__(**kwargs)
         self.axes = axes

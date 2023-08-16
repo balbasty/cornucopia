@@ -251,7 +251,7 @@ class FinalTransform(Transform):
     def is_final(self):
         return True
 
-    def apply(self, x,):
+    def apply(self, x):
         """Apply the transform to a tensor
 
         Parameters
@@ -302,6 +302,11 @@ class IdentityTransform(FinalTransform):
 
 
 class SharedMixin:
+    """
+    Mixin for transforms that have parameters (e.g. random ones) 
+    that may be shared across tensors and/or channels or independent 
+    across tensors and/or channels.
+    """
 
     @classmethod
     def _prepare_shared(cls, shared):
@@ -313,9 +318,9 @@ class SharedMixin:
 
     def apply(self, x):
         if 'channels' in self.shared:
-            xform = self.make_final(x[:1])
+            xform = self.make_final(x[:1], max_depth=1)
         else:
-            xform = self.make_final(x, 1)
+            xform = self.make_final(x, max_depth=1)
         return xform.apply(x)
 
     def forward(self, *a, **k):
@@ -343,8 +348,8 @@ class SharedMixin:
 
 class NonFinalTransform(SharedMixin, Transform):
     """
-    Mixin for transforms whose parameters depend on features
-    of the input transform (shape, dtype, etc)
+    Transforms whose parameters depend on features of the input 
+    transform (shape, dtype, etc)
 
     Parameters
     ----------

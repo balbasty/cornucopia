@@ -890,7 +890,7 @@ class MakeAffinePair(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
-class ThroughSliceAffineTransform(NonFinalTransform):
+class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
     class Final(FinalTransform):
@@ -1168,7 +1168,7 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
-class RandomThroughSliceAffineTransform(NonFinalTransform):
+class RandomSlicewiseAffineTransform(NonFinalTransform):
     """
     Slicewise3DAffineTransform with random parameters.
     """
@@ -1337,7 +1337,7 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
         if shared_matrix is None:
             shared_matrix = self.shared
 
-        return ThroughSliceAffineTransform(
+        return SlicewiseAffineTransform(
             translations, rotations, shears, zooms,
             bulk_translations, bulk_rotations, bulk_shears, bulk_zooms,
             slice=slice, spacing=spacing, subsample=subsample,
