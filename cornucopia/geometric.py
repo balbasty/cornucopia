@@ -894,25 +894,64 @@ class ThroughSliceAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
     class Final(FinalTransform):
-        def __init__(self, flow, matrix, bound='border', **kwargs):
+        def __init__(self, flow, matrix, slice=-1, spacing=1, subsample=1,
+                     bound='border', **kwargs):
             super().__init__(**kwargs)
             self.flow = flow
             self.matrix = matrix
+            self.slice = slice
+            self.spacing = spacing
+            self.subsample = subsample
             self.bound = bound
 
         def apply(self, x):
             flow = cast_like(self.flow, x)
             matrix = cast_like(self.matrix, x)
-            y = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
+
+            # compute shape
+            fullshape = list(x.shape[1:])
+            ndim = len(fullshape)
+            zindex = self.slice - ndim if self.slice >= 0 else self.slice
+            oshape = list(fullshape)
+            oshape[zindex] = fullshape[zindex] // self.spacing
+            nb_slice = oshape[zindex]
+            fullshape[zindex] = nb_slice * self.spacing
+            nb_repeat = self.spacing//self.subsample
+
+            # compute sampling coordinates
+            slicer = [slice(None, None, self.subsample)] * ndim
+            slicer = (*slicer, slice(None))
+            id = warps.identity(
+                fullshape, dtype=flow.dtype, device=flow.device
+            )[slicer]
+            coord = (flow * self.subsample).movedim(0, -1) + id
+
+            # sample slices
+            y = warps.apply_flow(x[None], coord[None], has_identity=True,
                                  padding_mode=self.bound)[0]
+
+            if y.is_floating_point():
+                # not a label map -> apply PSF
+                kernel = torch.full(
+                    [nb_repeat, 1],
+                    1 / math.sqrt(nb_repeat),
+                    dtype=y.dtype, device=y.device
+                )
+                y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
+                y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
+                y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
+
             return prepare_output(
                 dict(input=x, output=y, flow=flow, matrix=matrix),
                 self.returns
             )
 
-    def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
-                 slice=-1, unit='fov', bound='border',
-                 *, shared=True, **kwargs):
+    def __init__(
+        self, translations=0, rotations=0, shears=0, zooms=0,
+        bulk_translations=0, bulk_rotations=0, bulk_shears=0, bulk_zooms=0,
+        slice=-1, unit='fov', bound='border', spacing=1, subsample=1,
+        *, shared=True, **kwargs
+    ):
         """
 
         Parameters
@@ -922,15 +961,27 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         rotations : list of [list of] float
             Rotations per slice (about Z/Y/X), in deg
         shears : list of [list of] float
-            Translation per slice (about Z/Y/Z)
+            Shears per slice (about Z/Y/Z)
         zooms : list of [list of] float
             Zoom about 1 per slice (per X/Y/Z)
+        bulk_translations : [list of] float
+            Bulk translation (per X/Y/Z)
+        bulk_rotations : [list of] float
+            Bulk rotation (about Z/Y/X), in deg
+        bulk_shears : l[list of] float
+            Bulk shear (about Z/Y/Z)
+        bulk_zooms : [list of] float
+            Bulk zoom about 1 (per X/Y/Z)
         slice : {0, 1, 2}
             Slice direction
         unit : {'fov', 'vox'}
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        spacing : int
+            Spacing between thick slices (as a number of high-res voxels)
+        subsample : int
+            Additional isotropic subsampling
 
         Keyword Parameters
         ------------------
@@ -957,9 +1008,15 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         self.rotations = rotations
         self.zooms = zooms
         self.shears = shears
+        self.bulk_translations = bulk_translations
+        self.bulk_rotations = bulk_rotations
+        self.bulk_zooms = bulk_zooms
+        self.bulk_shears = bulk_shears
         self.unit = unit
         self.bound = bound
         self.slice = slice
+        self.spacing = spacing
+        self.subsample = subsample
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         if max_depth == 0:
@@ -967,10 +1024,14 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         if 'channels' not in self.shared and len(x) > 1:
             return self.make_per_channel(x, max_depth, flow=True)
 
-        fullshape = x.shape[1:]
+        fullshape = list(x.shape[1:])
         ndim = len(fullshape)
-        slice = self.slice - ndim if self.slice >= 0 else self.slice
-        nb_slice = fullshape[slice]
+        zindex = self.slice - ndim if self.slice >= 0 else self.slice
+        oshape = list(fullshape)
+        oshape[zindex] = fullshape[zindex] // self.spacing
+        nb_slice = oshape[zindex]
+        fullshape[zindex] = nb_slice * self.spacing
+
         backend = dict(dtype=x.dtype, device=x.device)
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
@@ -987,25 +1048,49 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         zooms = [
             ensure_list(z, ndim) for z in self.zooms
         ]
+
+        bulk_rotations = ensure_list(
+            self.bulk_rotations, ndim * (ndim - 1) // 2
+        )
+        bulk_shears = ensure_list(
+            self.bulk_shears, ndim * (ndim - 1) // 2
+        )
+        bulk_translations = ensure_list(
+            self.bulk_translations, ndim
+        )
+        bulk_zooms = ensure_list(
+            self.bulk_zooms, ndim
+        )
+
         offsets = [(n-1)/2 for n in fullshape]
 
         if self.unit == 'fov':
             translations = [
                 [t1 * n for t1, n in zip(t, fullshape)] for t in translations
             ]
+            bulk_translations = [
+                t * n for t, n in zip(bulk_translations, fullshape)
+            ]
         rotations = [
             [r1 * math.pi / 180 for r1 in r] for r in rotations
         ]
+        bulk_rotations = [
+            r * math.pi / 180 for r in bulk_rotations
+        ]
 
-        try:
-            rotations = torch.as_tensor(rotations, **backend)
-            shears = torch.as_tensor(shears, **backend)
-            translations = torch.as_tensor(translations, **backend)
-            zooms = torch.as_tensor(zooms, **backend)
-            offsets = torch.as_tensor(offsets, **backend)
-        except Exception as e:
-            print(e)
-            pass
+        rotations = (
+            torch.as_tensor(rotations, **backend) +
+            torch.as_tensor(bulk_rotations, **backend))
+        shears = (
+            torch.as_tensor(shears, **backend) +
+            torch.as_tensor(bulk_shears, **backend))
+        translations = (
+            torch.as_tensor(translations, **backend) +
+            torch.as_tensor(bulk_translations, **backend))
+        zooms = (
+            torch.as_tensor(zooms, **backend) +
+            torch.as_tensor(bulk_zooms, **backend))
+        offsets = torch.as_tensor(offsets, **backend)
 
         E = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
         F = torch.eye(ndim+1, **backend)
@@ -1051,17 +1136,35 @@ class ThroughSliceAffineTransform(NonFinalTransform):
         A = T.matmul(A)
 
         if flow:
-            flow = warps.identity(fullshape, dtype=A.dtype, device=A.device)
-            flow = flow.movedim(-1, 0).movedim(slice, -1).movedim(0, -1)
+            slicer = [slice(None, None, self.subsample)] * ndim
+            slicer = (*slicer, slice(None))
+            id = warps.identity(fullshape, dtype=A.dtype, device=A.device)
+            id = id[slicer]
+            flow = id.unfold(
+                zindex-1,
+                self.spacing//self.subsample,
+                self.spacing//self.subsample
+            ).movedim(-1, 0)  # [spacing, *sshape, D]
+            flow = flow.movedim(-1, 0)      \
+                       .movedim(zindex, -1) \
+                       .movedim(0, -1)
+            # ^ [spacing, *oshape, nb_slices, D]
             flow = A[:, :-1, :-1].matmul(flow.unsqueeze(-1)).squeeze(-1)
             flow += A[:, :-1, -1]
-            flow = flow.movedim(-1, 0).movedim(-1, slice).movedim(0, -1)
-            flow = warps.sub_identity_(flow).movedim(-1, 0)
+            # flow = flow.movedim(-1, 0).movedim(-1, zindex).movedim(0, -1)
+            flow = flow.transpose(0, -1)     \
+                       .flatten(-2)          \
+                       .movedim(-1, zindex)  \
+                       .movedim(0, -1)
+            # ^ [*oshape, D]
+            flow = (flow - id).div_(self.subsample).movedim(-1, 0)
+            # ^ [D, *oshape]
         else:
             flow = None
 
         return self.Final(
-            flow, A, self.bound, **self.get_prm()
+            flow, A, self.slice, self.spacing, self.subsample, self.bound,
+            **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -1070,10 +1173,12 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
     Slicewise3DAffineTransform with random parameters.
     """
 
-    def __init__(self, translations=0.1, rotations=15,
-                 shears=0, zooms=0, slice=-1, shots=2, nodes=8,
-                 unit='fov', bound='border',
-                 *, shared=True, shared_matrix=None, **kwargs):
+    def __init__(
+        self, translations=0.1, rotations=15, shears=0, zooms=0,
+        bulk_translations=0.05, bulk_rotations=15, bulk_shears=0, bulk_zooms=0,
+        slice=-1, spacing=1, subsample=1, shots=2, nodes=8, unit='fov',
+        bound='border', *, shared=True, shared_matrix=None, **kwargs
+    ):
         """
 
         Parameters
@@ -1086,8 +1191,20 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
             Sampler or Upper bound for shears (about Z/Y/Z)
         zooms : Sampler or [list of] float
             Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        bulk_translations : [list of] float
+            Sampler or Upper bound for Bulk translation (per X/Y/Z)
+        bulk_rotations : [list of] float
+            Sampler or Upper bound for Bulk rotation (about Z/Y/X), in deg
+        bulk_shears : l[list of] float
+            Sampler or Upper bound for Bulk shear (about Z/Y/Z)
+        bulk_zooms : [list of] float
+            Sampler or Upper bound for Bulk zoom about 1 (per X/Y/Z)
         slice : int, optional
             Slice direction. If None, a random slice direction is selected.
+        spacing : int
+            Spacing between thick slices (as a number of high-res voxels)
+        subsample : int
+            Additional isotropic subsampling
         shots : int
             Number of interleaved sweeps.
             Typically, two interleaved sequences of slices are acquired
@@ -1120,9 +1237,15 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
         self.rotations = Uniform.make(make_range(rotations))
         self.shears = Uniform.make(make_range(shears))
         self.zooms = Uniform.make(make_range(zooms))
+        self.bulk_translations = Uniform.make(make_range(bulk_translations))
+        self.bulk_rotations = Uniform.make(make_range(bulk_rotations))
+        self.bulk_shears = Uniform.make(make_range(bulk_shears))
+        self.bulk_zooms = Uniform.make(make_range(bulk_zooms))
         self.unit = unit
         self.bound = bound
         self.slice = slice
+        self.spacing = spacing
+        self.subsample = subsample
         if nodes:
             nodes = RandInt.make(make_range(0, nodes))
         self.nodes = nodes
@@ -1144,8 +1267,15 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
         if isinstance(slice, Sampler):
             slice = slice()
 
+        # get slice spacing
+        spacing, subsample = self.spacing, self.subsample
+        if isinstance(spacing, Sampler):
+            spacing = spacing()
+        if isinstance(subsample, Sampler):
+            subsample = subsample()
+
         # get number of independent motions
-        nb_slices = x.shape[1:][slice]
+        nb_slices = x.shape[1:][slice] // spacing
         nodes = self.nodes
         if isinstance(nodes, Sampler):
             nodes = nodes()
@@ -1156,6 +1286,10 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
         rotations = self.rotations
         shears = self.shears
         zooms = self.zooms
+        bulk_translations = self.bulk_translations
+        bulk_rotations = self.bulk_rotations
+        bulk_shears = self.bulk_shears
+        bulk_zooms = self.bulk_zooms
         if isinstance(translations, Sampler):
             translations = translations([nodes, ndim])
         if isinstance(rotations, Sampler):
@@ -1164,6 +1298,14 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
             shears = shears([nodes, (ndim*(ndim-1))//2])
         if isinstance(zooms, Sampler):
             zooms = zooms([nodes, ndim])
+        if isinstance(bulk_translations, Sampler):
+            bulk_translations = bulk_translations(ndim)
+        if isinstance(bulk_rotations, Sampler):
+            bulk_rotations = bulk_rotations((ndim*(ndim-1))//2)
+        if isinstance(bulk_shears, Sampler):
+            bulk_shears = bulk_shears((ndim*(ndim-1))//2)
+        if isinstance(bulk_zooms, Sampler):
+            bulk_zooms = bulk_zooms(ndim)
 
         # cubic interpolation of motion parameters
         if nodes < nb_slices:
@@ -1197,6 +1339,8 @@ class RandomThroughSliceAffineTransform(NonFinalTransform):
 
         return ThroughSliceAffineTransform(
             translations, rotations, shears, zooms,
-            slice=slice, unit=self.unit, bound=self.bound,
+            bulk_translations, bulk_rotations, bulk_shears, bulk_zooms,
+            slice=slice, spacing=spacing, subsample=subsample,
+            unit=self.unit, bound=self.bound,
             shared=shared_matrix, **self.get_prm()
         ).make_final(x, max_depth-1)
