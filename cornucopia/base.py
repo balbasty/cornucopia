@@ -303,8 +303,8 @@ class IdentityTransform(FinalTransform):
 
 class SharedMixin:
     """
-    Mixin for transforms that have parameters (e.g. random ones) 
-    that may be shared across tensors and/or channels or independent 
+    Mixin for transforms that have parameters (e.g. random ones)
+    that may be shared across tensors and/or channels or independent
     across tensors and/or channels.
     """
 
@@ -348,7 +348,7 @@ class SharedMixin:
 
 class NonFinalTransform(SharedMixin, Transform):
     """
-    Transforms whose parameters depend on features of the input 
+    Transforms whose parameters depend on features of the input
     transform (shape, dtype, etc)
 
     Parameters

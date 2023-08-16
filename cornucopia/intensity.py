@@ -666,7 +666,7 @@ class GammaTransform(NonFinalTransform):
 
         """
         super().__init__(shared=shared, **kwargs)
-        self.gamma = gamma
+        self.gamma = kwargs.pop('value', gamma)
         self.vmin = vmin
         self.vmax = vmax
 
@@ -717,7 +717,7 @@ class RandomGammaTransform(NonFinalTransform):
 
         """
         super().__init__(shared=shared, **kwargs)
-        self.gamma = Uniform.make(gamma)
+        self.gamma = Uniform.make(kwargs.pop('value', gamma))
         self.shared_minmax = self._prepare_shared(shared_minmax)
 
     def make_final(self, x, max_depth=float('inf')):

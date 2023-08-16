@@ -58,7 +58,7 @@ img = cc.SwitchTransform([gauss, chi])(img)
 # syntactic sugar
 img = (0.2 * gauss)(img)                           # -> MaybeTransform
 img = (gauss | chi)(img)                           # -> SwitchTransform
-img = cc.switch({gauss: 0.5, chi: 0.5})(img)       # -> SwitchTransform
+img = cc.ctx.switch({gauss: 0.5, chi: 0.5})(img)   # -> SwitchTransform
 ```
 
 ### Sequences of transforms
@@ -67,7 +67,11 @@ Transforms can be composed together using the `SequentialTransform` class,
 or by simply adding them together:
 ```python
 # programatic instantiation of a sequence
-seq = cc.SequentialTransform([cc.ElasticTransform(), cc.GaussianNoiseTransform()])
+seq = cc.SequentialTransform([
+       cc.ElasticTransform(), 
+       cc.GaussianNoiseTransform()
+])
+
 # syntactic sugar
 seq = cc.ElasticTransform() + cc.GaussianNoiseTransform()
 
@@ -86,7 +90,7 @@ class that allows any transform to be easily randomized:
 img = cc.RandomAffineElasticTransform()(img)
 
 # randomize a transform
-hypernoise = cc.randomize(cc.GaussianNoise)(cc.Uniform(0, 10))
+hypernoise = cc.ctx.randomize(cc.GaussianNoise, cc.Uniform(0, 10))
 img = hypernoise(img)
 ```
 
@@ -124,8 +128,8 @@ img1, lab1 = dat['image'], dat['label']
 
 It is then possible to take advantage of positional arguments, keywords
 and/or dictionaries to apply some transforms to a subset of inputs.
-This is done using the `cc.MappedTransform` meta-transform (or the `cc.map`
-utility function):
+This is done using the `cc.MappedTransform` meta-transform (or the 
+`cc.ctx.map` utility function):
 ```python
 # using positionals
 geom = cc.RandomElasticTransform()
@@ -153,12 +157,12 @@ Alternatively, a transform can be applied selectively to a set of keys
 ```python
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.include_keys(noise, "image")
+trf = geom + cc.ctx.include(noise, "image")
 img, lab = trf(image=img, label=lab)
 
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.exclude_keys(noise, "label")
+trf = geom + cc.ctx.exclude(noise, "label")
 img, lab = trf(image=img, label=lab)
 ```
 
@@ -171,8 +175,8 @@ your dataloader, and apply all other augmentations inside a PyTorch module.
 The `BatchedTransform` class allows a transform to be applied to a batched
 tensor or a nested structure of batched tensors:
 ```python
-batched_transform = cc.batch(transform)  # or cc.BatchedTransform(transform)
-img, lab = batched_transform(img, lab)   # input shapes: [B, C, X, Y, Z]
+batched_transform = cc.ctx.batch(transform) # or cc.BatchedTransform(transform)
+img, lab = batched_transform(img, lab)      # input shapes: [B, C, X, Y, Z]
 ```
 
 **Happy augmentation!**
