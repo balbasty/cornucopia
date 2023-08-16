@@ -15,7 +15,7 @@ from random import shuffle
 from .base import FinalTransform, NonFinalTransform
 from .utils.py import ensure_list
 from .utils.padding import pad
-from .random import Uniform, RandKFrom
+from .random import Uniform, RandKFrom, Sampler
 
 
 class FlipTransform(FinalTransform):
@@ -51,7 +51,7 @@ class RandomFlipTransform(NonFinalTransform):
 
         Parameters
         ----------
-        axes : [list of] int
+        axes : Sampler or [list of] int
             Axes that can be flipped (default: all)
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same flip to all channels and/or tensors
@@ -65,7 +65,9 @@ class RandomFlipTransform(NonFinalTransform):
         if max_depth == 0:
             return self
         axes = self.axes or range(1, x.ndim)
-        rand_axes = RandKFrom(axes)()
+        if not isinstance(axes, Sampler):
+            rand_axes = RandKFrom(ensure_list(axes))
+        rand_axes = rand_axes()
         return FlipTransform(rand_axes).make_final(x, max_depth-1)
 
 
