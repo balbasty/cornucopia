@@ -1,5 +1,12 @@
-__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal',
-           'RandKFrom']
+__all__ = [
+    'Sampler',
+    'Fixed',
+    'Uniform',
+    'RandInt',
+    'Normal',
+    'LogNormal',
+    'RandKFrom',
+]
 
 import random
 import copy
@@ -515,4 +522,3 @@ def make_range(*args, **kwargs):
     else:
         assert len(args) > 0
         return vmid - args[0], vmid + args[0]
-

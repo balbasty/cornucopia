@@ -1,3 +1,8 @@
+"""
+This module contains transforms that implement physics-based forward
+models of MR image formation.
+"""
+
 __all__ = [
     'RandomSusceptibilityMixtureTransform',
     'SusceptibilityToFieldmapTransform',
@@ -470,7 +475,7 @@ class GradientEchoTransform(FinalTransform):
 
 class RandomGMMGradientEchoTransform(NonFinalTransform):
     """
-    Generate a SpoiledGradientEcho image from synthetic PD/T1/T2 maps.
+    Generate a Spoiled Gradient Echo image from synthetic PD/T1/T2 maps.
     """
 
     class GREParameters(FinalTransform):

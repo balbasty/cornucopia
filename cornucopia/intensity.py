@@ -23,10 +23,9 @@ import torch
 from torch.nn.functional import interpolate
 import math
 import interpol
-from .base import (
-    RandomizedTransform, FinalTransform, NonFinalTransform, SequentialTransform
-)
 from .baseutils import prepare_output
+from .base import FinalTransform, NonFinalTransform
+from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
 

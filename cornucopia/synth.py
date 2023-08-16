@@ -77,25 +77,37 @@ References
 __all__ = ['SynthFromLabelTransform', 'IntensityTransform']
 
 from .baseutils import Kwargs, prepare_output
-from .base import (
-    SequentialTransform, RandomizedTransform, SwitchTransform,
-    FinalTransform, NonFinalTransform, IdentityTransform,
+from .base import FinalTransform, NonFinalTransform
+from .special import (
+    SequentialTransform,
+    RandomizedTransform,
+    SwitchTransform,
+    IdentityTransform,
 )
 from .labels import (
-    RandomGaussianMixtureTransform, RelabelTransform, OneHotTransform
+    RandomGaussianMixtureTransform,
+    RelabelTransform,
+    OneHotTransform,
 )
 from .intensity import (
-    RandomMulFieldTransform, RandomGammaTransform, QuantileTransform
+    RandomMulFieldTransform,
+    RandomGammaTransform,
+    QuantileTransform,
 )
 from .psf import (
-    RandomSmoothTransform, RandomLowResSliceTransform, RandomLowResTransform
+    RandomSmoothTransform,
+    RandomLowResSliceTransform,
+    RandomLowResTransform,
 )
-from .noise import RandomChiNoiseTransform, GFactorTransform
+from .noise import (
+    RandomChiNoiseTransform,
+    GFactorTransform,
+)
 from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, Fixed, LogNormal
 from .io import LoadTransform
-import random as pyrandom
 from numbers import Number
+import random as pyrandom
 
 
 class IntensityTransform(SequentialTransform):

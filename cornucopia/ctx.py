@@ -9,7 +9,7 @@ __all__ = [
     'map',
     'randomize',
 ]
-from .base import (
+from .special import (
     IncludeKeysTransform as include,
     ExcludeKeysTransform as exclude,
     SharedTransform as shared,
@@ -18,7 +18,5 @@ from .base import (
     SwitchTransform as switch,
     MappedTransform as map,
     RandomizedTransform as randomize,
-)
-from .special import (
     BatchedTransform as batch,
 )

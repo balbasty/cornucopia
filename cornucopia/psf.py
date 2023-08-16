@@ -1,8 +1,18 @@
-__all__ = ['SmoothTransform', 'RandomSmoothTransform',
-           'LowResTransform', 'RandomLowResTransform',
-           'LowResSliceTransform', 'RandomLowResSliceTransform']
+"""
+This module contains transforms that modify the resolution and/or 
+point spread function of an image.
+"""
+__all__ = [
+    'SmoothTransform',
+    'RandomSmoothTransform',
+    'LowResTransform',
+    'RandomLowResTransform',
+    'LowResSliceTransform',
+    'RandomLowResSliceTransform',
+]
 
-from .base import FinalTransform, NonFinalTransform, RandomizedTransform
+from .base import FinalTransform, NonFinalTransform
+from .special import RandomizedTransform
 from .baseutils import prepare_output
 from .utils.conv import smoothnd
 from .utils.py import ensure_list

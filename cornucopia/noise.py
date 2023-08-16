@@ -5,8 +5,9 @@ __all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
 
 import torch
 import math
-from .base import FinalTransform, NonFinalTransform, RandomizedTransform
 from .baseutils import prepare_output
+from .base import FinalTransform, NonFinalTransform
+from .special import RandomizedTransform
 from .intensity import MulFieldTransform, AddValueTransform, MulValueTransform
 from .random import Uniform, RandInt, Fixed, make_range
 from . import ctx

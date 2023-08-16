@@ -1,7 +1,8 @@
 __all__ = ['ContrastMixtureTransform', 'ContrastLookupTransform']
 
 import torch
-from .base import NonFinalTransform, FinalTransform, PerChannelTransform
+from .base import NonFinalTransform, FinalTransform
+from .special import PerChannelTransform
 from .utils.gmm import fit_gmm
 
 
