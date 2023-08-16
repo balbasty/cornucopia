@@ -2,6 +2,7 @@ __all__ = [
     'AddValueTransform',
     'MulValueTransform',
     'AddMulTransform',
+    'FillValueTransform',
     'ClipTransform',
     'BaseFieldTransform',
     'AddFieldTransform',
@@ -44,8 +45,8 @@ class OpConstTransform(FinalTransform):
         ----------
         value : number or tensor
             right-hand side of the operation
-        op : {torch.add, torch.sub, torch.mul, torch.div}
-            Arithntic operation
+        op : {torch.add, torch.mul}
+            Arithmetic operation
         value_name : str
             Name used when returning the rhs value
         """
@@ -78,6 +79,43 @@ class AddValueTransform(OpConstTransform):
 class MulValueTransform(OpConstTransform):
     """Multiply with a constant value"""
     _op = torch.mul
+
+
+class FillValueTransform(FinalTransform):
+    """Fills the tensor with a value inside a mask"""
+
+    def __init__(self, mask, value, mask_name='mask', value_name='value',
+                 **kwargs):
+        """
+        Parameters
+        ----------
+        mask : tensor
+            Mask of voxels in which to set the value
+        value : number or tensor
+            right-hand side of the operation
+        mask_name : str
+            Name used when returning the mask
+        value_name : str
+            Name used when returning the rhs value
+        """
+        super().__init__(**kwargs)
+        self.mask = mask
+        self.value = value
+        self.mask_name = mask_name
+        self.value_name = value_name
+
+    def apply(self, x):
+        mask, value = self.mask, self.value
+        mask = mask.to(x.device)
+        if torch.is_tensor(value):
+            value = value.to(x)
+        y = x.masked_fill(mask, value)
+        return prepare_output(
+            {'input': x, 'output': y,
+             self.mask_name: mask,
+             self.value_name: value},
+            self.returns
+        )
 
 
 class AddMulTransform(FinalTransform):

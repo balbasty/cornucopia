@@ -16,18 +16,19 @@ __all__ = [
     'RandomSmoothShallowLabelTransform',
     'BernoulliTransform',
     'SmoothBernoulliTransform',
-    # 'BernoulliDiskTransform',
-    # 'SmoothBernoulliDiskTransform',
+    'BernoulliDiskTransform',
+    'SmoothBernoulliDiskTransform',
 ]
 
 import torch
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
 from .base import FinalTransform, NonFinalTransform
 from .baseutils import prepare_output
-from .intensity import AddFieldTransform, MulValueTransform
+from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
 from .utils.morpho import bounded_distance
+from . import ctx
 import interpol
 import distmap
 import math as pymath
@@ -891,7 +892,7 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
             return self
         return self.Final(
             AddFieldTransform(self.shape, shared=self.shared), self.labels,
-            self.min_radius, self.max_radius, **self.get_prm()
+            self.min_radius, self.max_radius, self.method, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -1283,150 +1284,162 @@ class SmoothBernoulliTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
-# class BernoulliDiskTransform(Transform):
-#     """Randomly mask voxels in balls at random locations"""
+class BernoulliDiskTransform(NonFinalTransform):
+    """Randomly mask voxels in balls at random locations"""
 
-#     def __init__(self, prob=0.1, radius=2, value=0, method='conv',
-#                  *, shared=False, **kwargs):
-#         """
-#         Parameters
-#         ----------
-#         prob : float
-#             Probability of masking out a voxel
-#         radius : float or Sampler
-#             Disk radius
-#         value : float or int or {'min', 'max', 'rand'}
-#             Value to set in the disks
-#         method : {'conv', 'l1', 'l2'}
-#             Method used to compute the distance map
-#         returns : [list or dict of] {'input', 'output', 'disks'}
-#             Which tensor to return
-#         shared : bool
-#             Same mask shared across channels
-#         """
-#         super().__init__(shared=shared, **kwargs)
-#         self.prob = prob
-#         self.radius = radius
-#         self.value = value
-#         self.method = method
+    def __init__(self, prob=0.1, radius=2, value=0, method='l2',
+                 *, shared=False, **kwargs):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+        radius : float or Sampler
+            Disk radius
+        value : float or int or {'min', 'max', 'rand'}
+            Value to set in the disks
+        method : {'conv', 'l1', 'l2'}
+            Method used to compute the distance map
+        returns : [list or dict of] {'input', 'output', 'disks'}
+            Which tensor to return
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shared=shared, **kwargs)
+        self.prob = prob
+        self.radius = radius
+        self.value = value
+        self.method = method
 
-#     def get_parameters(self, x):
-#         ndim = x.dim() - 1
-#         nvoxball = pymath.pow(pymath.pi, ndim/2) / pymath.gamma(ndim/2 + 1)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        ndim = x.dim() - 1
+        nvoxball = pymath.pow(pymath.pi, ndim/2) / pymath.gamma(ndim/2 + 1)
 
-#         nvoxball *= self.radius
-#         nvoxball = max(nvoxball, 1)
+        nvoxball *= self.radius
+        nvoxball = max(nvoxball, 1)
 
-#         # sample locations
-#         dtype = x.dtype
-#         if not dtype.is_floating_point:
-#             dtype = torch.get_default_dtype()
+        # sample locations
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
 
-#         # dilate disks
-#         mask = torch.rand_like(x, dtype=dtype) > (1 - self.prob / nvoxball)
-#         mask = DilateLabelTransform(
-#             method=self.method, radius=self.radius
-#         )(mask)
+        # dilate disks
+        mask = torch.rand_like(x, dtype=dtype) > (1 - self.prob / nvoxball)
+        mask = DilateLabelTransform(
+            method=self.method, radius=self.radius
+        )(mask)
 
-#         # set output value
-#         value = self.value
-#         if isinstance(value, str):
-#             if value == 'max':
-#                 value = x.max()
-#             elif value == 'min':
-#                 value = x.min()
-#             elif value.startswith('rand'):
-#                 mn, mx = x.min().item(), x.max().item()
-#                 if x.dtype.is_floating_point:
-#                     value = Uniform(mn, mx)()
-#                 else:
-#                     value = RandInt(mn, mx)()
-#             else:
-#                 raise ValueError('Unknown value mode: {}', value)
-#         return mask, value
+        # set output value
+        value = self.value
+        if isinstance(value, str):
+            if value == 'max':
+                value = x.max()
+            elif value == 'min':
+                value = x.min()
+            elif value.startswith('rand'):
+                mn, mx = x.min().item(), x.max().item()
+                if x.dtype.is_floating_point:
+                    value = Uniform(mn, mx)()
+                else:
+                    value = RandInt(mn, mx)()
+            else:
+                raise ValueError('Unknown value mode: {}', value)
 
-#     def apply_transform(self, x, parameters):
-#         mask, value = parameters
-#         y = x.masked_fill(mask, value)
-#         return prepare_output(dict(input=x, output=y, disks=mask),
-#                               self.returns)
+        return FillValueTransform(
+            mask, value, mask_name='disks', **self.get_prm(),
+        ).make_final(x, max_depth-1)
 
 
-# class SmoothBernoulliDiskTransform(Transform):
-#     """Randomly mask voxels in balls at random locations"""
+class SmoothBernoulliDiskTransform(NonFinalTransform):
+    """Randomly mask voxels in balls at random locations"""
 
-#     def __init__(self, prob=0.1, radius=2, shape=5, value=0, method='conv',
-#                  *, shared=False, **kwargs):
-#         """
-#         Parameters
-#         ----------
-#         prob : float
-#             Probability of masking out a voxel
-#             A probability field is sampled from a smooth random field.
-#         radius : float or (float, float) or Sampler
-#             Max or Min/Max disk radius, sampled  from a smooth random field.
-#         shape : int or sequence[int]
-#             Number of control points in the random field
-#         method : {'conv', 'l1', 'l2'}
-#             Method used to compute the distance map
-#         returns : [list or dict of] {'input', 'output', 'disks'}
-#             Which tensor to return
-#         shared : bool
-#             Same mask shared across channels
-#         """
-#         super().__init__(shared=shared, **kwargs)
-#         self.prob = prob
-#         self.field = BaseFieldTransform(shape=shape)
-#         self.dilate = SmoothMorphoLabelTransform(
-#             min_radius=0, max_radius=radius, shape=shape, method=method)
-#         self.radius = (
-#           (0, radius) if not isinstance(radius, (list, tuple)) else
-#           tuple(radius) if len(radius) == 2 else
-#           (0, radius[0]) if len(radius) == 1 else
-#           (0, 2)
-#         )
-#         self.value = value
+    def __init__(self, prob=0.1, radius=2, shape=5, value=0, method='l2',
+                 *, shared=False, shared_field=None, **kwargs):
+        """
+        Parameters
+        ----------
+        prob : float
+            Probability of masking out a voxel
+            A probability field is sampled from a smooth random field.
+        radius : float or (float, float)
+            Max or Min/Max disk radius, sampled from a smooth random field.
+        shape : int or sequence[int]
+            Number of control points in the random field
+        method : {'conv', 'l1', 'l2'}
+            Method used to compute the distance map
+        returns : [list or dict of] {'input', 'output', 'disks'}
+            Which tensor to return
+        shared : bool
+            Same mask shared across channels
+        """
+        super().__init__(shared=shared, **kwargs)
+        self.prob = prob
+        self.shared_field = self._prepare_shared(shared_field)
+        self.field = AddFieldTransform(shape=shape)
+        min_radius, max_radius = 0, radius
+        if isinstance(max_radius, (list, tuple)):
+            min_radius, max_radius = max_radius
+        self.dilate = SmoothMorphoLabelTransform(
+            min_radius=min_radius, max_radius=max_radius, 
+            shape=shape, method=method)
+        self.radius = (
+          (0, radius) if not isinstance(radius, (list, tuple)) else
+          tuple(radius) if len(radius) == 2 else
+          (0, radius[0]) if len(radius) == 1 else
+          (0, 2)
+        )
+        self.value = value
 
-#     def get_parameters(self, x):
-#         ndim = x.dim() - 1
-#         nvoxball = pymath.pow(pymath.pi, ndim / 2)
-#         nvoxball /= pymath.gamma(ndim / 2 + 1)
-#         nvoxball *= sum(self.radius) / 2
-#         nvoxball = max(nvoxball, 1)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        ndim = x.dim() - 1
+        nvoxball = pymath.pow(pymath.pi, ndim / 2)
+        nvoxball /= pymath.gamma(ndim / 2 + 1)
+        nvoxball *= sum(self.radius) / 2
+        nvoxball = max(nvoxball, 1)
 
-#         # sample seeds
-#         prob = self.field.get_parameters(x)
-#         prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
-#         prob *= self.prob * x.shape[1:].numel() / nvoxball
+        shared_field = self.shared_field
+        if shared_field is None:
+            shared_field = self.shared
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        fake_x = x.new_zeros([], dtype=dtype).expand(x.shape)
 
-#         dtype = x.dtype
-#         if not dtype.is_floating_point:
-#             dtype = torch.get_default_dtype()
-#         mask = torch.rand_like(x, dtype=dtype) > (1 - prob)
+        # sample seeds
+        with ctx.shared(self.field, shared_field):
+            prob = self.field(fake_x)
+        prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
+        prob *= self.prob * x.shape[1:].numel() / nvoxball
 
-#         # dilate balls
-#         mask = self.dilate.transform_tensor(mask)
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        mask = torch.rand_like(x, dtype=dtype) > (1 - prob)
 
-#         # set output value
-#         value = self.value
-#         if isinstance(value, str):
-#             if value == 'max':
-#                 value = x.max()
-#             elif value == 'min':
-#                 value = x.min()
-#             elif value.startswith('rand'):
-#                 mn, mx = x.min().item(), x.max().item()
-#                 if x.dtype.is_floating_point:
-#                     value = Uniform(mn, mx)()
-#                 else:
-#                     value = RandInt(mn, mx)()
-#             else:
-#                 raise ValueError('Unknown value mode: {}', value)
+        # dilate balls
+        with ctx.shared(self.dilate, shared_field):
+            mask = self.dilate(mask)
 
-#         return mask, value
+        # set output value
+        value = self.value
+        if isinstance(value, str):
+            if value == 'max':
+                value = x.max()
+            elif value == 'min':
+                value = x.min()
+            elif value.startswith('rand'):
+                mn, mx = x.min().item(), x.max().item()
+                if x.dtype.is_floating_point:
+                    value = Uniform(mn, mx)()
+                else:
+                    value = RandInt(mn, mx)()
+            else:
+                raise ValueError('Unknown value mode: {}', value)
 
-#     def apply_transform(self, x, parameters):
-#         mask, value = parameters
-#         y = x.masked_fill(mask, value)
-#         return prepare_output(dict(input=x, output=y, disks=mask),
-#                               self.returns)
+        return FillValueTransform(
+            mask, value, mask_name='disks', **self.get_prm(),
+        ).make_final(x, max_depth-1)

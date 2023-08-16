@@ -42,6 +42,7 @@ image pairs with a random affine deformation between them::
 
 from . import random                        # noqa: F401
 from . import ctx                           # noqa: F401
+from .ctx import batch                      # noqa: F401
 from .base import *                         # noqa: F401,F403
 from .special import *                      # noqa: F401,F403
 from .contrast import *                     # noqa: F401,F403
