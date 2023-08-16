@@ -1,8 +1,14 @@
-__all__ = ['ElasticTransform', 'RandomElasticTransform',
-           'AffineTransform', 'RandomAffineTransform',
-           'AffineElasticTransform', 'RandomAffineElasticTransform',
-           'MakeAffinePair',
-           'ThroughSliceAffineTransform', 'RandomThroughSliceAffineTransform']
+__all__ = [
+    'ElasticTransform',
+    'RandomElasticTransform',
+    'AffineTransform',
+    'RandomAffineTransform',
+    'AffineElasticTransform',
+    'RandomAffineElasticTransform',
+    'MakeAffinePair',
+    'SlicewiseAffineTransform',
+    'RandomSlicewiseAffineTransform',
+]
 
 import torch
 from torch.nn.functional import interpolate
