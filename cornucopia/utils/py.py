@@ -1,7 +1,6 @@
 from types import GeneratorType as generator
 from typing import List
 import torch
-from torch import Tensor
 from .version import torch_version
 
 
@@ -22,6 +21,16 @@ def ensure_list(x, size=None, crop=True, **kwargs):
     if size and crop:
         x = x[:size]
     return x
+
+
+def cast_like(input, like, **kwargs):
+    """Cast to same backend as another tensor, but preserve 'integerness'"""
+    if input is None:
+        return input
+    dtype = like.dtype
+    if input.is_floating_point != like.is_floating_point:
+        dtype = input.dtype
+    return input.to(dtype=dtype, device=like.device, **kwargs)
 
 
 def make_vector(input, n=None, crop=True, *args,
@@ -165,6 +174,7 @@ def cumsum(sequence, reverse=False, exclusive=False):
         seq = list(reversed(seq))
     return seq
 
+
 if torch_version('>=', (1, 10)):
     def meshgrid_ij(*x):
         return torch.meshgrid(*x, indexing='ij')
@@ -218,8 +228,8 @@ def move_to_permutation(length, source, destination):
         raise ValueError(f'Expected source positions to be unique but got '
                          f'{source}')
     if len(set(destination)) != len(destination):
-        raise ValueError(f'Expected destination positions to be unique but got '
-                         f'{destination}')
+        raise ValueError(f'Expected destination positions to be unique '
+                         f'but got {destination}')
 
     # compute permutation
     positions_in = list(range(length))

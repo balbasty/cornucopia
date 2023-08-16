@@ -19,13 +19,13 @@ r"""
 Absolute MR susceptibility values.
 
 !!! warning
-    the `chi_to_fieldmap` function takes *delta* susceptibility values, with 
-    respect to the air susceptibility. The susceptibility of the air should 
-    therefore be subtracted from these values before being passed to 
+    the `chi_to_fieldmap` function takes *delta* susceptibility values, with
+    respect to the air susceptibility. The susceptibility of the air should
+    therefore be subtracted from these values before being passed to
     `mrfield`.
 
 !!! note
-    All values are expressed in ppm (parts per million). 
+    All values are expressed in ppm (parts per million).
     They get multiplied by 1e-6 in `mrfield`
 
 References
@@ -36,21 +36,21 @@ References
       MRM, 2004
       https://onlinelibrary.wiley.com/doi/epdf/10.1002/mrm.20194
 2.  "Susceptibility mapping of air, bone, and calcium in the head"
-      Sagar Buch, Saifeng Liu, Yongquan Ye, Yu‐Chung Norman Cheng, 
+      Sagar Buch, Saifeng Liu, Yongquan Ye, Yu-Chung Norman Cheng,
       Jaladhar Neelavalli, and E. Mark Haacke
       MRM, 2014
-3.  "Whole-brain susceptibility mapping at high field: A comparison 
+3.  "Whole-brain susceptibility mapping at high field: A comparison
        of multiple- and single-orientation methods"
       Sam Wharton, and Richard Bowtell
       NeuroImage, 2010
-4.  "Quantitative susceptibility mapping of human brain reflects 
+4.  "Quantitative susceptibility mapping of human brain reflects
        spatial variation in tissue composition"
       Wei Li, Bing Wua, and Chunlei Liu
       NeuroImage 2011
-5.  "Human brain atlas for automated region of interest selection in 
-       quantitative susceptibility mapping: Application to determine iron 
+5.  "Human brain atlas for automated region of interest selection in
+       quantitative susceptibility mapping: Application to determine iron
        content in deep gray matter structures"
-      Issel Anne L.Lim, Andreia V. Faria, Xu Li, Johnny T.C.Hsu, 
+      Issel Anne L.Lim, Andreia V. Faria, Xu Li, Johnny T.C.Hsu,
       Raag D.Airan, Susumu Mori, Peter C.M. van Zijl
       NeuroImage, 2013
 """
@@ -121,11 +121,14 @@ def labels_to_chi(label_map, label_dict=None,
         elif susceptibility in jenkinson_chi:
             susceptibility = jenkinson_chi[susceptibility]
         elif susceptibility in buch_chi_delta_water:
-            susceptibility = buch_chi_delta_water[susceptibility] + mr_chi['water']
+            susceptibility = buch_chi_delta_water[susceptibility] \
+                           + mr_chi['water']
         elif susceptibility in li_chi_delta_water:
-            susceptibility = li_chi_delta_water[susceptibility] + mr_chi['water']
+            susceptibility = li_chi_delta_water[susceptibility] \
+                           + mr_chi['water']
         elif susceptibility in wharton_chi_delta_water:
-            susceptibility = wharton_chi_delta_water[susceptibility] + mr_chi['water']
+            susceptibility = wharton_chi_delta_water[susceptibility] \
+                           + mr_chi['water']
         else:
             susceptibility = mr_chi['water']
 
@@ -417,7 +420,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         Penalty on absolute values
     lam_abs : float, default=10
         Penalty on gradients
-    returns : combination of {'corrected', 'correction', 'parameters'}, default='corrected'
+    returns : combination of {'corrected', 'correction', 'parameters'}
         Components to return
 
     Returns
@@ -615,6 +618,7 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
         assert dim == 2
         yield 2 * ramps[0] * ramps[1]
         yield ramps[0].square() - ramps[1].square()
+
 
 # --- values from the literature
 

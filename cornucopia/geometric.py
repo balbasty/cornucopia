@@ -1,26 +1,123 @@
-__all__ = ['ElasticTransform', 'RandomElasticTransform',
-           'AffineTransform', 'RandomAffineTransform',
-           'AffineElasticTransform', 'RandomAffineElasticTransform',
-           'MakeAffinePair',
-           'ThroughSliceAffineTransform', 'RandomThroughSliceAffineTransform']
+__all__ = [
+    'ElasticTransform',
+    'RandomElasticTransform',
+    'AffineTransform',
+    'RandomAffineTransform',
+    'AffineElasticTransform',
+    'RandomAffineElasticTransform',
+    'MakeAffinePair',
+    'SlicewiseAffineTransform',
+    'RandomSlicewiseAffineTransform',
+]
 
 import torch
 from torch.nn.functional import interpolate
 import math
 import random
 import interpol
-from .base import Transform, RandomizedTransform, prepare_output
-from .random import Sampler, Uniform, RandInt, Fixed, make_range
+from .base import NonFinalTransform, FinalTransform
+from .baseutils import prepare_output, return_requires
+from .random import Sampler, Uniform, RandInt, make_range
 from .utils import warps
-from .utils.py import ensure_list
+from .utils.py import ensure_list, cast_like
 
 
-class ElasticTransform(Transform):
+class ElasticTransform(NonFinalTransform):
     """
     Elastic transform encoded by cubic splines.
     The number of control points is fixed but coefficients are
     randomly sampled.
     """
+
+    class Final(FinalTransform):
+        """Final (deterministic) elastic transform"""
+
+        def __init__(self, flow=None, controls=None, steps=0, order=3,
+                     bound='border', **kwargs):
+            """
+            Parameters
+            ----------
+            flow : (C, D, *spatial) tensor
+                Flow field
+            control : (C, D, *shape) tensor
+                Spline control points
+            steps : int
+                Number of scaling and squaring steps
+            order : int
+                Spline order
+            bound : str
+                Boundary condition
+            """
+            super().__init__(**kwargs)
+            self.flow = flow
+            self.controls = controls
+            self.steps = steps
+            self.order = order
+            self.bound = bound
+
+        def make_flow(self, control, fullshape):
+            """Upsample the control points to the final full size
+
+            Parameters
+            ----------
+            control : (C, D, *shape) tensor
+                Spline control points
+            fullshape : list[int]
+                Target shape
+
+            Returns
+            -------
+            flow : (C, D, *fullshape) tensor
+                Upampled flow field
+
+            """
+            if self.order == 1:
+                mode = ('trilinear' if len(fullshape) == 3 else
+                        'bilinear' if len(fullshape) == 2 else
+                        'linear')
+                flow = interpolate(
+                    control[None], fullshape, mode=mode, align_corners=True
+                )[0]
+            else:
+                flow = interpol.resize(
+                    control, shape=fullshape, interpolation=self.order,
+                    prefilter=False
+                )
+            if self.steps:
+                flow = warps.exp_velocity(
+                    flow.movedim(1, -1), self.steps
+                ).movedim(-1, 1)
+            return flow
+
+        def apply(self, x):
+            """Deform the input tensor
+
+            Parameters
+            ----------
+            x : (C, *spatial) tensor
+                Input tensor
+
+            Returns
+            -------
+            out : [dict or list of] tensor
+                The tensors returned by this function depend on the
+                value of `self.returns`. See `ElasticTransform`.
+
+            """
+            flow = cast_like(self.flow, x)
+            controls = cast_like(self.controls, x)
+            required = return_requires(self.returns)
+            if flow is None and ('flow' in required or 'output' in required):
+                flow = self.make_flow(controls, x.shape[1:])
+            y = None
+            if 'output' in required:
+                y = warps.apply_flow(
+                    x[:, None], flow.movedim(1, -1), padding_mode=self.bound
+                )[:, 0]
+            return prepare_output(
+                dict(input=x, output=y, flow=flow, controls=controls),
+                self.returns
+            )
 
     def __init__(self, dmax=0.1, unit='fov', shape=5, bound='border',
                  steps=0, order=3, *, shared=True, **kwargs):
@@ -40,22 +137,27 @@ class ElasticTransform(Transform):
             Number of scaling-and-squaring integration steps
         order : int
             Spline order
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
             - 'controls': The control points of the displacement field
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
-            raise ValueError('Unit must be one of {"fov", "vox"} '
-                             f'but got "{unit}".')
+            raise ValueError(
+                'Unit must be one of {"fov", "vox"} but got "{unit}".'
+            )
         if bound not in ('zeros', 'border', 'reflection'):
-            raise ValueError('Bound must be one of '
-                             '{"zeros", "border", reflection"} '
-                             f'but got "{bound}".')
+            raise ValueError(
+                'Bound must be one of {"zeros", "border", reflection"} '
+                f'but got "{bound}".'
+            )
         self.dmax = dmax
         self.unit = unit
         self.bound = bound
@@ -63,23 +165,32 @@ class ElasticTransform(Transform):
         self.steps = steps
         self.order = order
 
-    def get_parameters(self, x, fullsize=True):
+    def make_final(self, x, max_depth=float('inf'), flow=True):
         """
+        Generate a deterministic transform with constant parameters
 
         Parameters
         ----------
-        x : (C, *shape) tensor
-        fullsize : bool
+        x : (C, *spatial) tensor
+            Tensor to deform
+        max_depth : int
+            Maximum number of transforms to unroll
+        flow : bool
+            Precompute the upsampled flow field
 
         Returns
         -------
-        warp : (C, D, *shape) tensor, if `fullsize`
-            Dense, exponentiated warp
-        control : (C, D, *self.shape)
-            Spline control points
+        xform : ElasticTransform.Final
+            Final transform with parameters
+            - `flow : (C, D, *spatial) tensor`, the upsampled flow field
+            - `control : (C, D, *shape) tensor`, the spline control points
 
         """
+        if max_depth == 0:
+            return self
         batch, *fullshape = x.shape
+        if 'channels' in self.shared:
+            batch = 1
         ndim = len(fullshape)
         smallshape = ensure_list(self.shape, ndim)
         dmax = ensure_list(self.dmax, ndim)
@@ -88,39 +199,41 @@ class ElasticTransform(Transform):
             backend['dtype'] = torch.get_default_dtype()
         if self.unit == 'fov':
             dmax = [d * f for d, f in zip(dmax, fullshape)]
-        t = torch.rand([batch, ndim, *smallshape], **backend)
+        controls = torch.rand([batch, ndim, *smallshape], **backend)
         for d in range(ndim):
-            t[:, d].sub_(0.5).mul_(2*dmax[d])
-        if not fullsize:
-            return t
-        if self.order == 1:
-            mode = ('trilinear' if len(fullshape) == 3 else
-                    'bilinear' if len(fullshape) == 2 else
-                    'linear')
-            ft = interpolate(t[None], fullshape, mode=mode, align_corners=True)[0]
+            controls[:, d].sub_(0.5).mul_(2*dmax[d])
+        if flow:
+            if self.order == 1:
+                mode = ('trilinear' if len(fullshape) == 3 else
+                        'bilinear' if len(fullshape) == 2 else
+                        'linear')
+                flow = interpolate(
+                    controls[None], fullshape, mode=mode, align_corners=True
+                )[0]
+            else:
+                flow = interpol.resize(
+                    controls, shape=fullshape, interpolation=self.order,
+                    prefilter=False
+                )
+            if self.steps:
+                flow = warps.exp_velocity(
+                    flow.movedim(1, -1), self.steps
+                ).movedim(-1, 1)
         else:
-            ft = interpol.resize(t, shape=fullshape, interpolation=self.order,
-                                 prefilter=False)
-        if self.steps:
-            ft = warps.exp_velocity(ft.movedim(1, -1), self.steps).movedim(-1, 1)
-        return ft, t
-
-    def apply_transform(self, x, parameters):
-        flow, controls = parameters
-        y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                             padding_mode=self.bound)[:, 0]
-        return prepare_output(
-            dict(input=x, output=y, flow=flow, controls=controls),
-            self.returns)
+            flow = None
+        return self.Final(
+            flow, controls, self.steps, self.order, self.bound,
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class RandomElasticTransform(RandomizedTransform):
+class RandomElasticTransform(NonFinalTransform):
     """
     Elastic Transform with random parameters.
     """
 
-    def __init__(self, dmax=0.15, shape=10, unit='fov', bound='border',
-                 steps=0, order=3, *, shared=True, **kwargs):
+    def __init__(self, dmax=0.1, shape=5, unit='fov', bound='border',
+                 steps=0, order=3, *, shared=True, shared_flow=None, **kwargs):
         """
 
         Parameters
@@ -135,40 +248,53 @@ class RandomElasticTransform(RandomizedTransform):
             Padding mode
         order : int
             Spline order
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
             - 'controls': The control points of the displacement field
-        shared : bool
-            Apply same transform to all images/channels
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Whether to share random parameters across tensors and/or channels
+        shared_flow : {'channels', 'tensors', 'channels+tensors', '', None}
+            Whether to share random field across tensors and/or channels.
+            By default: same as `shared`
         """
-        super().__init__(
-            ElasticTransform,
-            dict(dmax=Uniform.make(make_range(0, dmax)),
-                 shape=RandInt.make(make_range(2, shape)),
-                 unit=unit,
-                 bound=bound,
-                 steps=steps,
-                 order=order,
-                 **kwargs),
-            shared=shared)
+        super().__init__(shared=shared, **kwargs)
+        self.dmax = Uniform.make(make_range(0, dmax))
+        self.shape = RandInt.make(make_range(2, shape))
+        self.unit = unit
+        self.bound = bound
+        self.steps = steps
+        self.order = order
+        self.shared_flow = shared_flow
 
-    def get_parameters(self, x):
-        ndim = x.dim() - 1
-        sample = self.sample
-        keys_nd = ['shape']
-        self.sample = {
-            key: value(ndim)
-            if isinstance(value, Sampler) and key in keys_nd else value
-            for key, value in sample.items()
-        }
-        sub = super().get_parameters(x)
-        self.sample = sample
-        return sub
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        ndim = x.ndim - 1
+
+        dmax, shape, order = self.dmax, self.shape, self.order
+        if isinstance(dmax, Sampler):
+            dmax = dmax()
+        if isinstance(shape, Sampler):
+            shape = shape(ndim)
+        if isinstance(order, Sampler):
+            order = order()
+        shared_flow = self.shared_flow
+        if shared_flow is None:
+            shared_flow = self.shared
+
+        return ElasticTransform(
+            dmax=dmax, shape=shape, order=order,
+            unit=self.unit, bound=self.bound, steps=self.steps,
+            shared=shared_flow,
+        ).make_final(x, max_depth-1)
 
 
-class AffineTransform(Transform):
+class AffineTransform(NonFinalTransform):
     """
     Apply an affine transform encoded by translations, rotations,
     shears and zooms.
@@ -178,6 +304,41 @@ class AffineTransform(Transform):
     with the center of the field of view used as center of rotation.
     (A is a matrix so the transforms are applied right to left)
     """
+
+    class Final(FinalTransform):
+        """Apply an affine transform encoded by an affine matrix"""
+
+        def __init__(self, flow=None, matrix=None, bound='border', **kwargs):
+            """
+            Parameters
+            ----------
+            flow : ([C], D, *spatial) tensor
+                Flow field
+            matrix : ([C], D+1, D+1) tensor
+                Matrix
+            """
+            super().__init__(**kwargs)
+            self.flow = flow
+            self.matrix = matrix
+            self.bound = bound
+
+        def make_flow(self, matrix, shape):
+            return warps.affine_flow(matrix, shape).movedim(-1, 0)
+
+        def apply(self, x):
+            flow = cast_like(self.flow, x)
+            matrix = cast_like(self.matrix, x)
+            required = return_requires(self.returns)
+            if flow is None and ('flow' in required or 'output' in required):
+                flow = self.make_flow(matrix, x.shape[1:])
+            y = None
+            if 'output' in required:
+                y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
+                                     padding_mode=self.bound)[:, 0]
+            return prepare_output(
+                dict(input=x, output=y, flow=flow, matrix=matrix),
+                self.returns
+            )
 
     def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
                  unit='fov', bound='border', *, shared=True, **kwargs):
@@ -197,22 +358,27 @@ class AffineTransform(Transform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
             - 'matrix': The affine matrix
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
-            raise ValueError('Unit must be one of {"fov", "vox"} '
-                             f'but got "{unit}".')
+            raise ValueError(
+                'Unit must be one of {"fov", "vox"} but got "{unit}".'
+            )
         if bound not in ('zeros', 'border', 'reflection'):
-            raise ValueError('Bound must be one of '
-                             '{"zeros", "border", reflection"} '
-                             f'but got "{bound}".')
+            raise ValueError(
+                'Bound must be one of {"zeros", "border", reflection"} '
+                f'but got "{bound}".'
+            )
         self.translations = translations
         self.rotations = rotations
         self.zooms = zooms
@@ -220,7 +386,7 @@ class AffineTransform(Transform):
         self.unit = unit
         self.bound = bound
 
-    def get_parameters(self, x, fullsize=True):
+    def make_final(self, x, max_depth=float('inf'), flow=True):
         batch, *fullshape = x.shape
         ndim = len(fullshape)
         backend = dict(dtype=x.dtype, device=x.device)
@@ -243,64 +409,62 @@ class AffineTransform(Transform):
         zooms = torch.as_tensor(zooms, **backend)
         offsets = torch.as_tensor(offsets, **backend)
 
-        I = torch.eye(ndim+1, **backend)
-        O = I.clone()
-        O[:ndim, -1] = -offsets
-        Z = I.clone()
+        E = torch.eye(ndim+1, **backend)
+        # offset to center
+        F = E.clone()
+        F[:ndim, -1] = -offsets
+        # zooms
+        Z = E.clone()
         Z.diagonal(0, -1, -2)[:-1].copy_(1 + zooms)
+        # translations
         T = torch.eye(ndim+1, **backend)
         T[:ndim, -1] = translations
 
-        A = O               # origin at center of FOV
+        A = F               # origin at center of FOV
         A = Z @ A           # zoom
         if ndim == 2:
-            S = I.clone()
+            S = E.clone()
             S[0, 1] = S[1, 0] = shears[0]
             A = S @ A       # shear
-            R = I.clone()
+            R = E.clone()
             R[0, 0] = R[1, 1] = rotations[0].cos()
             R[0, 1] = rotations[0].sin()
             R[1, 0] = -R[0, 1]
             A = R @ A       # rotation
         elif ndim == 3:
-            Sz = I.clone()
+            Sz = E.clone()
             Sz[0, 1] = Sz[1, 0] = shears[0]
-            Sy = I.clone()
+            Sy = E.clone()
             Sy[0, 2] = Sz[2, 0] = shears[1]
-            Sx = I.clone()
+            Sx = E.clone()
             Sx[1, 2] = Sz[2, 1] = shears[2]
             A = Sx @ Sy @ Sz @ A       # shear
-            Rz = I.clone()
+            Rz = E.clone()
             Rz[0, 0] = Rz[1, 1] = rotations[0].cos()
             Rz[0, 1] = rotations[0].sin()
             Rz[1, 0] = -Rz[0, 1]
-            Ry = I.clone()
+            Ry = E.clone()
             Ry[0, 0] = Ry[2, 2] = rotations[1].cos()
             Ry[0, 2] = rotations[1].sin()
             Ry[2, 0] = -Ry[0, 2]
-            Rx = I.clone()
+            Rx = E.clone()
             Rx[1, 1] = Rx[2, 2] = rotations[2].cos()
             Rx[1, 2] = rotations[2].sin()
             Rx[2, 1] = -Rx[1, 2]
             A = Rx @ Ry @ Rz @ A       # rotation
-        A = O.inverse() @ A
+        A = F.inverse() @ A
         A = T @ A
 
-        if not fullsize:
-            return A
-        t = warps.affine_flow(A, fullshape).movedim(-1, 0)
-        return t, A
-
-    def apply_transform(self, x, parameters):
-        flow, matrix = parameters
-        y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
-                             padding_mode=self.bound)[:, 0]
-        return prepare_output(
-            dict(input=x, output=y, flow=flow, matrix=matrix),
-            self.returns)
+        if flow:
+            flow = warps.affine_flow(A, fullshape).movedim(-1, 0)
+        else:
+            flow = None
+        return self.Final(
+            flow, A, self.bound, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class RandomAffineTransform(RandomizedTransform):
+class RandomAffineTransform(NonFinalTransform):
     """
     Affine Transform with random parameters.
     """
@@ -314,6 +478,7 @@ class RandomAffineTransform(RandomizedTransform):
                  bound='border',
                  *,
                  shared=True,
+                 shared_matrix=None,
                  **kwargs):
         """
 
@@ -331,43 +496,91 @@ class RandomAffineTransform(RandomizedTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
             - 'matrix': The affine matrix
-        shared : bool
-            Apply same transform to all images/channels
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Whether to share random parameters across tensors and/or channels
+        shared_matrix : {'channels', 'tensors', 'channels+tensors', '', None}
+            Whether to share matrices across tensors and/or channels.
+            By default: same as `shared`
         """
-        super().__init__(
-            AffineTransform,
-            dict(translations=Uniform.make(make_range(translations)),
-                 rotations=Uniform.make(make_range(rotations)),
-                 shears=Uniform.make(make_range(shears)),
-                 zooms=Uniform.make(make_range(zooms)),
-                 unit=unit,
-                 bound=bound,
-                 **kwargs),
-            shared=shared)
+        super().__init__(shared=shared, **kwargs)
+        self.translations = Uniform.make(make_range(translations))
+        self.rotations = Uniform.make(make_range(rotations))
+        self.shears = Uniform.make(make_range(shears))
+        self.zooms = Uniform.make(make_range(zooms))
+        self.unit = unit
+        self.bound = bound
+        self.shared_matrix = shared_matrix
 
-    def get_parameters(self, x):
-        ndim = x.dim() - 1
-        sample = self.sample
-        affine_keys = ['translations', 'rotations', 'shears', 'zooms']
-        self.sample = {
-            key: value(ndim)
-            if isinstance(value, Sampler) and key in affine_keys else value
-            for key, value in sample.items()
-        }
-        sub = super().get_parameters(x)
-        self.sample = sample
-        return sub
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        ndim = x.ndim - 1
+
+        translations = self.translations
+        rotations = self.rotations
+        shears = self.shears
+        zooms = self.zooms
+        unit = self.unit
+        bound = self.bound
+        shared_matrix = self.shared_matrix
+        if isinstance(translations, Sampler):
+            translations = translations(ndim)
+        if isinstance(rotations, Sampler):
+            rotations = rotations(ndim)
+        if isinstance(shears, Sampler):
+            shears = shears(ndim)
+        if isinstance(zooms, Sampler):
+            zooms = zooms(ndim)
+        if shared_matrix is None:
+            shared_matrix = self.shared
+
+        return AffineTransform(
+            translations, rotations, shears, zooms,
+            unit=unit, bound=bound, shared=shared_matrix,
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class AffineElasticTransform(Transform):
+class AffineElasticTransform(NonFinalTransform):
     """
     Affine + Elastic [+ Patch] transform.
     """
+
+    class Final(FinalTransform):
+        def __init__(self, flow, controls, affine, bound='border', **kwargs):
+            """
+            Parameters
+            ----------
+            flow : (C, D, *spatial) tensor
+            controls : (C, D, *spatial) tensor
+            affine : ([C], D+1, D+1) tensor
+            bound : str
+            """
+            super().__init__(**kwargs)
+            self.flow = flow
+            self.controls = controls
+            self.affine = affine
+            self.bound = bound
+
+        def apply(self, x):
+            flow = cast_like(self.flow, x)
+            controls = cast_like(self.controls, x)
+            affine = cast_like(self.affine, x)
+            y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+                                 padding_mode=self.bound,
+                                 has_identity=True)[:, 0]
+            return prepare_output(
+                dict(input=x, output=y, flow=flow,
+                     controls=controls, matrix=affine),
+                self.returns)
 
     def __init__(self, dmax=0.1, shape=5, steps=0,
                  translations=0, rotations=0, shears=0, zooms=0,
@@ -399,15 +612,18 @@ class AffineElasticTransform(Transform):
             Size of random patch to extract
         order : int
             Spline order
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
             - 'control': The control points of the nonlinear field
             - 'matrix': The affine matrix
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
-        """
+        """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.patch = patch
         self.steps = steps
@@ -416,17 +632,18 @@ class AffineElasticTransform(Transform):
         self.elastic = ElasticTransform(
             dmax,  unit, shape, bound, steps, order, shared=shared)
 
-    def get_parameters(self, x):
+    def make_final(self, x, max_depth=float('inf')):
         """
 
         Parameters
         ----------
         x : (C, *shape) tensor
+        max_depth : int
 
         Returns
         -------
         warp : (C, D, *shape) tensor
-        control : (C, D, *self.shape) tensor
+        controls : (C, D, *self.shape) tensor
         affine : (D+1, D+1) tensor
 
         """
@@ -437,13 +654,15 @@ class AffineElasticTransform(Transform):
             backend['dtype'] = torch.get_default_dtype()
 
         # get transformation parameters
-        A = self.affine.get_parameters(x, fullsize=False)           # (D+1, D+1)
+        A = self.affine.make_final(x, flow=False).matrix  # (D+1, D+1)
         if self.steps:
             # request the blown up and exponentiated field
-            eslasticflow, control = self.elastic.get_parameters(x, fullsize=True)   # (C, D, *shape)
+            xform = self.elastic.make_final(x, flow=True)
+            eslasticflow, controls = xform.flow, xform.controls
+            # (C, D, *shape)
         else:
             # request only the spline control points
-            control = self.elastic.get_parameters(x, fullsize=False)
+            controls = self.elastic.make_final(x, flow=False).controls
             eslasticflow = None
 
         # 1) start from identity
@@ -472,44 +691,52 @@ class AffineElasticTransform(Transform):
         else:
             # we sample into the spline control points
             # and must rescale the sampling coordinates accordingly
-            smallshape = control.shape[2:]
+            smallshape = controls.shape[2:]
             scale = [(s0-1)/(s1-1) for s0, s1 in zip(smallshape, fullshape)]
             scale = torch.as_tensor(scale, **backend)
             if self.elastic.order == 1:
                 # we can use pytorch
                 flow = warps.apply_flow(
-                    control, flow * scale,
+                    controls, flow * scale,
                     padding_mode='zeros',
                     has_identity=True,
                 ).add_(flow.movedim(-1, 0))
             else:
                 # we must use torch-interpol
                 flow = interpol.grid_pull(
-                    control, flow * scale,
+                    controls, flow * scale,
                     bound='zero',
                     interpolation=self.elastic.order,
                 ).add_(flow.movedim(-1, 0))
-        return flow, control, A
 
-    def apply_transform(self, x, parameters):
-        flow, controls, affine = parameters
-        y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                             padding_mode=self.elastic.bound,
-                             has_identity=True)[:, 0]
-        return prepare_output(
-            dict(input=x, output=y, flow=flow, controls=controls, matrix=affine),
-            self.returns)
+        return self.Final(
+            flow, controls, A, self.elastic.bound, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class RandomAffineElasticTransform(RandomizedTransform):
+class RandomAffineElasticTransform(NonFinalTransform):
     """
     Random Affine + Elastic transform.
     """
 
-    def __init__(self, dmax=0.1, shape=5, steps=0,
-                 translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                 unit='fov', bound='border', patch=None, order=3,
-                 *, shared=True, **kwargs):
+    def __init__(
+        self,
+        dmax=0.1,
+        shape=5,
+        steps=0,
+        translations=0.1,
+        rotations=15,
+        shears=0.012,
+        zooms=0.15,
+        unit='fov',
+        bound='border',
+        patch=None,
+        order=3,
+        *,
+        shared=True,
+        shared_flow=None,
+        **kwargs
+    ):
         """
 
         Parameters
@@ -536,40 +763,82 @@ class RandomAffineElasticTransform(RandomizedTransform):
             Size of random patch to extract
         order : int
             Spline order
-        shared : bool
-            Apply same transform to all images/channels
+
+        Keyword Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Apply same hyperparameters to all images/channels
+        shared_flow : {'channels', 'tensors', 'channels+tensors', '', None}
+            Apply the same random flow to all images/channels.
+            Default: same as shared
         """
-        super().__init__(
-            AffineElasticTransform,
-            dict(dmax=Uniform.make(make_range(0, dmax)),
-                 shape=RandInt.make(make_range(2, shape)),
-                 translations=Uniform.make(make_range(translations)),
-                 rotations=Uniform.make(make_range(rotations)),
-                 shears=Uniform.make(make_range(shears)),
-                 zooms=Uniform.make(make_range(zooms)),
-                 unit=unit,
-                 bound=bound,
-                 steps=steps,
-                 patch=patch,
-                 order=order,
-                 **kwargs),
-            shared=shared)
+        super().__init__(shared=shared, **kwargs)
+        self.dmax = Uniform.make(make_range(0, dmax))
+        self.shape = RandInt.make(make_range(2, shape))
+        self.translations = Uniform.make(make_range(translations))
+        self.rotations = Uniform.make(make_range(rotations))
+        self.shears = Uniform.make(make_range(shears))
+        self.zooms = Uniform.make(make_range(zooms))
+        self.unit = unit
+        self.bound = bound
+        self.steps = steps
+        self.patch = patch
+        self.order = order
+        self.shared_flow = shared_flow
 
-    def get_parameters(self, x):
-        ndim = x.dim() - 1
-        sample = self.sample
-        affine_keys = ['shape', 'translations', 'rotations', 'shears', 'zooms']
-        self.sample = {
-            key: value(ndim)
-            if isinstance(value, Sampler) and key in affine_keys else value
-            for key, value in sample.items()
-        }
-        sub = super().get_parameters(x)
-        self.sample = sample
-        return sub
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+
+        ndim = x.ndim - 1
+        dmax = self.dmax
+        shape = self.shape
+        translations = self.translations
+        rotations = self.rotations
+        shears = self.shears
+        zooms = self.zooms
+        unit = self.unit
+        bound = self.bound
+        steps = self.steps
+        patch = self.patch
+        order = self.order
+        shared_flow = self.shared_flow
+
+        if isinstance(dmax, Sampler):
+            dmax = dmax()
+        if isinstance(shape, Sampler):
+            shape = shape(ndim)
+        if isinstance(translations, Sampler):
+            translations = translations(ndim)
+        if isinstance(rotations, Sampler):
+            rotations = rotations(ndim)
+        if isinstance(shears, Sampler):
+            shears = shears(ndim)
+        if isinstance(zooms, Sampler):
+            zooms = zooms(ndim)
+        if isinstance(order, Sampler):
+            order = order(ndim)
+        if shared_flow is None:
+            shared_flow = self.shared
+
+        return AffineElasticTransform(
+            dmax=dmax,
+            shape=shape,
+            translations=translations,
+            rotations=rotations,
+            shears=shears,
+            zooms=zooms,
+            unit=unit,
+            bound=bound,
+            steps=steps,
+            patch=patch,
+            order=order,
+            shared=shared_flow,
+            **self.get_prm(),
+        ).make_final(x, max_depth-1)
 
 
-class MakeAffinePair(Transform):
+class MakeAffinePair(NonFinalTransform):
     """
     Generate a pair made of the same image transformed in two different ways.
 
@@ -578,6 +847,23 @@ class MakeAffinePair(Transform):
     true_transform is a dictionary with keys 'flow' and 'affine'.
     """
 
+    class Final(FinalTransform):
+        def __init__(self, left, right, **kwargs):
+            super().__init__(**kwargs)
+            self.left = left
+            self.right = right
+
+        def apply(self, x):
+            x1 = self.left(x)
+            x2 = self.right(x)
+            mat1, mat2 = self.left.matrix, self.right.matrix
+            mat1, mat2 = cast_like(mat1, x), cast_like(mat2, x)
+            mat12 = mat2.inverse() @ mat1
+            flow12 = warps.affine_flow(mat12, x.shape[1:]).movedim(-1, 0)
+            return prepare_output(
+                dict(input=x, left=x1, right=x2, flow=flow12, matrix=mat12),
+                self.returns)
+
     def __init__(self, transform=None, *, returns=('left', 'right'), **kwargs):
         """
 
@@ -585,6 +871,9 @@ class MakeAffinePair(Transform):
         ----------
         transform : RandomAffineTransform, default=`RandomAffineTransform()`
             An instantiated transform.
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
 
             - 'input': Input image
@@ -597,30 +886,78 @@ class MakeAffinePair(Transform):
         super().__init__(shared=True, returns=returns, **kwargs)
         self.subtransform = transform or RandomAffineTransform()
 
-    def get_parameters(self, x):
-        t1 = self.subtransform.get_parameters(x)
-        t2 = self.subtransform.get_parameters(x)
-        p1, p2 = t1.get_parameters(x), t2.get_parameters(x)
-        return t1, p1, t2, p2
-
-    def apply_transform(self, x, parameters):
-        t1, p1, t2, p2 = parameters
-        x1 = t1.apply_transform(x, p1)
-        x2 = t2.apply_transform(x, p2)
-        mat1, mat2 = p1[1], p2[1]
-        mat12 = mat2.inverse() @ mat1
-        flow12 = warps.affine_flow(mat12, x.shape[1:]).movedim(-1, 0)
-        return prepare_output(
-            dict(input=x, left=x1, right=x2, flow=flow12, matrix=mat12),
-            self.returns)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        left = self.subtransform.make_final(x)
+        right = self.subtransform.make_final(x)
+        return self.Final(
+            left, right, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class ThroughSliceAffineTransform(Transform):
+class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
-    def __init__(self, translations=0, rotations=0, shears=0, zooms=0,
-                 slice=-1, unit='fov', bound='border',
-                 *, shared=True, **kwargs):
+    class Final(FinalTransform):
+        def __init__(self, flow, matrix, slice=-1, spacing=1, subsample=1,
+                     bound='border', **kwargs):
+            super().__init__(**kwargs)
+            self.flow = flow
+            self.matrix = matrix
+            self.slice = slice
+            self.spacing = spacing
+            self.subsample = subsample
+            self.bound = bound
+
+        def apply(self, x):
+            flow = cast_like(self.flow, x)
+            matrix = cast_like(self.matrix, x)
+
+            # compute shape
+            fullshape = list(x.shape[1:])
+            ndim = len(fullshape)
+            zindex = self.slice - ndim if self.slice >= 0 else self.slice
+            oshape = list(fullshape)
+            oshape[zindex] = fullshape[zindex] // self.spacing
+            nb_slice = oshape[zindex]
+            fullshape[zindex] = nb_slice * self.spacing
+            nb_repeat = self.spacing//self.subsample
+
+            # compute sampling coordinates
+            slicer = [slice(None, None, self.subsample)] * ndim
+            slicer = (*slicer, slice(None))
+            id = warps.identity(
+                fullshape, dtype=flow.dtype, device=flow.device
+            )[slicer]
+            coord = (flow * self.subsample).movedim(0, -1) + id
+
+            # sample slices
+            y = warps.apply_flow(x[None], coord[None], has_identity=True,
+                                 padding_mode=self.bound)[0]
+
+            if y.is_floating_point():
+                # not a label map -> apply PSF
+                kernel = torch.full(
+                    [nb_repeat, 1],
+                    1 / math.sqrt(nb_repeat),
+                    dtype=y.dtype, device=y.device
+                )
+                y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
+                y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
+                y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
+
+            return prepare_output(
+                dict(input=x, output=y, flow=flow, matrix=matrix),
+                self.returns
+            )
+
+    def __init__(
+        self, translations=0, rotations=0, shears=0, zooms=0,
+        bulk_translations=0, bulk_rotations=0, bulk_shears=0, bulk_zooms=0,
+        slice=-1, unit='fov', bound='border', spacing=1, subsample=1,
+        *, shared=True, **kwargs
+    ):
         """
 
         Parameters
@@ -630,134 +967,224 @@ class ThroughSliceAffineTransform(Transform):
         rotations : list of [list of] float
             Rotations per slice (about Z/Y/X), in deg
         shears : list of [list of] float
-            Translation per slice (about Z/Y/Z)
+            Shears per slice (about Z/Y/Z)
         zooms : list of [list of] float
             Zoom about 1 per slice (per X/Y/Z)
+        bulk_translations : [list of] float
+            Bulk translation (per X/Y/Z)
+        bulk_rotations : [list of] float
+            Bulk rotation (about Z/Y/X), in deg
+        bulk_shears : l[list of] float
+            Bulk shear (about Z/Y/Z)
+        bulk_zooms : [list of] float
+            Bulk zoom about 1 (per X/Y/Z)
         slice : {0, 1, 2}
             Slice direction
         unit : {'fov', 'vox'}
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        spacing : int
+            Spacing between thick slices (as a number of high-res voxels)
+        subsample : int
+            Additional isotropic subsampling
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
 
             - 'input': First transformed image
             - 'output': Second transformed image
             - 'flow': Displacement field
             - 'matrix': Stacked affine matrices (one per slice)
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
-            raise ValueError('Unit must be one of {"fov", "vox"} '
-                             f'but got "{unit}".')
+            raise ValueError(
+                'Unit must be one of {"fov", "vox"} but got ' + f'{unit}".'
+            )
         if bound not in ('zeros', 'border', 'reflection'):
-            raise ValueError('Bound must be one of '
-                             '{"zeros", "border", reflection"} '
-                             f'but got "{bound}".')
+            raise ValueError(
+                'Bound must be one of {"zeros", "border", reflection"} '
+                f'but got "{bound}".'
+            )
         self.translations = translations
         self.rotations = rotations
         self.zooms = zooms
         self.shears = shears
+        self.bulk_translations = bulk_translations
+        self.bulk_rotations = bulk_rotations
+        self.bulk_zooms = bulk_zooms
+        self.bulk_shears = bulk_shears
         self.unit = unit
         self.bound = bound
         self.slice = slice
+        self.spacing = spacing
+        self.subsample = subsample
 
-    def get_parameters(self, x, fullsize=True):
-        batch, *fullshape = x.shape
+    def make_final(self, x, max_depth=float('inf'), flow=True):
+        if max_depth == 0:
+            return self
+        if 'channels' not in self.shared and len(x) > 1:
+            return self.make_per_channel(x, max_depth, flow=True)
+
+        fullshape = list(x.shape[1:])
         ndim = len(fullshape)
-        slice = self.slice - ndim if self.slice >= 0 else self.slice
-        nb_slice = fullshape[slice]
+        zindex = self.slice - ndim if self.slice >= 0 else self.slice
+        oshape = list(fullshape)
+        oshape[zindex] = fullshape[zindex] // self.spacing
+        nb_slice = oshape[zindex]
+        fullshape[zindex] = nb_slice * self.spacing
+
         backend = dict(dtype=x.dtype, device=x.device)
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
 
-        rotations = [ensure_list(r, ndim * (ndim - 1) // 2) for r in self.rotations]
-        shears = [ensure_list(s, ndim * (ndim - 1) // 2) for s in self.shears]
-        translations = [ensure_list(t, ndim) for t in self.translations]
-        zooms = [ensure_list(z, ndim) for z in self.zooms]
+        rotations = [
+            ensure_list(r, ndim * (ndim - 1) // 2) for r in self.rotations
+        ]
+        shears = [
+            ensure_list(s, ndim * (ndim - 1) // 2) for s in self.shears
+        ]
+        translations = [
+            ensure_list(t, ndim) for t in self.translations
+        ]
+        zooms = [
+            ensure_list(z, ndim) for z in self.zooms
+        ]
+
+        bulk_rotations = ensure_list(
+            self.bulk_rotations, ndim * (ndim - 1) // 2
+        )
+        bulk_shears = ensure_list(
+            self.bulk_shears, ndim * (ndim - 1) // 2
+        )
+        bulk_translations = ensure_list(
+            self.bulk_translations, ndim
+        )
+        bulk_zooms = ensure_list(
+            self.bulk_zooms, ndim
+        )
+
         offsets = [(n-1)/2 for n in fullshape]
 
         if self.unit == 'fov':
-            translations = [[t1 * n for t1, n in zip(t, fullshape)] for t in translations]
-        rotations = [[r1 * math.pi / 180 for r1 in r] for r in rotations]
+            translations = [
+                [t1 * n for t1, n in zip(t, fullshape)] for t in translations
+            ]
+            bulk_translations = [
+                t * n for t, n in zip(bulk_translations, fullshape)
+            ]
+        rotations = [
+            [r1 * math.pi / 180 for r1 in r] for r in rotations
+        ]
+        bulk_rotations = [
+            r * math.pi / 180 for r in bulk_rotations
+        ]
 
-        rotations = torch.as_tensor(rotations, **backend)
-        shears = torch.as_tensor(shears, **backend)
-        translations = torch.as_tensor(translations, **backend)
-        zooms = torch.as_tensor(zooms, **backend)
+        rotations = (
+            torch.as_tensor(rotations, **backend) +
+            torch.as_tensor(bulk_rotations, **backend))
+        shears = (
+            torch.as_tensor(shears, **backend) +
+            torch.as_tensor(bulk_shears, **backend))
+        translations = (
+            torch.as_tensor(translations, **backend) +
+            torch.as_tensor(bulk_translations, **backend))
+        zooms = (
+            torch.as_tensor(zooms, **backend) +
+            torch.as_tensor(bulk_zooms, **backend))
         offsets = torch.as_tensor(offsets, **backend)
 
-        I = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
-        O = torch.eye(ndim+1, **backend)
-        O[:ndim, -1] = -offsets
-        Z = I.clone()
+        E = torch.eye(ndim+1, **backend).expand([nb_slice, ndim+1, ndim+1])
+        F = torch.eye(ndim+1, **backend)
+        F[:ndim, -1] = -offsets
+        Z = E.clone()
         Z.diagonal(0, -1, -2)[:, :-1].copy_(1 + zooms)
-        T = I.clone()
+        T = E.clone()
         T[:, :ndim, -1] = translations
 
-        A = O               # origin at center of FOV
+        A = F               # origin at center of FOV
         A = Z.matmul(A)     # zoom
         if ndim == 2:
-            S = I.clone()
+            S = E.clone()
             S[:, 0, 1] = S[:, 1, 0] = shears[:, 0]
             A = S.matmul(A)       # shear
-            R = I.clone()
+            R = E.clone()
             R[:, 0, 0] = R[:, 1, 1] = rotations[:, 0].cos()
             R[:, 0, 1] = rotations[:, 0].sin()
             R[:, 1, 0] = -R[:, 0, 1]
             A = R.matmul(A)       # rotation
         elif ndim == 3:
-            Sz = I.clone()
+            Sz = E.clone()
             Sz[:, 0, 1] = Sz[:, 1, 0] = shears[:, 0]
-            Sy = I.clone()
+            Sy = E.clone()
             Sy[:, 0, 2] = Sz[:, 2, 0] = shears[:, 1]
-            Sx = I.clone()
+            Sx = E.clone()
             Sx[:, 1, 2] = Sz[:, 2, 1] = shears[:, 2]
             A = Sx.matmul(Sy).matmul(Sz).matmul(A)       # shear
-            Rz = I.clone()
+            Rz = E.clone()
             Rz[:, 0, 0] = Rz[:, 1, 1] = rotations[:, 0].cos()
             Rz[:, 0, 1] = rotations[:, 0].sin()
             Rz[:, 1, 0] = -Rz[:, 0, 1]
-            Ry = I.clone()
+            Ry = E.clone()
             Ry[:, 0, 0] = Ry[:, 2, 2] = rotations[:, 1].cos()
             Ry[:, 0, 2] = rotations[:, 1].sin()
             Ry[:, 2, 0] = -Ry[:, 0, 2]
-            Rx = I.clone()
+            Rx = E.clone()
             Rx[:, 1, 1] = Rx[:, 2, 2] = rotations[:, 2].cos()
             Rx[:, 1, 2] = rotations[:, 2].sin()
             Rx[:, 2, 1] = -Rx[:, 1, 2]
             A = Rx.matmul(Ry).matmul(Rz).matmul(A)       # rotation
-        A = O.inverse().matmul(A)
+        A = F.inverse().matmul(A)
         A = T.matmul(A)
 
-        if not fullsize:
-            return A
-        t = warps.identity(fullshape, dtype=A.dtype, device=A.device)
-        t = t.movedim(-1, 0).movedim(slice, -1).movedim(0, -1)
-        t = A[:, :-1, :-1].matmul(t.unsqueeze(-1)).squeeze(-1).add_(A[:, :-1, -1])
-        t = t.movedim(-1, 0).movedim(-1, slice).movedim(0, -1)
-        t = warps.sub_identity_(t).movedim(-1, 0)
-        return t, A
+        if flow:
+            slicer = [slice(None, None, self.subsample)] * ndim
+            slicer = (*slicer, slice(None))
+            id = warps.identity(fullshape, dtype=A.dtype, device=A.device)
+            id = id[slicer]
+            flow = id.unfold(
+                zindex-1,
+                self.spacing//self.subsample,
+                self.spacing//self.subsample
+            ).movedim(-1, 0)  # [spacing, *sshape, D]
+            flow = flow.movedim(-1, 0)      \
+                       .movedim(zindex, -1) \
+                       .movedim(0, -1)
+            # ^ [spacing, *oshape, nb_slices, D]
+            flow = A[:, :-1, :-1].matmul(flow.unsqueeze(-1)).squeeze(-1)
+            flow += A[:, :-1, -1]
+            # flow = flow.movedim(-1, 0).movedim(-1, zindex).movedim(0, -1)
+            flow = flow.transpose(0, -1)     \
+                       .flatten(-2)          \
+                       .movedim(-1, zindex)  \
+                       .movedim(0, -1)
+            # ^ [*oshape, D]
+            flow = (flow - id).div_(self.subsample).movedim(-1, 0)
+            # ^ [D, *oshape]
+        else:
+            flow = None
 
-    def apply_transform(self, x, parameters):
-        flow, matrix = parameters
-        y = warps.apply_flow(x[None], flow.movedim(0, -1)[None],
-                             padding_mode=self.bound)[0]
-        return prepare_output(
-            dict(input=x, output=y, flow=flow, matrix=matrix),
-            self.returns)
+        return self.Final(
+            flow, A, self.slice, self.spacing, self.subsample, self.bound,
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class RandomThroughSliceAffineTransform(RandomizedTransform):
+class RandomSlicewiseAffineTransform(NonFinalTransform):
     """
     Slicewise3DAffineTransform with random parameters.
     """
 
-    def __init__(self, translations=0.1, rotations=15,
-                 shears=0, zooms=0, slice=-1, shots=2, nodes=8,
-                 unit='fov', bound='border', *, shared=True, **kwargs):
+    def __init__(
+        self, translations=0.1, rotations=15, shears=0, zooms=0,
+        bulk_translations=0.05, bulk_rotations=15, bulk_shears=0, bulk_zooms=0,
+        slice=-1, spacing=1, subsample=1, shots=2, nodes=8, unit='fov',
+        bound='border', *, shared=True, shared_matrix=None, **kwargs
+    ):
         """
 
         Parameters
@@ -770,8 +1197,20 @@ class RandomThroughSliceAffineTransform(RandomizedTransform):
             Sampler or Upper bound for shears (about Z/Y/Z)
         zooms : Sampler or [list of] float
             Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        bulk_translations : [list of] float
+            Sampler or Upper bound for Bulk translation (per X/Y/Z)
+        bulk_rotations : [list of] float
+            Sampler or Upper bound for Bulk rotation (about Z/Y/X), in deg
+        bulk_shears : l[list of] float
+            Sampler or Upper bound for Bulk shear (about Z/Y/Z)
+        bulk_zooms : [list of] float
+            Sampler or Upper bound for Bulk zoom about 1 (per X/Y/Z)
         slice : int, optional
             Slice direction. If None, a random slice direction is selected.
+        spacing : int
+            Spacing between thick slices (as a number of high-res voxels)
+        subsample : int
+            Additional isotropic subsampling
         shots : int
             Number of interleaved sweeps.
             Typically, two interleaved sequences of slices are acquired
@@ -784,73 +1223,130 @@ class RandomThroughSliceAffineTransform(RandomizedTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+
+        Keyword Parameters
+        ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
 
             - 'input': First transformed image
             - 'output': Second transformed image
             - 'flow': Displacement field
             - 'matrix': Stacked affine matrices (one per slice)
-        shared : bool
-            Apply same transform to all images/channels
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Apply same parameters to all images/channels
+        shared_matrix : {'channels', 'tensors', 'channels+tensors', ''}
+            Apply same affine matrix to all images/channels.
+            Default: same as `shared`.
         """
-        super().__init__(
-            ThroughSliceAffineTransform,
-            dict(translations=Uniform.make(make_range(translations)),
-                 rotations=Uniform.make(make_range(rotations)),
-                 shears=Uniform.make(make_range(shears)),
-                 zooms=Uniform.make(make_range(zooms)),
-                 unit=unit,
-                 bound=bound,
-                 slice=slice,
-                 **kwargs),
-            shared=shared)
+        super().__init__(shared=shared, **kwargs)
+        self.translations = Uniform.make(make_range(translations))
+        self.rotations = Uniform.make(make_range(rotations))
+        self.shears = Uniform.make(make_range(shears))
+        self.zooms = Uniform.make(make_range(zooms))
+        self.bulk_translations = Uniform.make(make_range(bulk_translations))
+        self.bulk_rotations = Uniform.make(make_range(bulk_rotations))
+        self.bulk_shears = Uniform.make(make_range(bulk_shears))
+        self.bulk_zooms = Uniform.make(make_range(bulk_zooms))
+        self.unit = unit
+        self.bound = bound
+        self.slice = slice
+        self.spacing = spacing
+        self.subsample = subsample
         if nodes:
             nodes = RandInt.make(make_range(0, nodes))
         self.nodes = nodes
         self.shots = shots
+        self.shared_matrix = shared_matrix
 
-    def get_parameters(self, x):
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        if 'channels' not in self.shared and len(x) > 1:
+            return self.make_per_channel(x, max_depth, flow=True)
+
         ndim = x.ndim - 1
-        sample, self.sample = self.sample, dict(self.sample)
 
         # get slice direction
-        if self.sample['slice'] is None:
-            self.sample['slice'] = RandInt(0, ndim)
-        if isinstance(self.sample['slice'], Sampler):
-            self.sample['slice'] = self.sample['slice']()
+        slice = self.slice
+        if slice is None:
+            slice = RandInt(0, ndim)
+        if isinstance(slice, Sampler):
+            slice = slice()
+
+        # get slice spacing
+        spacing, subsample = self.spacing, self.subsample
+        if isinstance(spacing, Sampler):
+            spacing = spacing()
+        if isinstance(subsample, Sampler):
+            subsample = subsample()
 
         # get number of independent motions
-        nb_slices = x.shape[1:][self.sample['slice']]
+        nb_slices = x.shape[1:][slice] // spacing
         nodes = self.nodes
         if isinstance(nodes, Sampler):
             nodes = nodes()
         nodes = min(nodes or nb_slices, nb_slices)
 
         # sample parameters per slice per XYZ
-        self.sample = {
-            key: [val(ndim) for _ in range(nodes)]
-            if isinstance(val, Sampler) else val
-            for key, val in self.sample.items()
-        }
+        translations = self.translations
+        rotations = self.rotations
+        shears = self.shears
+        zooms = self.zooms
+        bulk_translations = self.bulk_translations
+        bulk_rotations = self.bulk_rotations
+        bulk_shears = self.bulk_shears
+        bulk_zooms = self.bulk_zooms
+        if isinstance(translations, Sampler):
+            translations = translations([nodes, ndim])
+        if isinstance(rotations, Sampler):
+            rotations = rotations([nodes, (ndim*(ndim-1))//2])
+        if isinstance(shears, Sampler):
+            shears = shears([nodes, (ndim*(ndim-1))//2])
+        if isinstance(zooms, Sampler):
+            zooms = zooms([nodes, ndim])
+        if isinstance(bulk_translations, Sampler):
+            bulk_translations = bulk_translations(ndim)
+        if isinstance(bulk_rotations, Sampler):
+            bulk_rotations = bulk_rotations((ndim*(ndim-1))//2)
+        if isinstance(bulk_shears, Sampler):
+            bulk_shears = bulk_shears((ndim*(ndim-1))//2)
+        if isinstance(bulk_zooms, Sampler):
+            bulk_zooms = bulk_zooms(ndim)
 
         # cubic interpolation of motion parameters
         if nodes < nb_slices:
             def node2slice(x):
-                x = torch.as_tensor(x, dtype=torch.float32).T  # [3, N]
+                x = torch.as_tensor(x, dtype=torch.float32).T  # [D, N]
                 x = interpol.resize(x, shape=[nb_slices],
                                     interpolation=3, bound='replicate',
-                                    prefilter=False).T  # [S, 3]
+                                    prefilter=False).T  # [S, D]
                 y = torch.empty_like(x)
                 for i in range(self.shots):
                     y[i::self.shots] = x[:len(y[i::self.shots])]
                     x = x[len(y[i::self.shots]):]
                 return y.tolist()
-            affine_keys = ['translations', 'rotations', 'shears', 'zooms']
-            self.sample = {
-                key: node2slice(val) if key in affine_keys else val
-                for key, val in self.sample.items()
-            }
+            translations = node2slice(translations)
+            rotations = node2slice(rotations)
+            shears = node2slice(shears)
+            zooms = node2slice(zooms)
+        else:
+            if torch.is_tensor(translations):
+                translations = translations.tolist()
+            if torch.is_tensor(rotations):
+                rotations = rotations.tolist()
+            if torch.is_tensor(shears):
+                shears = shears.tolist()
+            if torch.is_tensor(zooms):
+                zooms = zooms.tolist()
 
-        out = super().get_parameters(x)
-        self.sample = sample
-        return out
+        shared_matrix = self.shared_matrix
+        if shared_matrix is None:
+            shared_matrix = self.shared
+
+        return SlicewiseAffineTransform(
+            translations, rotations, shears, zooms,
+            bulk_translations, bulk_rotations, bulk_shears, bulk_zooms,
+            slice=slice, spacing=spacing, subsample=subsample,
+            unit=self.unit, bound=self.bound,
+            shared=shared_matrix, **self.get_prm()
+        ).make_final(x, max_depth-1)

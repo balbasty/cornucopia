@@ -2,15 +2,16 @@ __all__ = ['SmoothTransform', 'RandomSmoothTransform',
            'LowResTransform', 'RandomLowResTransform',
            'LowResSliceTransform', 'RandomLowResSliceTransform']
 
-from .base import Transform, RandomizedTransform, prepare_output
+from .base import FinalTransform, NonFinalTransform, RandomizedTransform
+from .baseutils import prepare_output
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
-from .random import Uniform, RandInt, Fixed, make_range
+from .random import Sampler, Uniform, RandInt, make_range
 from torch.nn.functional import interpolate
 import math
 
 
-class SmoothTransform(Transform):
+class SmoothTransform(FinalTransform):
     """Apply Gaussian smoothing"""
 
     def __init__(self, fwhm=1, **kwargs):
@@ -20,13 +21,16 @@ class SmoothTransform(Transform):
         ----------
         fwhm : float
             Full-width at half-maximum of the Gaussian kernel
-        returns : [list or dict of] {'input', 'output'}, default='output'
+
+        Keyword Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'output'}
             Which tensors to return.
         """
         super().__init__(**kwargs)
         self.fwhm = fwhm
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         return smoothnd(x, fwhm=ensure_list(self.fwhm, x.dim()-1))
 
 
@@ -40,21 +44,59 @@ class RandomSmoothTransform(RandomizedTransform):
         ----------
         fwhm : Sampler or  float
             Sampler or upper bound for the full-width at half-maximum
-        returns : [list or dict of] {'input', 'output'}, default='output'
+
+        Keyword Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'output'}
             Which tensors to return.
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same fwhm for all channels/tensors
         """
         super().__init__(SmoothTransform,
-                         dict(fwhm=Uniform.make(make_range(0, fwhm)),
-                              **kwargs),
-                         shared=shared)
+                         dict(fwhm=Uniform.make(make_range(0, fwhm))),
+                         shared=shared, **kwargs)
 
 
-class LowResSliceTransform(Transform):
+class LowResSliceTransform(NonFinalTransform):
     """
     Model a low-resolution slice direction, with Gaussian profile
     """
+
+    class Final(FinalTransform):
+
+        def __init__(self, axis, resolution, thickness, noise=None, **kwargs):
+            super().__init__(**kwargs)
+            self.axis = axis
+            self.resolution = resolution
+            self.thickness = thickness
+            self.noise = noise
+
+        def apply(self, x):
+            ndim = x.dim() - 1
+            mode = ('trilinear' if ndim == 3 else
+                    'bilinear' if ndim == 2 else
+                    'linear')
+
+            def interpol(x, shape):
+                return interpolate(
+                    x[None], size=shape, align_corners=True, mode=mode
+                )[0]
+
+            fwhm = [0] * ndim
+            fwhm[self.axis] = self.resolution * self.thickness
+            y = smoothnd(x, fwhm=fwhm)
+            factor = [1] * ndim
+            factor[self.axis] = 1/self.resolution
+            ishape = x.shape[1:]
+            oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
+            y = interpol(y, oshape)
+            if self.noise:
+                y = self.noise(y)
+            z = interpol(y, ishape)
+            return prepare_output(
+                dict(input=x, lowres=y, output=z),
+                self.returns
+            )
 
     def __init__(self, resolution=3, thickness=0.8, axis=-1, noise=None,
                  **kwargs):
@@ -63,14 +105,19 @@ class LowResSliceTransform(Transform):
         Parameters
         ----------
         resolution : float
-            Resolution of the slice dimension, in terms of high-res voxels
+            Resolution of the slice dimension, in terms of high-res voxels.
+            This is the distance between the centers of two consecutive slices.
         thickness : float in 0..1
-            Slice thickness, as a proportion of resolution
+            Slice thickness, as a proportion of resolution.
+            This is how much data is averaged into one low-resolution slice.
         axis : int
             Slice axis
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
-        returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
+
+        Keyword Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
         """
         super().__init__(**kwargs)
@@ -79,33 +126,23 @@ class LowResSliceTransform(Transform):
         self.axis = axis
         self.thickness = thickness
 
-    def get_parameters(self, x):
-        ndim = x.dim() - 1
-        factor = [1] * ndim
-        factor[self.axis] = 1/self.resolution
-        oshape = [max(2, math.ceil(s*f)) for s, f in zip(x.shape[1:], factor)]
-        if self.noise:
-            fake_x = x.new_zeros([]).expand([len(x), *oshape])
-            return self.noise.get_parameters(fake_x)
-        return None
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
 
-    def apply_transform(self, x, parameters):
-        ndim = x.dim() - 1
-        mode = ('trilinear' if ndim == 3 else
-                'bilinear' if ndim == 2 else
-                'linear')
-        fwhm = [0] * ndim
-        fwhm[self.axis] = self.resolution * self.thickness
-        y = smoothnd(x, fwhm=fwhm)
-        factor = [1] * ndim
-        factor[self.axis] = 1/self.resolution
-        ishape = x.shape[1:]
-        oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
-        y = interpolate(y[None], size=oshape, align_corners=True, mode=mode)[0]
-        if self.noise is not None:
-            y = self.noise.apply_transform(y, parameters)
-        z = interpolate(y[None], size=ishape, align_corners=True, mode=mode)[0]
-        return prepare_output(dict(input=x, lowres=y, output=z), self.returns)
+        noise = None
+        if self.noise:
+            factor = [1] * (x.ndim-1)
+            factor[self.axis] = 1/self.resolution
+            ishape = x.shape[1:]
+            oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
+            fake_x = x.new_zeros([]).expand([len(x), *oshape])
+            noise = self.noise.make_final(fake_x, max_depth-1)
+
+        return self.Final(
+            self.axis, self.resolution, self.thickness, noise,
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class RandomLowResSliceTransform(RandomizedTransform):
@@ -114,45 +151,100 @@ class RandomLowResSliceTransform(RandomizedTransform):
     def __init__(self, resolution=3, thickness=0.1, axis=None, noise=None,
                  *, shared=False, **kwargs):
         """
-
         Parameters
         ----------
         resolution : Sampler or float
-            Sampler or upper bound for the resolution of the slice dimension,
-            in terms of high-res voxels
+            Distribution from which to sample the resolution.
+            If a `float`, sample from `Uniform(1, value)`.
+            To force a fixed value, pass `Fixed(value)`.
+            The resolution is the distance (in terms of high-res voxels)
+            between the centers of two consecutive low-res slices.
         thickness : Sampler or float in 0..1
-            Sampler or lower bound for the slice thickness,
-            as a proportion of resolution
+            Distribution from which to sample the resolution.
+            If a `float`, sample from `Uniform(value, 1)`.
+            To force a fixed value, pass `Fixed(value)`.
+            Thickness is defined as a proportion of the resolution, and
+            determines how much data is averaged into one low-resolution slice.
         axis : int
             Slice axis. If None, select one randomly.
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
-        returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
+
+        Keyword Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same resolution for all channels/tensors
         """
-        super().__init__(LowResSliceTransform,
-                         dict(resolution=Uniform.make(make_range(1, resolution)),
-                              thickness=Uniform.make(make_range(thickness, 1)),
-                              axis=axis,
-                              noise=noise,
-                              **kwargs),
-                         shared=shared)
+        super().__init__(
+            LowResSliceTransform,
+            dict(resolution=Uniform.make(make_range(1, resolution)),
+                 thickness=Uniform.make(make_range(thickness, 1)),
+                 axis=axis,
+                 noise=noise),
+            shared=shared,
+            **kwargs
+        )
 
-    def get_parameters(self, x):
-        if self.sample['axis'] is None:
-            sample = self.sample
-            self.sample = dict(sample)
-            self.sample['axis'] = RandInt(x.ndim-2)
-            out = super().get_parameters(x)
-            self.sample = sample
-            return out
-        return super().get_parameters(x)
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        if 'channels' not in self.shared and len(x) > 1:
+            return self.make_per_channel(x, max_depth)
+        resolution = self.sample['resolution']
+        if isinstance(resolution, Sampler):
+            resolution = resolution()
+        thickness = self.sample['thickness']
+        if isinstance(thickness, Sampler):
+            thickness = thickness()
+        axis = self.sample['axis']
+        if axis is None:
+            axis = RandInt(x.ndim-2)
+        if isinstance(axis, Sampler):
+            axis = axis()
+        noise = self.sample['noise']
+        # if noise:
+        #     noise = noise.make_final(x, max_depth-1)
+        return LowResSliceTransform(
+            resolution, thickness, axis, noise, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class LowResTransform(Transform):
+class LowResTransform(NonFinalTransform):
     """Model a lower-resolution image"""
+
+    class Final(FinalTransform):
+
+        def __init__(self, resolution, noise=None, **kwargs):
+            super().__init__(**kwargs)
+            self.resolution = resolution
+            self.noise = noise
+
+        def apply(self, x):
+            ndim = x.dim() - 1
+            mode = ('trilinear' if ndim == 3 else
+                    'bilinear' if ndim == 2 else
+                    'linear')
+
+            def interpol(x, shape):
+                return interpolate(
+                    x[None], size=shape, align_corners=True, mode=mode
+                )[0]
+
+            resolution = ensure_list(self.resolution, ndim)
+            y = smoothnd(x, fwhm=resolution)
+            factor = [1/r for r in resolution]
+            ishape = x.shape[1:]
+            oshape = [math.ceil(s*f) for s, f in zip(ishape, factor)]
+            y = interpol(y, oshape)
+            if self.noise is not None:
+                y = self.noise(y)
+            z = interpol(y, ishape)
+            return prepare_output(
+                dict(input=x, lowres=y, output=z),
+                self.returns
+            )
 
     def __init__(self, resolution=2, noise=None, **kwargs):
         """
@@ -163,38 +255,27 @@ class LowResTransform(Transform):
             Resolution of the low-res image, in terms of high-res voxels
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
-        returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
+        returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
         """
         super().__init__(**kwargs)
         self.resolution = resolution
         self.noise = noise
 
-    def get_parameters(self, x):
-        ndim = x.dim() - 1
-        resolution = ensure_list(self.resolution, ndim)
-        factor = [1/r for r in resolution]
-        oshape = [math.ceil(s*f) for s, f in zip(x.shape[1:], factor)]
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        noise = None
         if self.noise:
+            ndim = x.dim() - 1
+            resolution = ensure_list(self.resolution, ndim)
+            factor = [1/r for r in resolution]
+            oshape = [math.ceil(s*f) for s, f in zip(x.shape[1:], factor)]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
-            return self.noise.get_parameters(fake_x)
-        return None
-
-    def apply_transform(self, x, parameters):
-        ndim = x.dim() - 1
-        mode = ('trilinear' if ndim == 3 else
-                'bilinear' if ndim == 2 else
-                'linear')
-        resolution = ensure_list(self.resolution, ndim)
-        y = smoothnd(x, fwhm=resolution)
-        factor = [1/r for r in resolution]
-        ishape = x.shape[1:]
-        oshape = [math.ceil(s*f) for s, f in zip(ishape, factor)]
-        y = interpolate(y[None], size=oshape, align_corners=True, mode=mode)[0]
-        if self.noise is not None:
-            y = self.noise.apply_transform(y, parameters)
-        z = interpolate(y[None], size=ishape, align_corners=True, mode=mode)[0]
-        return prepare_output(dict(input=x, lowres=y, output=z), self.returns)
+            noise = self.noise.make_final(fake_x, max_depth-1)
+        return self.Final(
+            self.resolution, noise, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class RandomLowResTransform(RandomizedTransform):
@@ -202,20 +283,28 @@ class RandomLowResTransform(RandomizedTransform):
 
     def __init__(self, resolution=2, noise=None, *, shared=False, **kwargs):
         """
-
         Parameters
         ----------
-        resolution : Sampler or  float
-            Sampler or upper bound for the output resolution
+        resolution : Sampler or float
+            Distribution from which to sample the resolution.
+            If a `float`, sample from `Uniform(1, value)`.
+            To force a fixed value, pass `Fixed(value)`.
+            The resolution is the distance (in terms of high-res voxels)
+            between the centers of two consecutive low-res voxels.
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
-        returns : [list or dict of] {'input', 'lowres', 'output'}, default='output'
+
+        Keyword Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
-        shared : bool
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same resolution for all channels/tensors
         """
-        super().__init__(LowResTransform,
-                         dict(resolution=Uniform.make(make_range(1, resolution)),
-                              noise=noise,
-                              **kwargs),
-                         shared=shared)
+        super().__init__(
+            LowResTransform,
+            dict(resolution=Uniform.make(make_range(1, resolution)),
+                 noise=noise),
+            shared=shared,
+            **kwargs
+        )
