@@ -55,7 +55,7 @@ class ArrayCoilTransform(NonFinalTransform):
         shape : int
             Number of control points for the underlying smooth component.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
             Default is 'uncombined'.
@@ -250,7 +250,7 @@ class IntraScanMotionTransform(NonFinalTransform):
         coils : Transform
             A transform that generates a set of complex sensitivity profiles
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens', 'flow', 'matrix', 'pattern'}
             Default is 'sos'

@@ -420,7 +420,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         transforms : list[Transform]
             A list of transforms to apply sequentially.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensor', ''}
 
@@ -1087,8 +1087,8 @@ class RandomizedTransform(NonFinalTransform):
             A collection of functions that generate parameter values provided
             to `transform`.
 
-        Keyword Parameters
-        ------------------
+        Other Parameters
+        ----------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Share random parameters across tensors and/or channels
         """

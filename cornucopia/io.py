@@ -50,7 +50,7 @@ class LoadTransform(FinalTransform):
         device : str or torch.device
             Device on which to load data (default: cpu)
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         to_ras : bool, default=True
             Reorient data so that it has a RAS layout.

@@ -427,7 +427,7 @@ class RandomSmoothLabelMap(NonFinalTransform):
         soft : bool
             Return a soft (one-hot) label map
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Shared hyperparameters across tensors/channels

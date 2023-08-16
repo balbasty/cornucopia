@@ -468,7 +468,7 @@ class RandomMulFieldTransform(NonFinalTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'field'}
             Which tensor(s) to return
@@ -523,7 +523,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
             Sampler or Upper bound for number of control points
             along the slice direction. If None, same as `shape`.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
@@ -616,7 +616,7 @@ class RandomAddFieldTransform(RandomizedTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Whether to share random parameters across tensors and/or channels
@@ -696,7 +696,7 @@ class GammaTransform(NonFinalTransform):
         returns : [list or dict] {'input', 'output', 'vmin', 'vmax', 'gamma'}
             Which tensors to return
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same vmin/vmax for all channels
@@ -745,7 +745,7 @@ class RandomGammaTransform(NonFinalTransform):
         gamma : Sampler or [pair of] float
             Sampler or range for the exponent value
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same gamma for all images/channels
@@ -783,7 +783,7 @@ class ZTransform(NonFinalTransform):
         sigma : float
             Target standard deviation. If None, keep the input sd.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Use the same mean/sigma for all images/channels

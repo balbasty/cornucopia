@@ -180,7 +180,7 @@ class PatchTransform(NonFinalTransform):
         bound : str
             Boundary condition in case padding is needed
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensor', ''}
         """
@@ -232,7 +232,7 @@ class RandomPatchTransform(NonFinalTransform):
         bound : str
             Boundary condition in case padding is needed
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', None}
             Extract the same patch from all channels and/or tensors

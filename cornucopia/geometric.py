@@ -138,7 +138,7 @@ class ElasticTransform(NonFinalTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
             - 'input': The input image
@@ -249,7 +249,7 @@ class RandomElasticTransform(NonFinalTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
             - 'input': The input image
@@ -359,7 +359,7 @@ class AffineTransform(NonFinalTransform):
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
             - 'input': The input image
@@ -497,7 +497,7 @@ class RandomAffineTransform(NonFinalTransform):
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
             - 'input': The input image
@@ -613,7 +613,7 @@ class AffineElasticTransform(NonFinalTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
             - 'input': The input image
@@ -764,7 +764,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         order : int
             Spline order
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same hyperparameters to all images/channels
@@ -872,7 +872,7 @@ class MakeAffinePair(NonFinalTransform):
         transform : RandomAffineTransform, default=`RandomAffineTransform()`
             An instantiated transform.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
 
@@ -989,7 +989,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
         subsample : int
             Additional isotropic subsampling
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
 
@@ -1224,7 +1224,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
 

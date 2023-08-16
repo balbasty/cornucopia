@@ -32,7 +32,7 @@ class SmoothTransform(FinalTransform):
         fwhm : float
             Full-width at half-maximum of the Gaussian kernel
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output'}
             Which tensors to return.
@@ -55,7 +55,7 @@ class RandomSmoothTransform(RandomizedTransform):
         fwhm : Sampler or  float
             Sampler or upper bound for the full-width at half-maximum
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output'}
             Which tensors to return.
@@ -125,7 +125,7 @@ class LowResSliceTransform(NonFinalTransform):
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
@@ -180,7 +180,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.
@@ -304,7 +304,7 @@ class RandomLowResTransform(RandomizedTransform):
         noise : Transform, optional
             A transform that adds noise in the low-resolution space
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'lowres', 'output'}
             Which tensors to return.

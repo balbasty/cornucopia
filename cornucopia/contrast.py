@@ -84,7 +84,7 @@ class ContrastMixtureTransform(NonFinalTransform):
             Do not change background mean/cov.
             The background class is the class with minimum mean value.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply the same contrast offset to all channels and/or tensors

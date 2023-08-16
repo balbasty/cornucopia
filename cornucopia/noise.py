@@ -35,7 +35,7 @@ class GaussianNoiseTransform(NonFinalTransform):
         sigma : float
             Standard deviation
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
@@ -74,7 +74,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
             If a `float`, sample from `Uniform(0, value)`.
             To use a fixed value, pass `Fixed(value)`.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
@@ -126,7 +126,7 @@ class ChiNoiseTransform(NonFinalTransform):
         nb_channels : int
             Number of independent channels
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
@@ -180,7 +180,7 @@ class RandomChiNoiseTransform(RandomizedTransform):
             If a `int`, sample from `RandInt(1, value)`.
             To use a fixed value, pass `Fixed(value)`.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
@@ -257,7 +257,7 @@ class GFactorTransform(NonFinalTransform):
         vmax : float
             Maximum g-factor
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'gfactor', 'noise', 'scalednoise'}
             Which tensors to return
@@ -302,7 +302,7 @@ class GammaNoiseTransform(NonFinalTransform):
         mean : float
             Expected value
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
@@ -347,7 +347,7 @@ class RandomGammaNoiseTransform(RandomizedTransform):
             If a `float`, sample from `Uniform(0, value)`.
             To use a fixed value, pass `Fixed(value)`.
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return

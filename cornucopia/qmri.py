@@ -216,7 +216,7 @@ class ShimTransform(FinalTransform):
         isocenter : (3 or 2) tensor or list of float
             Coordinates of the isocenter, in voxels
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'shim'}
         """
@@ -276,7 +276,7 @@ class OptimalShimTransform(NonFinalTransform):
         mask : bool
             Mask zeros/NaNs from objective functions
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'shim'}
         """
@@ -317,7 +317,7 @@ class RandomShimTransform(NonFinalTransform):
         max_order : int or Sampler
             Sampler for spherical harminocs order (or upper bound)
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'shim'}
         shared : {'channels', 'tensors', 'channels+tensors', ''}
