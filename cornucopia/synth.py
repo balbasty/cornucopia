@@ -155,8 +155,8 @@ class IntensityTransform(SequentialTransform):
         Parameters
         ----------
         bias : int or Sampler or False
-            The sampled value controls the smoothness of the field
-            (smaller values yield smoother fields).
+            The sampled value controls the smoothness of the intensity
+            bias field (smaller values yield smoother fields).
             If a `float`, sample from `RandInt(2, value)`.
         gamma : float or Sampler or False
             The Gamma transform squeezes intensities such that the contrast
@@ -185,8 +185,9 @@ class IntensityTransform(SequentialTransform):
             will have a poorer SNR than this). The noise variance is
             then sampled from `Uniform(0, 1/snr)`.
         gfactor : int or Sampler or False
-            The g-factor map locally scales the noise variance.
-            The sampled value controls the smoothness of the g-factor field.
+            The g-factor is a smooth field that locally scales the noise
+            variance. The `gfactor` argument controls the smoothness of
+            the g-factor field.
             If a `float`, sample from `RandInt(2, value)`.
         order : {1..7}
             Spline order of the bias/g-factor fields (1 is much faster)
@@ -359,7 +360,9 @@ class SynthFromLabelTransform(NonFinalTransform):
         Parameters
         ----------
         patch : [list of] int
-            Shape of the patches to extact
+            If provided, patches of this size are extracted. Note that
+            patches are extracted *after* application of the geometric
+            transforms (altough both operations are combined efficiently).
         from_disk : bool
             Assume inputs are filenames and load from disk
         one_hot : bool, default=False
@@ -368,50 +371,95 @@ class SynthFromLabelTransform(NonFinalTransform):
             List of labels to use for synthesis.
             If multiple labels are grouped in a sublist, they share the
             same intensity in the GMM. All labels not listed are assumed
-            background.
+            background. For example, this option can be ued to ensure
+            that symmetric structures share the same intensity.
         synth_labels_maybe : dict[tuple of [tuple of] int, float]
             List of labels to sometimes use for synthesis, and their
-            probability of being sampled.
+            probability of being sampled. This options allow groups parts
+            of the anatomy to be hidden in a random subset of images. This
+            can be used to e.g. model the presence of skull-stripped images.
         target_labels : tuple of [tuple of] int
             List of target labels.
             If multiple labels are grouped in a sublist, they are fused.
             All labels not listed are assumed background.
             The final label map is relabeled in the order provided,
             starting from 1 (background is 0).
+            This option can be used to predict a coarser set of labels,
+            than those used for synthesis.
         order : int
             Spline order of the elastic and bias fields (1 is much faster)
 
         Other Parameters
         ----------------
         rotation : float or Sampler or False
-            Upper bound for rotations, in degree.
+            Distribution from which random rotations (in degree) are sampled.
+            If a `float`, sample from `Uniform(-value, value)`.
         shears : float or Sampler or False
-            Upper bound for shears
+            Distribution from which random shears are sampled.
+            If a `float`, sample from `Uniform(-value, value)`.
         zooms : float or Sampler or False
-            Upper bound for zooms (about one)
+            Distribution from which random zooms (about one) are sampled.
+            If a `float`, sample from `Uniform(-value, value)`.
+            The zoom effectively applied is 1 plus the sampled value
+            (i.e., the zoom is sampled from `Uniform(1-value, 1+value)`).
         elastic : float or Sampler or False
-            Upper bound for elastic displacements, in percent of the FOV.
+            Distribution from which the maximum of the displacement magnitude
+            (in proportion of the field-of-view) is sampled.
+            If a `float`, sample from `Uniform(0, value)`.
         elastic_nodes : int or Sampler
-            Upper bound for number of control points in the elastic field.
+            The sampled value controls the smoothness of the displacement
+            field (smaller values yield smoother fields).
+            If a `float`, sample from `RandInt(2, value)`.
         elastic_steps : int or Sampler
             Number of scaling-and-squaring integration steps.
+            Scaling-and-squaring ensure that the elastic field is
+            diffeomorphic (one-to-one and onto).
+            If 0, the field is not integrated, which is faster but may
+            result in image foldings.
 
         Other Parameters
         ----------------
         gmm_fwhm : float or Sampler or False
-            Upper bound for the FWHM of the intra-tissue smoothing kernel
+            In contrast with the SynthSeg paper, we perform an
+            edge-preserving smoothing after intensities are sampled, in
+            order to mimic texture. This parameter controls the width
+            of the smoothing kernel.
+            If a `float`, sample from `Uniform(0, value)`.
         bias : int or Sampler or False
-            Upper bound for the number of control points of the bias field
+            The sampled value controls the smoothness of the intensity
+            bias field (smaller values yield smoother fields).
+            If a `float`, sample from `RandInt(2, value)`.
         gamma : float or Sampler or False
-            Upper bound for the exponent of the Gamma transform
+            The Gamma transform squeezes intensities such that the contrast
+            to noise ratio is decreased (positive values lead to less
+            decreased contrast, positive values lead to increased contrast).
+            If a `float`, sample the gamma exponent from `LogNormal(0, value)`.
         motion_fwhm : float or Sampler or False
-            Upper bound of the FWHM of the global (PSF/motion) smoothing kernel
+            A blur can be perform to model the point spread function or
+            motion-related smearing. The amount of smoothing is encoded by
+            the full-width at half-maximum (FWHM) of the underlying
+            Gaussian kernel.
+            If a `float`, sample the FWHM from `Uniform(0, value)`.
         resolution : float or Sampler or False
-            Upper bound for the inter-slice spacing (in voxels)
+            Thick-slice or isotropic low-resolution (LR) images are randomly
+            applied. and their (through-slice or iso) resolution is
+            controlled here. It is defined as a proportion of the
+            high-resolution voxel size (i.e., a resolution of `4` mean
+            that the LR voxel size will be four times as large as the
+            input voxel size)
+            If a `float`, sampled form `Uniform(0, value)`.
         snr : float or Sampler or False
-            Lower bound for the signal-to-noise ratio
+            The amount of noise added is encoded by the signal-to-noise ratio
+            (SNR) of the noisy image (larger sampled values yield less
+            noisy images).
+            If a `float`, the value is a lower bound for SNR (no image
+            will have a poorer SNR than this). The noise variance is
+            then sampled from `Uniform(0, 1/snr)`.
         gfactor : int or Sampler or False
-            Upper bound for the number of control points of the g-factor map
+            The g-factor is a smooth field that locally scales the noise
+            variance. The sampled value controls the smoothness of
+            the g-factor field.
+            If a `float`, sample from `RandInt(2, value)`.
         """
         super().__init__(shared=False, returns=returns)
         self.load = (
