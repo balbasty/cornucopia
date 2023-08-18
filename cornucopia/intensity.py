@@ -610,7 +610,7 @@ class AddFieldTransform(BaseFieldTransform):
     finalklass = AddValueTransform
 
 
-class RandomAddFieldTransform(RandomizedTransform):
+class RandomAddFieldTransform(NonFinalTransform):
     """Random additive bias field transform"""
 
     def __init__(self, shape=8, vmin=-1, vmax=1, order=3, *,
