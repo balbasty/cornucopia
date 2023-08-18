@@ -474,6 +474,7 @@ class RandomAffineTransform(NonFinalTransform):
                  rotations=15,
                  shears=0.012,
                  zooms=0.15,
+                 iso=False,
                  unit='fov',
                  bound='border',
                  *,
@@ -492,6 +493,8 @@ class RandomAffineTransform(NonFinalTransform):
             Sampler or Upper bound for shears (about Z/Y/Z)
         zooms : Sampler or [list of] float
             Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        iso : bool
+            Use isotropic zoom
         unit : {'fov', 'vox'}
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
@@ -515,6 +518,7 @@ class RandomAffineTransform(NonFinalTransform):
         self.rotations = Uniform.make(make_range(rotations))
         self.shears = Uniform.make(make_range(shears))
         self.zooms = Uniform.make(make_range(zooms))
+        self.iso = iso
         self.unit = unit
         self.bound = bound
         self.shared_matrix = shared_matrix
@@ -538,7 +542,7 @@ class RandomAffineTransform(NonFinalTransform):
         if isinstance(shears, Sampler):
             shears = shears(ndim)
         if isinstance(zooms, Sampler):
-            zooms = zooms(ndim)
+            zooms = zooms() if self.iso else zooms(ndim)
         if shared_matrix is None:
             shared_matrix = self.shared
 
@@ -728,6 +732,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         rotations=15,
         shears=0.012,
         zooms=0.15,
+        iso=False,
         unit='fov',
         bound='border',
         patch=None,
@@ -755,6 +760,8 @@ class RandomAffineElasticTransform(NonFinalTransform):
             Sampler or Upper bound for shears (about Z/Y/Z)
         zooms : Sampler or [list of] float
             Sampler or Upper bound for zooms about 1 (per X/Y/Z)
+        iso : bool
+            Use isotropic zoom
         unit : {'fov', 'vox'}
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
@@ -779,6 +786,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.rotations = Uniform.make(make_range(rotations))
         self.shears = Uniform.make(make_range(shears))
         self.zooms = Uniform.make(make_range(zooms))
+        self.iso = iso
         self.unit = unit
         self.bound = bound
         self.steps = steps
@@ -815,7 +823,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         if isinstance(shears, Sampler):
             shears = shears(ndim)
         if isinstance(zooms, Sampler):
-            zooms = zooms(ndim)
+            zooms = zooms() if self.iso else zooms(ndim)
         if isinstance(order, Sampler):
             order = order(ndim)
         if shared_flow is None:
@@ -1182,8 +1190,9 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
     def __init__(
         self, translations=0.1, rotations=15, shears=0, zooms=0,
         bulk_translations=0.05, bulk_rotations=15, bulk_shears=0, bulk_zooms=0,
-        slice=-1, spacing=1, subsample=1, shots=2, nodes=8, unit='fov',
-        bound='border', *, shared=True, shared_matrix=None, **kwargs
+        iso=False, slice=-1, spacing=1, subsample=1, shots=2, nodes=8,
+        unit='fov', bound='border',
+        *, shared=True, shared_matrix=None, **kwargs
     ):
         """
 
@@ -1205,6 +1214,8 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             Sampler or Upper bound for Bulk shear (about Z/Y/Z)
         bulk_zooms : [list of] float
             Sampler or Upper bound for Bulk zoom about 1 (per X/Y/Z)
+        iso : bool
+            Use isotropic zoom
         slice : int, optional
             Slice direction. If None, a random slice direction is selected.
         spacing : int
@@ -1247,6 +1258,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         self.bulk_rotations = Uniform.make(make_range(bulk_rotations))
         self.bulk_shears = Uniform.make(make_range(bulk_shears))
         self.bulk_zooms = Uniform.make(make_range(bulk_zooms))
+        self.iso = iso
         self.unit = unit
         self.bound = bound
         self.slice = slice
@@ -1303,7 +1315,8 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         if isinstance(shears, Sampler):
             shears = shears([nodes, (ndim*(ndim-1))//2])
         if isinstance(zooms, Sampler):
-            zooms = zooms([nodes, ndim])
+            zooms = zooms([nodes, 1]) if self.iso else zooms([nodes, ndim])
+            zooms = zooms.expand([nodes, ndim])
         if isinstance(bulk_translations, Sampler):
             bulk_translations = bulk_translations(ndim)
         if isinstance(bulk_rotations, Sampler):
@@ -1311,7 +1324,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         if isinstance(bulk_shears, Sampler):
             bulk_shears = bulk_shears((ndim*(ndim-1))//2)
         if isinstance(bulk_zooms, Sampler):
-            bulk_zooms = bulk_zooms(ndim)
+            bulk_zooms = bulk_zooms() if self.iso else bulk_zooms(ndim)
 
         # cubic interpolation of motion parameters
         if nodes < nb_slices:
