@@ -833,8 +833,8 @@ class QuantileTransform(NonFinalTransform):
             Lower target value
         vmax : float
             Upper target value
-        clamp : bool
-            Clamp values outside (vmin, vmax)
+        clip : bool
+            Clip values outside (vmin, vmax)
         """
         super().__init__(**kwargs)
         self.pmin = pmin
@@ -848,7 +848,7 @@ class QuantileTransform(NonFinalTransform):
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return self.make_per_channel(x, max_depth)
-
+        
         nmax = 10000
         x = x[x != 0]
         x = x[torch.rand_like(x) < (nmax / x.numel())]
@@ -861,7 +861,7 @@ class QuantileTransform(NonFinalTransform):
         if self.clip:
             return SequentialTransform(
                 AddMulTransform(slope, offset, **self.get_prm()),
-                ClipTransform(self.vmin, self.vmax, **self.get_prm()),
+                ClipTransform(self.vmin, self.vmax, **self.get_prm())
             ).make_final(x, max_depth-1)
         else:
             return AddMulTransform(
