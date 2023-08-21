@@ -395,7 +395,7 @@ class RandomSlicewiseMultFieldTransform(RandomizedTransform):
                       shape=RandInt.make(make_range(2, shape)),
                       order=Fixed.make(order),
                       slice=slice,
-                      thickness=RandInt.make(make_range(0, thickness)),
+                      thickness=RandInt.make(make_range(3, thickness)),
                       shape_through=shape_through)
         super().__init__(MultFieldTransform, kwargs, shared=shared)
 
