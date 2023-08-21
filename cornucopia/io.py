@@ -9,14 +9,14 @@ from .utils.io import loaders
 class ToTensorTransform(Transform):
     """Convert to Tensor (or to other dtype/device)"""
 
-    def __init__(self, dim=None, dtype=None, device=None):
+    def __init__(self, dim=None, dtype=None, device=None, **kwargs):
         """
         Parameters
         ----------
         dtype : torch.dtype, optional
         device : torch.device, optional
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.dim = dim
         self.dtype = dtype
         self.device = device
@@ -37,7 +37,8 @@ class LoadTransform(Transform):
     Load data from disk
     """
 
-    def __init__(self, ndim=None, dtype=None, device=None, **kwargs):
+    def __init__(self, ndim=None, dtype=None,
+                 *, device=None, returns=None, append=False, **kwargs):
         """
         Parameters
         ----------
@@ -60,7 +61,7 @@ class LoadTransform(Transform):
             Field to load from a npz file.
             Only used by Numpy reader.
         """
-        super().__init__(shared='channels')
+        super().__init__(shared='channels', returns=returns, append=append)
         self.ndim = ndim
         self.dtype = dtype
         self.device = device

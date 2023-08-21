@@ -4,48 +4,55 @@ __all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
            'GFactorTransform']
 
 import torch
-from .base import Transform, RandomizedTransform
+from .base import Transform, RandomizedTransform, prepare_output
 from .intensity import MultFieldTransform
-from .random import Uniform, RandInt, upper_range
+from .random import Uniform, RandInt, Fixed, make_range
 
 
 class GaussianNoiseTransform(Transform):
     """Additive Gaussian noise"""
 
-    def __init__(self, sigma=0.1, shared=False):
+    def __init__(self, sigma=0.1, *, shared=False, **kwargs):
         """
 
         Parameters
         ----------
         sigma : float
             Standard deviation
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensors to return
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
 
     def get_parameters(self, x):
         return torch.randn_like(x).mul_(self.sigma)
 
     def apply_transform(self, x, parameters):
-        return x + parameters
+        y = x + parameters
+        return prepare_output(dict(input=x, output=y, noise=parameters),
+                              self.returns)
 
 
 class RandomGaussianNoiseTransform(RandomizedTransform):
     """Additive Gaussian noise with random standard deviation"""
 
-    def __init__(self, sigma=0.1, shared=False):
+    def __init__(self, sigma=0.1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
         sigma : Sampler or float
             Sampler or upper bound for the standard deviation
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensors to return
         shared : bool
             Use the same sd for all channels/images
         """
         super().__init__(GaussianNoiseTransform,
-                         dict(sigma=Uniform.make(upper_range(sigma))),
+                         dict(sigma=Uniform.make(make_range(0, sigma)),
+                              **kwargs),
                          shared=shared)
 
 
@@ -55,7 +62,7 @@ class ChiNoiseTransform(Transform):
     (Rician is a special case with nb_channels = 2)
     """
 
-    def __init__(self, sigma=0.1, nb_channels=2, shared=False):
+    def __init__(self, sigma=0.1, nb_channels=2, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -63,10 +70,12 @@ class ChiNoiseTransform(Transform):
             Standard deviation
         nb_channels : int
             Number of independent channels
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensors to return
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
         self.nb_channels = nb_channels
 
@@ -75,16 +84,18 @@ class ChiNoiseTransform(Transform):
         for _ in range(self.nb_channels):
             noise += torch.randn_like(x).mul_(self.sigma).square_()
         noise /= self.nb_channels
-        return noise
+        return noise.sqrt_()
 
     def apply_transform(self, x, parameters):
-        return x.square().add_(parameters).sqrt_()
+        y = x.square().add_(parameters.square()).sqrt_()
+        return prepare_output(dict(input=x, output=y, noise=parameters),
+                              self.returns)
 
 
 class RandomChiNoiseTransform(RandomizedTransform):
     """Additive Chi noise with random standard deviation and channels"""
 
-    def __init__(self, sigma=0.1, nb_channels=8, shared=False):
+    def __init__(self, sigma=0.1, nb_channels=8, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -92,18 +103,21 @@ class RandomChiNoiseTransform(RandomizedTransform):
             Sampler or upper bound for the standard deviation
         nb_channels : Sampler or int
             Sampler or upper bound for the number of channels
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensors to return
         shared : bool
             Use the same sd for all channels/images
         """
         super().__init__(ChiNoiseTransform,
-                         dict(sigma=Uniform.make(upper_range(sigma)),
-                              nb_channels=RandInt.make(upper_range(nb_channels, 2))),
+                         dict(sigma=Uniform.make(make_range(0, sigma)),
+                              nb_channels=RandInt.make(make_range(2, nb_channels)),
+                              **kwargs),
                          shared=shared)
 
 
 class GFactorTransform(Transform):
 
-    def __init__(self, noise, shape=5, vmin=1, vmax=4):
+    def __init__(self, noise, shape=5, vmin=1, vmax=4, *, returns=None, **kwargs):
         """
 
         Parameters
@@ -116,8 +130,10 @@ class GFactorTransform(Transform):
             Minimum g-factor
         vmax : float
             Maximum g-factor
+        returns : [list or dict of] {'input', 'output', 'gfactor', 'noise', 'scalednoise'}
+            Which tensors to return
         """
-        super().__init__()
+        super().__init__(returns=returns, **kwargs)
         self.noise = noise
         self.gfactor = MultFieldTransform(shape, vmin=vmin, vmax=vmax)
 
@@ -126,17 +142,22 @@ class GFactorTransform(Transform):
         if isinstance(noise, Transform):
             noisetrf, noise = noise, noise.get_parameters(x)
         gfactor = self.gfactor.get_parameters(x)
-        return noisetrf, noise * gfactor
+        return noisetrf, noise, gfactor
 
     def apply_transform(self, x, parameters):
-        noisetrf, noiseprm = parameters
-        return noisetrf.apply_transform(x, noiseprm)
+        noisetrf, noise, gfactor = parameters
+        scalednoise = noise * gfactor
+        y = noisetrf.apply_transform(x, noise * gfactor)
+        return prepare_output(
+            dict(input=x, output=y, gfactor=gfactor,
+                 noise=noise, scalednoise=scalednoise),
+            self.returns)
 
 
 class GammaNoiseTransform(Transform):
     """Multiplicative Gamma noise"""
 
-    def __init__(self, mean=1, sigma=0.1, shared=False):
+    def __init__(self, mean=1, sigma=0.1, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -145,10 +166,12 @@ class GammaNoiseTransform(Transform):
             Expected value
         sigma : float
             Standard deviation
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensors to return
         shared : bool
             Add the exact same values to all channels/images
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.mean = mean
         self.sigma = sigma
 
@@ -165,13 +188,15 @@ class GammaNoiseTransform(Transform):
         return torch.distributions.Gamma(alpha, beta).sample(x.shape)
 
     def apply_transform(self, x, parameters):
-        return x * parameters
+        y = x * parameters
+        return prepare_output(dict(input=x, outptu=y, noise=parameters),
+                              self.returns)
 
 
 class RandomGammaNoiseTransform(RandomizedTransform):
     """Multiplicative Gamma noise with random standard deviation and mean"""
 
-    def __init__(self, mean=2, sigma=0.1, shared=False):
+    def __init__(self, mean=Fixed(1), sigma=0.1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -183,6 +208,7 @@ class RandomGammaNoiseTransform(RandomizedTransform):
             Use the same mean/sd for all channels/images
         """
         super().__init__(GammaNoiseTransform,
-                         dict(mean=Uniform.make(upper_range(mean)),
-                              sigma=Uniform.make(upper_range(sigma))),
+                         dict(mean=Uniform.make(make_range(0, mean)),
+                              sigma=Uniform.make(make_range(0, sigma)),
+                              **kwargs),
                          shared=shared)

@@ -51,5 +51,9 @@ from .kspace import *
 from .labels import *
 from .noise import *
 from .psf import *
+from .qmri import *
 from .synth import *
 from .utils.patch import patch_apply
+
+from . import _version
+__version__ = _version.get_versions()['version']

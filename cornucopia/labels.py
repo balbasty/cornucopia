@@ -10,15 +10,14 @@ __all__ = ['OneHotTransform', 'ArgMaxTransform',
            'RelabelTransform']
 
 import torch
-from .random import Uniform, Sampler, RandInt, Fixed, upper_range, lower_range
-from .base import Transform, RandomizedTransform
+from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
+from .base import Transform, RandomizedTransform, prepare_output
 from .intensity import BaseFieldTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
 from .utils.morpho import bounded_distance
 import interpol
 import distmap
-import random as pyrand
 import math as pymath
 
 
@@ -26,14 +25,14 @@ class OneHotTransform(Transform):
     """Transform a volume of integer labels into a one-hot representation"""
 
     def __init__(self, label_map=None, label_ref=None, keep_background=True,
-                 dtype=None):
+                 dtype=None, **kwargs):
         """
 
         Parameters
         ----------
         label_map : list or [list of] int
             Map one-hot classes to [list of] labels or label names
-            (!! Should not include the background class !!)
+            !!! warning "Should not include the background class"
         label_ref : dict[int] -> str
             Map label values to label names
         keep_background : bool
@@ -42,7 +41,7 @@ class OneHotTransform(Transform):
         dtype : torch.dtype
             Use a different dtype for the one-hot
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.label_map = label_map
         self.label_ref = label_ref
         self.keep_background = keep_background
@@ -103,29 +102,42 @@ class OneHotTransform(Transform):
 class ArgMaxTransform(Transform):
 
     def apply_transform(self, x, parameters):
-        return x.argmax(0)
+        return x.argmax(0)[None]
 
 
 class RelabelTransform(Transform):
     """Relabel a label map"""
 
-    def __init__(self, labels):
+    def __init__(self, labels=None, **kwargs):
         """
+
+        !!! note
+
+            The `labels` are mapped to the range `{1..len(labels)}`.
+
+            If an element of this list is a sublist of indices, they are merged.
+
+            All labels absent from the list are mapped to `0`.
 
         Parameters
         ----------
         labels : list of [list of] int, optional
             Relabeling scheme.
-            The labels in this list are mapped to the range {1..len(labels)}.
-            If an element of this list is a sublist of indices, they are merged.
-            All labels absent from the list are mapped to 0.
+
         """
-        super().__init__(shared=False)
+        super().__init__(shared=False, **kwargs)
         self.labels = labels
 
-    def apply_transform(self, x, parameters=None):
+    def get_parameters(self, x):
+        labels = self.labels
+        if labels is None:
+            labels = x.unique().tolist()[1:]
+        return labels
+
+    def apply_transform(self, x, parameters):
+        labels = parameters
         y = torch.zeros_like(x)
-        for out, inp in enumerate(self.labels):
+        for out, inp in enumerate(labels):
             out = out + 1
             if not isinstance(inp, (list, tuple)):
                 inp = [inp]
@@ -138,7 +150,7 @@ class GaussianMixtureTransform(Transform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
     def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
-                 dtype=None, shared=False):
+                 dtype=None, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -154,7 +166,7 @@ class GaussianMixtureTransform(Transform):
         dtype : torch.dtype
             Output data type. Only used if input is an integer label map.
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.mu = mu
         self.sigma = sigma
         self.fwhm = fwhm
@@ -162,57 +174,51 @@ class GaussianMixtureTransform(Transform):
         self.dtype = dtype
 
     def get_parameters(self, x):
+        nk = len(x) if x.is_floating_point() else x.unique().numel()
         mu = self.mu
         sigma = self.sigma
         if mu is None:
-            mu = torch.rand([len(x)]).mul_(255)
+            mu = torch.rand([nk]).tolist()
         if sigma is None:
-            sigma = torch.full([len(x)], 255 / len(x))
-        if x.dtype.is_floating_point:
-            backend = dict(dtype=x.dtype, device=x.device)
-        else:
-            backend = dict(dtype=self.dtype or torch.get_default_dtype(),
-                           device=x.device)
-        mu = torch.as_tensor(mu).to(**backend)
-        sigma = torch.as_tensor(sigma).to(**backend)
+            sigma = [1 / nk] * nk
         return mu, sigma
 
     def apply_transform(self, x, parameters):
         mu, sigma = parameters
+        getitem = lambda x: x.item() if torch.is_tensor(x) else x
 
-        if x.dtype.is_floating_point:
+        if x.is_floating_point():
             backend = dict(dtype=x.dtype, device=x.device)
-            y = torch.zeros_like(x[0], **backend)
-            mu = mu.to(**backend)
-            sigma = sigma.to(**backend)
+            y = torch.zeros_like(x[0])
             fwhm = ensure_list(self.fwhm or [0], len(x))
             for k in range(len(x)):
+                muk, sigmak = getitem(mu[k]), getitem(sigma[k])
                 if self.background is not None and k == self.background:
                     continue
                 y1 = torch.randn(x.shape[1:], **backend)
                 if fwhm[k]:
                     y1 = smoothnd(y1, fwhm=fwhm[k])
-                y += x[k] * y1.mul_(sigma[k]).add_(mu[k])
+                y += y1.mul_(sigmak).add_(muk).mul_(x[k])
             y = y[None]
         else:
             backend = dict(dtype=self.dtype or torch.get_default_dtype(),
                            device=x.device)
             y = torch.zeros_like(x, **backend)
-            mu, sigma = mu.to(y), sigma.to(y)
             nk = x.max().item()+1
             fwhm = ensure_list(self.fwhm or [0], nk)
             for k in range(nk):
+                muk, sigmak = getitem(mu[k]), getitem(sigma[k])
                 if self.background is not None and k == self.background:
                     continue
                 if fwhm[k]:
-                    y1 = torch.randn(x.shape[1:], **backend)
+                    y1 = torch.randn(x.shape, **backend)
                     y1 = smoothnd(y1, fwhm=fwhm[k])
-                    y += (x == k) * y1.mul_(sigma[k]).add_(mu[k])
+                    y += y1.mul_(sigmak).add_(muk).masked_fill_(x != k, 0)
                 else:
                     mask = x == k
                     numel = mask.sum()
                     if numel:
-                        y[mask] = torch.randn(numel, **backend).mul_(sigma[k]).add_(mu[k])
+                        y[mask] = torch.randn(numel, **backend).mul_(sigmak).add_(muk)
         return y
 
 
@@ -221,37 +227,49 @@ class RandomGaussianMixtureTransform(RandomizedTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=255, sigma=16, fwhm=2, background=None, shared='channels'):
+    def __init__(self, mu=1, sigma=0.05, fwhm=2, background=None,
+                 *, shared='channels', **kwargs):
         """
 
         Parameters
         ----------
         mu : Sampler or [list of] float
             Sampling function for cluster means, or upper bound
-        sigma : callable or [list of] float
+        sigma : Sampler or [list of] float
             Sampling function for cluster standard deviations, or upper bound
-        fwhm : callable or [list of] float
+        fwhm : Sampler or [list of] float
             Sampling function for smoothing width, or upper bound
         background : int, optional
             Index of background channel
         """
-        sample = dict(mu=Uniform.make(upper_range(mu)),
-                      sigma=Uniform.make(upper_range(sigma)),
-                      fwhm=Uniform.make(upper_range(fwhm)),
-                      background=background)
-        super().__init__(GaussianMixtureTransform, sample, shared=shared)
+        super().__init__(
+            GaussianMixtureTransform,
+            dict(mu=Uniform.make(make_range(0, mu)),
+                 sigma=Uniform.make(make_range(0, sigma)),
+                 fwhm=Uniform.make(make_range(0, fwhm)),
+                 background=background,
+                 **kwargs),
+            shared=shared)
 
     def get_parameters(self, x):
         n = len(x) if x.dtype.is_floating_point else x.max() + 1
-        return self.subtransform(**{k: f(n) if callable(f)
-                                    else ensure_list(f, n) if k != 'background'
-                                    else f for k, f in self.sample.items()})
+
+        sample = self.sample
+        self.sample = {
+            key: value(n) if isinstance(value, Sampler) else value
+            for key, value in self.sample.items()
+        }
+
+        out = super().get_parameters(x)
+        self.sample = sample
+        return out
 
 
 class SmoothLabelMap(Transform):
     """Generate a random label map"""
 
-    def __init__(self, nb_classes=2, shape=5, soft=False, shared=False):
+    def __init__(self, nb_classes=2, shape=5, soft=False,
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -265,7 +283,7 @@ class SmoothLabelMap(Transform):
         shared : bool
             Apply the same field to all channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.nb_classes = nb_classes
         self.shape = shape
         self.soft = soft
@@ -302,7 +320,8 @@ class SmoothLabelMap(Transform):
 class RandomSmoothLabelMap(RandomizedTransform):
     """Generate a random label map with random hyper-parameters"""
 
-    def __init__(self, nb_classes=8, shape=5, soft=False, shared=False):
+    def __init__(self, nb_classes=8, shape=5, soft=False,
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -314,10 +333,13 @@ class RandomSmoothLabelMap(RandomizedTransform):
         soft : bool
             Return a soft (one-hot) label map
         """
-        super().__init__(SmoothLabelMap,
-                         dict(nb_classes=RandInt.make(upper_range(nb_classes, min=2)),
-                              shape=RandInt.make(upper_range(shape, min=2)),
-                              soft=Fixed.make(soft)), shared=shared)
+        super().__init__(
+            SmoothLabelMap,
+            dict(nb_classes=RandInt.make(make_range(2, nb_classes)),
+                 shape=RandInt.make(make_range(2, shape)),
+                 soft=Fixed.make(soft),
+                 **kwargs),
+            shared=shared)
 
 
 class ErodeLabelTransform(Transform):
@@ -325,7 +347,8 @@ class ErodeLabelTransform(Transform):
     Morphological erosion.
     """
 
-    def __init__(self, labels=tuple(), radius=3, method='conv', new_labels=False):
+    def __init__(self, labels=tuple(), radius=3, method='conv', new_labels=False,
+                 **kwargs):
         """
         Parameters
         ----------
@@ -342,7 +365,7 @@ class ErodeLabelTransform(Transform):
             If not False, the eroded portion of each label gives rise to
             a new label. If True, create new unique labels.
         """
-        super().__init__(shared=True)
+        super().__init__(shared=True, **kwargs)
         self.labels = ensure_list(labels)
         self.radius = ensure_list(radius, min(len(self.labels), 1))
         self.method = method
@@ -432,7 +455,7 @@ class DilateLabelTransform(Transform):
     Morphological dilation.
     """
 
-    def __init__(self, labels=tuple(), radius=3, method='conv'):
+    def __init__(self, labels=tuple(), radius=3, method='conv', **kwargs):
         """
         Parameters
         ----------
@@ -446,7 +469,7 @@ class DilateLabelTransform(Transform):
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
         """
-        super().__init__(shared=True)
+        super().__init__(shared=True, **kwargs)
         self.labels = ensure_list(labels)
         self.radius = ensure_list(radius, min(len(self.labels), 1))
         self.method = method
@@ -499,7 +522,7 @@ class RandomErodeLabelTransform(RandomizedTransform):
     """
 
     def __init__(self, labels=0.5, radius=3, method='conv',
-                 new_labels=False, shared=False):
+                 new_labels=False, *, shared=False, **kwargs):
         """
 
         Parameters
@@ -521,9 +544,10 @@ class RandomErodeLabelTransform(RandomizedTransform):
         """
         super().__init__(ErodeLabelTransform,
                          dict(labels=labels,
-                              radius=Uniform.make(upper_range(radius)),
+                              radius=Uniform.make(make_range(0, radius)),
                               method=Fixed(method),
-                              new_labels=Fixed(new_labels)),
+                              new_labels=Fixed(new_labels),
+                              **kwargs),
                          shared=shared)
 
     def get_parameters(self, x):
@@ -533,22 +557,16 @@ class RandomErodeLabelTransform(RandomizedTransform):
             prob = sample['labels']
             labels = x.unique().tolist()
             n = int(pymath.ceil(len(labels) * prob))
-            def label_sampler():
-                pyrand.shuffle(labels)
-                return labels[:n]
-            sample['labels'] = label_sampler
-        if callable(sample['radius']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['radius']
-            def sample_radius():
-                return [sampler() for _ in range(n)]
-            sample['radius'] = sample_radius
+            sample['labels'] = RandKFrom(labels, n)
+        if isinstance(sample['radius'], Sampler) and n is None:
+            if isinstance(sample['labels'], Sampler):
+                sample['labels'] = sample['labels']()
+            n = len(sample['labels'])
 
-        return self.subtransform(**{k: f() if callable(f) else f
-                                    for k, f in sample.items()})
+        return self.subtransform(**{
+            k: f(n) if isinstance(f, Sampler) and k == 'radius'
+            else f() if isinstance(f, Sampler) else f
+            for k, f in sample.items()})
 
 
 class RandomDilateLabelTransform(RandomizedTransform):
@@ -556,7 +574,8 @@ class RandomDilateLabelTransform(RandomizedTransform):
     Morphological dilation with random radius/labels.
     """
 
-    def __init__(self, labels=0.5, radius=3, method='conv', shared=False):
+    def __init__(self, labels=0.5, radius=3, method='conv',
+                 *, shared=False, **kwargs):
         """
 
         Parameters
@@ -575,8 +594,9 @@ class RandomDilateLabelTransform(RandomizedTransform):
         """
         super().__init__(DilateLabelTransform,
                          dict(labels=labels,
-                              radius=Uniform.make(upper_range(radius)),
-                              method=Fixed(method)),
+                              radius=Uniform.make(make_range(0, radius)),
+                              method=Fixed(method),
+                              **kwargs),
                          shared=shared)
 
     def get_parameters(self, x):
@@ -586,36 +606,32 @@ class RandomDilateLabelTransform(RandomizedTransform):
             prob = sample['labels']
             labels = x.unique().tolist()
             n = int(pymath.ceil(len(labels) * prob))
-            def label_sampler():
-                pyrand.shuffle(labels)
-                return labels[:n]
-            sample['labels'] = label_sampler
-        if callable(sample['radius']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['radius']
-            def sample_radius():
-                return [sampler() for _ in range(n)]
-            sample['radius'] = sample_radius
+            sample['labels'] = RandKFrom(labels, n)
+        if isinstance(sample['radius'], Sampler) and n is None:
+            if isinstance(sample['labels'], Sampler):
+                sample['labels'] = sample['labels']()
+            n = len(sample['labels'])
 
-        return self.subtransform(**{k: f() if callable(f) else f
-                                    for k, f in sample.items()})
+        return self.subtransform(**{
+            k: f(n) if isinstance(f, Sampler) and k == 'radius'
+            else f() if isinstance(f, Sampler) else f
+            for k, f in sample.items()})
 
 
 class SmoothMorphoLabelTransform(Transform):
     """
     Morphological erosion with spatially varying radius.
 
-    We're actually computing the level set of each label and pushing it
-    up and down using a smooth "radius" map. In theory, this can
-    create "holes" or "islands", which would not happen with a normal
-    erosion. With radii that are small and radius map that are smooth
-    compared to the label size, it should be fine.
+    !!! note
+        We're actually computing the level set of each label and pushing it
+        up and down using a smooth "radius" map. In theory, this can
+        create "holes" or "islands", which would not happen with a normal
+        erosion. With radii that are small and radius map that are smooth
+        compared to the label size, it should be fine.
     """
 
-    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5, method='conv'):
+    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5,
+                 method='conv', **kwargs):
         """
         Parameters
         ----------
@@ -633,7 +649,7 @@ class SmoothMorphoLabelTransform(Transform):
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
         """
-        super().__init__(shared=True)
+        super().__init__(shared=True, **kwargs)
         self.labels = ensure_list(labels)
         self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
         self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
@@ -681,7 +697,7 @@ class SmoothMorphoLabelTransform(Transform):
             mask = d1 < d
             d[mask] = d1[mask]
             y.masked_fill_(mask, label)
-        return y
+        return prepare_output(dict(input=x, output=y), self.returns)
 
 
 class RandomSmoothMorphoLabelTransform(RandomizedTransform):
@@ -690,7 +706,7 @@ class RandomSmoothMorphoLabelTransform(RandomizedTransform):
     """
 
     def __init__(self, labels=0.5, min_radius=-3, max_radius=3,
-                 shape=5, method='conv', shared=False):
+                 shape=5, method='conv', *, shared=False, **kwargs):
         """
 
         Parameters
@@ -713,12 +729,17 @@ class RandomSmoothMorphoLabelTransform(RandomizedTransform):
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
         """
+        if isinstance(min_radius, (float, int)):
+            min_radius = make_range(min_radius, 0) if min_radius < 0 else make_range(0, min_radius)
+        if isinstance(max_radius, (float, int)):
+            max_radius = make_range(max_radius, 0) if max_radius < 0 else make_range(0, max_radius)
         super().__init__(SmoothMorphoLabelTransform,
                          dict(labels=labels,
-                              min_radius=Uniform.make(lower_range(min_radius)),
-                              max_radius=Uniform.make(upper_range(max_radius)),
-                              shape=RandInt.make(upper_range(shape)),
-                              method=Fixed(method)),
+                              min_radius=Uniform.make(min_radius),
+                              max_radius=Uniform.make(max_radius),
+                              shape=RandInt.make(make_range(2, shape)),
+                              method=Fixed(method),
+                              **kwargs),
                          shared=shared)
 
     def get_parameters(self, x):
@@ -728,38 +749,25 @@ class RandomSmoothMorphoLabelTransform(RandomizedTransform):
             prob = sample['labels']
             labels = x.unique().tolist()
             n = int(pymath.ceil(len(labels) * prob))
-            def label_sampler():
-                pyrand.shuffle(labels)
-                return labels[:n]
-            sample['labels'] = label_sampler
-        if callable(sample['min_radius']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['min_radius']
-            def sample_min_radius():
-                return [sampler() for _ in range(n)]
-            sample['min_radius'] = sample_min_radius
-        if callable(sample['max_radius']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['max_radius']
-            def sample_max_radius():
-                return [sampler() for _ in range(n)]
-            sample['max_radius'] = sample_max_radius
+            sample['labels'] = RandKFrom(labels, n)
+        if isinstance(sample['min_radius'], Sampler) or \
+                isinstance(sample['max_radius'], Sampler) and n is None:
+            if isinstance(sample['labels'], Sampler):
+                sample['labels'] = sample['labels']()
+            n = len(sample['labels'])
 
-        return self.subtransform(**{k: f() if callable(f) else f
-                                    for k, f in sample.items()})
+        return self.subtransform(**{
+            k: f(n) if isinstance(f, Sampler) and k in ('min_radius', 'max_radius')
+            else f() if isinstance(f, Sampler) else f
+            for k, f in sample.items()})
 
 
 class SmoothShallowLabelTransform(Transform):
     """Make labels "empty", with a border of a given size."""
 
     def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
-                 background_labels=tuple(), method='l2', shared=False):
+                 background_labels=tuple(), method='l2',
+                 *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -777,7 +785,7 @@ class SmoothShallowLabelTransform(Transform):
         method : {'l1', 'l2'}
             Method to use to compute the distance map.
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.labels = ensure_list(labels)
         self.background_labels = ensure_list(background_labels)
         self.shape = shape
@@ -844,7 +852,7 @@ class SmoothShallowLabelTransform(Transform):
                 d[mask] = d1[mask]
                 y.masked_fill_(mask, label)
 
-        return y
+        return prepare_output(dict(input=x, output=y), self.returns)
 
 
 class RandomSmoothShallowLabelTransform(RandomizedTransform):
@@ -853,7 +861,8 @@ class RandomSmoothShallowLabelTransform(RandomizedTransform):
     """
 
     def __init__(self, labels=0.5, max_width=5, min_width=1, shape=5,
-                 background_labels=tuple(), method='l2', shared=False):
+                 background_labels=tuple(), method='l2',
+                 *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -880,11 +889,12 @@ class RandomSmoothShallowLabelTransform(RandomizedTransform):
         """
         super().__init__(SmoothShallowLabelTransform,
                          dict(labels=labels,
-                              min_width=Uniform.make(lower_range(min_width)),
-                              max_width=Uniform.make(upper_range(max_width)),
-                              shape=RandInt.make(upper_range(shape)),
-                              background_labels=Fixed(background_labels),
-                              method=Fixed(method)),
+                              min_width=Uniform.make(make_range(0, min_width)),
+                              max_width=Uniform.make(make_range(0, max_width)),
+                              shape=RandInt.make(make_range(2, shape)),
+                              background_labels=background_labels,
+                              method=method,
+                              **kwargs),
                          shared=shared)
 
     def get_parameters(self, x):
@@ -894,62 +904,52 @@ class RandomSmoothShallowLabelTransform(RandomizedTransform):
             prob = sample['labels']
             labels = x.unique().tolist()
             n = int(pymath.ceil(len(labels) * prob))
-            def label_sampler():
-                pyrand.shuffle(labels)
-                return labels[:n]
-            sample['labels'] = label_sampler
-        if callable(sample['min_width']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['min_width']
-            def sample_min_width():
-                return [sampler() for _ in range(n)]
-            sample['min_width'] = sample_min_width
-        if callable(sample['max_width']):
-            if n is None:
-                n = len(ensure_list(sample['labels']()
-                                    if callable(sample['labels']) else
-                                    sample['labels']))
-            sampler = sample['max_width']
-            def sample_max_width():
-                return [sampler() for _ in range(n)]
-            sample['max_width'] = sample_max_width
+            sample['labels'] = RandKFrom(labels, n)
+        if isinstance(sample['min_width'], Sampler) or \
+                isinstance(sample['max_width'], Sampler) and n is None:
+            if isinstance(sample['labels'], Sampler):
+                sample['labels'] = sample['labels']()
+            n = len(sample['labels'])
 
-        return self.subtransform(**{k: f() if callable(f) else f
-                                    for k, f in sample.items()})
+        return self.subtransform(**{
+            k: f(n) if isinstance(f, Sampler) and k in ('min_width', 'max_width')
+            else f() if isinstance(f, Sampler) else f
+            for k, f in sample.items()})
 
 
 class BernoulliTransform(Transform):
     """Randomly mask voxels"""
 
-    def __init__(self, prob=0.1, shared=False):
+    def __init__(self, prob=0.1, *, shared=False, **kwargs):
         """
         Parameters
         ----------
         prob : float
             Probability of masking out a voxel
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensor to return
         shared : bool
             Same mask shared across channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.prob = prob
 
     def get_parameters(self, x):
         dtype = x.dtype
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
-        return torch.rand_like(x, dtype=dtype) > self.prob
+        return torch.rand_like(x, dtype=dtype) <= self.prob
 
     def apply_transform(self, x, parameters):
-        return x * (~parameters)
+        y = x * parameters
+        return prepare_output(dict(input=x, output=y, noise=parameters),
+                              self.returns)
 
 
 class SmoothBernoulliTransform(BaseFieldTransform):
     """Randomly mask voxels"""
 
-    def __init__(self, prob=0.1, shape=5, shared=False):
+    def __init__(self, prob=0.1, shape=5, *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -957,10 +957,12 @@ class SmoothBernoulliTransform(BaseFieldTransform):
             Probability of masking out a voxel
         shape : int or sequence[int]
             Number of control points in the smooth field
+        returns : [list or dict of] {'input', 'output', 'noise'}
+            Which tensor to return
         shared : bool
             Same mask shared across channels
         """
-        super().__init__(shape=shape, shared=shared)
+        super().__init__(shape=shape, shared=shared, **kwargs)
         self.prob = prob
 
     def get_parameters(self, x):
@@ -971,16 +973,19 @@ class SmoothBernoulliTransform(BaseFieldTransform):
         dtype = x.dtype
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
-        return torch.rand_like(x, dtype=dtype) > (1 - prob)
+        return torch.rand_like(x, dtype=dtype) <= (1 - prob)
 
     def apply_transform(self, x, parameters):
-        return x * (~parameters)
+        y = x * parameters
+        return prepare_output(dict(input=x, output=y, noise=parameters),
+                              self.returns)
 
 
 class BernoulliDiskTransform(Transform):
     """Randomly mask voxels in balls at random locations"""
 
-    def __init__(self, prob=0.1, radius=2, value=0, method='conv', shared=False):
+    def __init__(self, prob=0.1, radius=2, value=0, method='conv',
+                 *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -992,10 +997,12 @@ class BernoulliDiskTransform(Transform):
             Value to set in the disks
         method : {'conv', 'l1', 'l2'}
             Method used to compute the distance map
+        returns : [list or dict of] {'input', 'output', 'disks'}
+            Which tensor to return
         shared : bool
             Same mask shared across channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.prob = prob
         self.radius = radius
         self.value = value
@@ -1036,14 +1043,16 @@ class BernoulliDiskTransform(Transform):
 
     def apply_transform(self, x, parameters):
         mask, value = parameters
-        return x.masked_fill(mask, value)
+        y = x.masked_fill(mask, value)
+        return prepare_output(dict(input=x, output=y, disks=mask),
+                              self.returns)
 
 
 class SmoothBernoulliDiskTransform(Transform):
     """Randomly mask voxels in balls at random locations"""
 
     def __init__(self, prob=0.1, radius=2, shape=5, value=0, method='conv',
-                 shared=False):
+                 *, shared=False, **kwargs):
         """
         Parameters
         ----------
@@ -1056,10 +1065,12 @@ class SmoothBernoulliDiskTransform(Transform):
             Number of control points in the random field
         method : {'conv', 'l1', 'l2'}
             Method used to compute the distance map
+        returns : [list or dict of] {'input', 'output', 'disks'}
+            Which tensor to return
         shared : bool
             Same mask shared across channels
         """
-        super().__init__(shared=shared)
+        super().__init__(shared=shared, **kwargs)
         self.prob = prob
         self.field = BaseFieldTransform(shape=shape)
         self.dilate = SmoothMorphoLabelTransform(
@@ -1109,4 +1120,6 @@ class SmoothBernoulliDiskTransform(Transform):
 
     def apply_transform(self, x, parameters):
         mask, value = parameters
-        return x.masked_fill(mask, value)
+        y = x.masked_fill(mask, value)
+        return prepare_output(dict(input=x, output=y, disks=mask),
+                              self.returns)
