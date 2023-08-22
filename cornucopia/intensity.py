@@ -409,7 +409,7 @@ class BaseFieldTransform(NonFinalTransform):
                 fullshape[slice] = thickness
                 fullshape0[slice] = (nb_slices - 1) * thickness
                 b1 = self.make_field(batch1, smallshape, fullshape, **backend)
-                b1 = b1.reshape([batch, -1, *b.shape[1:]])
+                b1 = b1.reshape([batch, -1, *b1.shape[1:]])
                 b1 = b1.movedim(1, 1+slice)
                 b1 = b1.reshape([batch, *fullshape0])
 
