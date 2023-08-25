@@ -1180,7 +1180,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
                        .movedim(-1, zindex)  \
                        .movedim(0, -1)
             # ^ [*oshape, D]
-            flow = (flow - id).div_(self.subsample).movedim(-1, 0)
+            flow = (flow - id).multiply_(1 / self.subsample).movedim(-1, 0)
             # ^ [D, *oshape]
         else:
             flow = None
@@ -1437,11 +1437,11 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             cubic interpolation of motion parameters
             (nb_nodes, nprm) -> (nb_slices, nprm)
             """
-            if len(x) == 1:
+            if len(x) in [1, nb_slices]:
                 return x.expand([nb_slices, x.shape[1]]).clone()
             x = torch.as_tensor(x, dtype=torch.float32).T  # [D, N]
             x = interpol.resize(x, shape=[nb_slices],
-                                interpolation=3, bound='replicate',
+                                interpolation=1, bound='replicate',
                                 prefilter=False).T  # [S, D]
             return x
 
