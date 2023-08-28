@@ -48,6 +48,7 @@ nav:
 - Installation: install.md
 - Getting Started: start.md
 - Examples:
+  -  Overview: examples/overview.md
   -  Field-of-view transforms: examples/fov.ipynb
   -  Noise transforms: examples/noise.ipynb
   -  Geometric transforms: examples/geom.ipynb

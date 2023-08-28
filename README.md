@@ -20,8 +20,27 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 
 ## Installation
 
-```shell
-pip install git+https://github.com/balbasty/cornucopia
+
+## Installation
+
+### Dependencies
+
+- `pytorch >= 1.8`
+- `numpy`
+- `nibabel`
+- `torch-interpol`
+- `torch-distmap`
+
+### Conda
+
+```sh
+conda install cornucopia -c balbasty -c pytorch 
+```
+
+### Pip
+
+```sh
+pip install cornucopia
 ```
 
 ## Documentation
@@ -29,6 +48,7 @@ pip install git+https://github.com/balbasty/cornucopia
 Read the [documentation](https://cornucopia.readthedocs.io) and in particular:
 - [installation](https://cornucopia.readthedocs.io/en/latest/install/)
 - [get started](https://cornucopia.readthedocs.io/en/latest/start/)
+- [examples](https://cornucopia.readthedocs.io/en/latest/examples/overview/)
 - [API](https://cornucopia.readthedocs.io/en/latest/api/overview/)
 
 ## Other augmentation packages
