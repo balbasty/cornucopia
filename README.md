@@ -34,7 +34,7 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 ### Conda
 
 ```sh
-conda install cornucopia -c balbasty -c pytorch 
+conda install cornucopia -c balbasty -c pytorch -c conda-forge
 ```
 
 ### Pip
