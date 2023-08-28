@@ -506,13 +506,13 @@ class SynthFromLabelTransform(NonFinalTransform):
             background=0,
         )
         self.intensity = IntensityTransform(
-            bias=bias, 
-            bias_strength=bias_strength, 
-            gamma=gamma, 
+            bias=bias,
+            bias_strength=bias_strength,
+            gamma=gamma,
             motion_fwhm=motion_fwhm,
-            resolution=resolution, 
-            snr=snr, 
-            gfactor=gfactor, 
+            resolution=resolution,
+            snr=snr,
+            gfactor=gfactor,
             order=order,
         )
 

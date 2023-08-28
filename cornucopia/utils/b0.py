@@ -441,6 +441,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
 
     if mask is not None:
         mask = ~mask  # make it a mask of background voxels
+        mask = mask.expand(fmap.shape)
 
     # compute gradients
     gmap = diff(fmap, dim)
@@ -448,7 +449,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
     gmap[..., :-1] *= lam_grad
     gmap[..., -1] *= lam_abs
     if mask is not None:
-        gmap[..., mask, :] = 0
+        gmap[mask, :] = 0
     gmap = gmap.reshape([*batch, -1])   # (*batch, k)
 
     # compute basis of spherical harmonics
@@ -462,7 +463,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         b[..., :-1] *= lam_grad
         b[..., -1] *= lam_abs
         if mask is not None:
-            b[..., mask, :] = 0
+            b[mask.expand(b.shape[:-1]), :] = 0
         b = b.reshape([b.shape[0], *batch, -1])
         basis.append(b)
     basis = torch.cat(basis, 0)
@@ -578,6 +579,7 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
         (2d: `2*order - 1` bases, 3D: `2*order + 1` bases)
 
     """
+    backend.setdefault('dtype', torch.get_default_dtype())
     shape = list(shape)
     dim = len(shape)
     if dim not in (2, 3):

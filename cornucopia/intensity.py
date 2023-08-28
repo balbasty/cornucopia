@@ -195,7 +195,6 @@ class RandomMulTransform(RandomizedTransform):
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
         """
-        kwargs['value'] = Uniform.make(make_range(0, value))
         super().__init__(
             MulValueTransform,
             Uniform.make(make_range(0, value)),
@@ -246,8 +245,7 @@ class RandomAddMulTransform(RandomizedTransform):
         """
         super().__init__(
             AddMulTransform,
-            Uniform.make(make_range(slope)),
-            Uniform.make(make_range(offset)),
+            (Uniform.make(make_range(slope)), Uniform.make(make_range(offset))),
             shared=shared,
             **kwargs
         )
@@ -371,6 +369,7 @@ class BaseFieldTransform(NonFinalTransform):
         if self.slice is not None:
             slice = positive_index(self.slice, ndim)
             thickness = self.thickness or 1
+            thickness = min(thickness, x.shape[1+slice])
             nb_slices = int(math.ceil(x.shape[1+slice] / thickness))
 
             smallshape = ensure_list(self.shape, ndim)
@@ -812,7 +811,7 @@ class ZTransform(NonFinalTransform):
             opt = dict(dim=list(range(1, x.ndim)), keepdim=True)
         mu, sigma = x.mean(**opt), x.std(**opt)
         return AddMulTransform(
-            1/sigma, -mu.sigma, **self.get_prm()
+            1/sigma, -mu/sigma, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 

@@ -159,7 +159,8 @@ class IntraScanMotionTransform(NonFinalTransform):
                 y = x.new_empty([len(sens), *x.shape[1:]],
                                 dtype=torch.complex64)
             else:
-                y = torch.empty_like(x, dtype=torch.complex64)
+                ydtype = torch.complex64 if self.freq else x.dtype
+                y = torch.empty_like(x, dtype=ydtype)
                 sens = netsens = None
 
             x = x.movedim(self.axis, 1)

@@ -37,34 +37,6 @@ import math as pymath
 class OneHotTransform(NonFinalTransform):
     """Transform a volume of integer labels into a one-hot representation"""
 
-    class Final(FinalTransform):
-
-        def __init__(self, labels, keep_background=True, **kwargs):
-            super().__init__(**kwargs)
-            self.labels = labels
-            self.keep_background = keep_background
-
-        def apply(self, x):
-            if len(x) != 1:
-                raise ValueError('Cannot one-hot multi-channel tensors')
-            x = x[0]
-
-            lmax = len(self.labels) + self.keep_background
-            y = x.new_zeros([lmax, *x.shape], dtype=self.dtype)
-
-            for new_l, old_l in enumerate(self.labels):
-                new_l += self.keep_background
-                if isinstance(old_l, (list, tuple)):
-                    for old_l1 in old_l:
-                        y[new_l, x == old_l1] = 1
-                else:
-                    y[new_l, x == old_l] = 1
-
-            if self.keep_background:
-                y[0] = 1 - y[1:].sum(0)
-
-            return y
-
     def __init__(self, label_map=None, label_ref=None, keep_background=True,
                  dtype=None, **kwargs):
         """
@@ -122,8 +94,38 @@ class OneHotTransform(NonFinalTransform):
                 label_map = new_label_map
 
         return self.Final(
-            label_map, self.keep_background, **self.get_prm()
+            label_map, self.keep_background, self.dtype, **self.get_prm()
         ).make_final(x, max_depth-1)
+
+    class Final(FinalTransform):
+
+        def __init__(self, labels, keep_background=True, dtype=None,
+                     **kwargs):
+            super().__init__(**kwargs)
+            self.labels = labels
+            self.keep_background = keep_background
+            self.dtype = dtype
+
+        def apply(self, x):
+            if len(x) != 1:
+                raise ValueError('Cannot one-hot multi-channel tensors')
+            x = x[0]
+
+            lmax = len(self.labels) + self.keep_background
+            y = x.new_zeros([lmax, *x.shape], dtype=self.dtype)
+
+            for new_l, old_l in enumerate(self.labels):
+                new_l += self.keep_background
+                if isinstance(old_l, (list, tuple)):
+                    for old_l1 in old_l:
+                        y[new_l, x == old_l1] = 1
+                else:
+                    y[new_l, x == old_l] = 1
+
+            if self.keep_background:
+                y[0] = 1 - y[1:].sum(0)
+
+            return y
 
 
 class ArgMaxTransform(FinalTransform):
@@ -134,25 +136,6 @@ class ArgMaxTransform(FinalTransform):
 
 class RelabelTransform(NonFinalTransform):
     """Relabel a label map"""
-
-    class Final(FinalTransform):
-
-        def __init__(self, labels, **kwargs):
-            super().__init__(**kwargs)
-            self.labels = labels
-
-        def apply(self, x):
-            if self.labels is None:
-                return self.make_final(x)(x)
-            assert self.labels is not None
-            y = torch.zeros_like(x)
-            for out, inp in enumerate(self.labels):
-                out = out + 1
-                if not isinstance(inp, (list, tuple)):
-                    inp = [inp]
-                for inp1 in inp:
-                    y.masked_fill_(x == inp1, out)
-            return y
 
     def __init__(self, labels=None, **kwargs):
         """
@@ -185,9 +168,68 @@ class RelabelTransform(NonFinalTransform):
             labels, **self.get_prm()
         ).make_final(x, max_depth-1)
 
+    class Final(FinalTransform):
+
+        def __init__(self, labels, **kwargs):
+            super().__init__(**kwargs)
+            self.labels = labels
+
+        def apply(self, x):
+            if self.labels is None:
+                return self.make_final(x)(x)
+            assert self.labels is not None
+            y = torch.zeros_like(x)
+            for out, inp in enumerate(self.labels):
+                out = out + 1
+                if not isinstance(inp, (list, tuple)):
+                    inp = [inp]
+                for inp1 in inp:
+                    y.masked_fill_(x == inp1, out)
+            return y
+
 
 class GaussianMixtureTransform(NonFinalTransform):
     """Sample from a Gaussian mixture with known cluster assignment"""
+
+    def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
+                 dtype=None, *, shared=False, **kwargs):
+        """
+
+        Parameters
+        ----------
+        mu : list[float]
+            Mean of each cluster. Default: random in (0, 1).
+        sigma : list[float]
+            Standard deviation of each cluster. Default: `1/nb_classes`.
+        fwhm : float or list[float]
+            Width of a within-class smoothing kernel.
+        background : int
+            Index of background channel, which does not get filled.
+            Default: fill all classes.
+        dtype : torch.dtype
+            Output data type. Only used if input is an integer label map.
+        """
+        super().__init__(shared=shared, **kwargs)
+        self.mu = mu
+        self.sigma = sigma
+        self.fwhm = fwhm
+        self.background = background
+        self.dtype = dtype
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        nk = len(x) if x.is_floating_point() else x.unique().numel()
+        mu = self.mu
+        sigma = self.sigma
+        if mu is None:
+            mu = torch.rand([nk]).tolist()
+        if sigma is None:
+            sigma = [1 / nk] * nk
+        return self.Final(
+            mu, sigma, self.fwhm, self.background, self.dtype,
+            **self.get_prm()
+        ).make_final(x, max_depth-1)
 
     class Final(FinalTransform):
 
@@ -243,46 +285,6 @@ class GaussianMixtureTransform(NonFinalTransform):
                             y[mask] = y1
             return y
 
-    def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
-                 dtype=None, *, shared=False, **kwargs):
-        """
-
-        Parameters
-        ----------
-        mu : list[float]
-            Mean of each cluster. Default: random in (0, 1).
-        sigma : list[float]
-            Standard deviation of each cluster. Default: `1/nb_classes`.
-        fwhm : float or list[float]
-            Width of a within-class smoothing kernel.
-        background : int
-            Index of background channel, which does not get filled.
-            Default: fill all classes.
-        dtype : torch.dtype
-            Output data type. Only used if input is an integer label map.
-        """
-        super().__init__(shared=shared, **kwargs)
-        self.mu = mu
-        self.sigma = sigma
-        self.fwhm = fwhm
-        self.background = background
-        self.dtype = dtype
-
-    def make_final(self, x, max_depth=float('inf')):
-        if max_depth == 0:
-            return self
-        nk = len(x) if x.is_floating_point() else x.unique().numel()
-        mu = self.mu
-        sigma = self.sigma
-        if mu is None:
-            mu = torch.rand([nk]).tolist()
-        if sigma is None:
-            sigma = [1 / nk] * nk
-        return self.Final(
-            mu, sigma, self.fwhm, self.background, self.dtype,
-            **self.get_prm()
-        ).make_final(x, max_depth-1)
-
 
 class RandomGaussianMixtureTransform(NonFinalTransform):
     """
@@ -337,15 +339,6 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
 
 class SmoothLabelMap(NonFinalTransform):
     """Generate a random label map"""
-
-    class Final(FinalTransform):
-
-        def __init__(self, labelmap, **kwargs):
-            super().__init__(**kwargs)
-            self.labelmap = labelmap
-
-        def apply(self, x):
-            return self.labelmap.to(x.device)
 
     def __init__(self, nb_classes=2, shape=5, soft=False,
                  *, shared=False, **kwargs):
@@ -409,6 +402,15 @@ class SmoothLabelMap(NonFinalTransform):
                 b.masked_fill_(mask, k)
                 maxprob = torch.where(mask, b1, maxprob)
         return self.Final(b, **self.get_prm()).make_final(x, max_depth-1)
+
+    class Final(FinalTransform):
+
+        def __init__(self, labelmap, **kwargs):
+            super().__init__(**kwargs)
+            self.labelmap = labelmap
+
+        def apply(self, x):
+            return self.labelmap.to(x.device)
 
 
 class RandomSmoothLabelMap(NonFinalTransform):
@@ -790,6 +792,40 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
         therefore `channels` or `False`.
     """
 
+    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5,
+                 method='conv', shared=False, **kwargs):
+        """
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to erode
+        min_radius : [sequence of] int
+            Minimum erosion (if < 0) or dilation (if > 0) radius (per label)
+        max_radius : [sequence of] int
+            Maximum erosion (if < 0) or dilation (if > 0)  radius (per label)
+        shape : [sequence of] int
+            Number of nodes in the smooth radius map
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+            If 'conv', use the L1 distance computed using a series of
+            convolutions. The radius will be rounded to the nearest integer.
+            Otherwise, use the appropriate distance transform.
+        """
+        super().__init__(shared=shared, **kwargs)
+        self.labels = ensure_list(labels)
+        self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
+        self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
+        self.shape = shape
+        self.method = method
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        return self.Final(
+            AddFieldTransform(self.shape, shared=self.shared), self.labels,
+            self.min_radius, self.max_radius, self.method, **self.get_prm()
+        ).make_final(x, max_depth-1)
+
     class Final(FinalTransform):
 
         def __init__(self, fields, labels, min_radius=-30, max_radius=3,
@@ -860,40 +896,6 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
                     d = torch.where(mask, d1, d)
                     y.masked_fill_(mask, label)
             return prepare_output(dict(input=x, output=y), self.returns)
-
-    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5,
-                 method='conv', shared=False, **kwargs):
-        """
-        Parameters
-        ----------
-        labels : [sequence of] int
-            Labels to erode
-        min_radius : [sequence of] int
-            Minimum erosion (if < 0) or dilation (if > 0) radius (per label)
-        max_radius : [sequence of] int
-            Maximum erosion (if < 0) or dilation (if > 0)  radius (per label)
-        shape : [sequence of] int
-            Number of nodes in the smooth radius map
-        method : {'conv', 'l1', 'l2'}
-            Method to use to compute the distance map.
-            If 'conv', use the L1 distance computed using a series of
-            convolutions. The radius will be rounded to the nearest integer.
-            Otherwise, use the appropriate distance transform.
-        """
-        super().__init__(shared=shared, **kwargs)
-        self.labels = ensure_list(labels)
-        self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
-        self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
-        self.shape = shape
-        self.method = method
-
-    def make_final(self, x, max_depth=float('inf')):
-        if max_depth == 0:
-            return self
-        return self.Final(
-            AddFieldTransform(self.shape, shared=self.shared), self.labels,
-            self.min_radius, self.max_radius, self.method, **self.get_prm()
-        ).make_final(x, max_depth-1)
 
 
 class RandomSmoothMorphoLabelTransform(NonFinalTransform):
@@ -985,6 +987,43 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
 class SmoothShallowLabelTransform(NonFinalTransform):
     """Make labels "empty", with a border of a given size."""
 
+    def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
+                 background_labels=tuple(), method='l2',
+                 *, shared=False, **kwargs):
+        """
+        Parameters
+        ----------
+        labels : [sequence of] int
+            Labels to make shallow
+        max_width : [sequence of] int
+            Maximum border width (per label)
+        min_width : [sequence of] int
+            Minimum border width (per label)
+        shape : [sequence of] int
+            Number of nodes in the smooth width map
+        background_labels : [sequence of] int
+            Labels that are allowed to grow into the shallow space
+            (default: all that are not in labels)
+        method : {'l1', 'l2'}
+            Method to use to compute the distance map.
+        """
+        super().__init__(shared=shared, **kwargs)
+        self.labels = ensure_list(labels)
+        self.background_labels = ensure_list(background_labels)
+        self.shape = shape
+        self.min_width = ensure_list(min_width, min(len(self.labels), 1))
+        self.max_width = ensure_list(max_width, min(len(self.labels), 1))
+        self.method = method
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+        xform = AddFieldTransform(self.shape, shared=self.shared)
+        return self.Final(
+            xform, self.labels, self.max_width, self.min_width,
+            self.background_labels, self.method, **self.get_prm()
+        ).make_final(x, max_depth-1)
+
     class Final(FinalTransform):
 
         def __init__(self, fields, labels=tuple(), max_width=5, min_width=1,
@@ -1031,7 +1070,7 @@ class SmoothShallowLabelTransform(NonFinalTransform):
             if not x.dtype.is_floating_point:
                 dtype = torch.get_default_dtype()
             y = torch.zeros_like(x)
-            z = x.new_zeros([]).expand(x.shape)
+            z = x.new_zeros([], dtype=dtype).expand(x.shape)
             d = torch.full_like(x, float('inf'), dtype=dtype)
             m = torch.zeros_like(x, dtype=torch.bool)
             all_labels = x.unique()
@@ -1070,43 +1109,6 @@ class SmoothShallowLabelTransform(NonFinalTransform):
                     y.masked_fill_(mask, label)
 
             return prepare_output(dict(input=x, output=y), self.returns)
-
-    def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
-                 background_labels=tuple(), method='l2',
-                 *, shared=False, **kwargs):
-        """
-        Parameters
-        ----------
-        labels : [sequence of] int
-            Labels to make shallow
-        max_width : [sequence of] int
-            Maximum border width (per label)
-        min_width : [sequence of] int
-            Minimum border width (per label)
-        shape : [sequence of] int
-            Number of nodes in the smooth width map
-        background_labels : [sequence of] int
-            Labels that are allowed to grow into the shallow space
-            (default: all that are not in labels)
-        method : {'l1', 'l2'}
-            Method to use to compute the distance map.
-        """
-        super().__init__(shared=shared, **kwargs)
-        self.labels = ensure_list(labels)
-        self.background_labels = ensure_list(background_labels)
-        self.shape = shape
-        self.min_width = ensure_list(min_width, min(len(self.labels), 1))
-        self.max_width = ensure_list(max_width, min(len(self.labels), 1))
-        self.method = method
-
-    def make_final(self, x, max_depth=float('inf')):
-        if max_depth == 0:
-            return self
-        xform = AddFieldTransform(self.shape, shared=self.shared)
-        return self.Final(
-            xform, self.labels, self.max_width, self.min_width,
-            self.background_labels, self.method, **self.get_prm()
-        ).make_final(x, max_depth-1)
 
 
 class RandomSmoothShallowLabelTransform(NonFinalTransform):
@@ -1148,6 +1150,7 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
         self.shape = RandInt.make(make_range(2, shape))
         self.background_labels = background_labels
         self.method = method
+        self.shared_fields = shared_fields
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -1157,7 +1160,7 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
 
         n = None
         labels = self.labels
-        min_width, max_width = self.min_width = self.max_width
+        min_width, max_width = self.min_width, self.max_width
         if isinstance(labels, float):
             prob = labels
             labels = x.unique().tolist()
@@ -1382,7 +1385,7 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
         if isinstance(max_radius, (list, tuple)):
             min_radius, max_radius = max_radius
         self.dilate = SmoothMorphoLabelTransform(
-            min_radius=min_radius, max_radius=max_radius, 
+            min_radius=min_radius, max_radius=max_radius,
             shape=shape, method=method)
         self.radius = (
           (0, radius) if not isinstance(radius, (list, tuple)) else

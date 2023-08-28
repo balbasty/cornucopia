@@ -107,26 +107,17 @@ class ContrastMixtureTransform(NonFinalTransform):
         nk, nc = old_mu.shape
         old_mu_min = old_mu.min(0).values
         old_mu_max = old_mu.max(0).values
-        old_sigma_min = old_sigma.diagonal(0, -1, -2).min(0).values.sqrt()
-        old_sigma_max = old_sigma.diagonal(0, -1, -2).max(0).values.sqrt()
+        old_sigma_diag = old_sigma.diagonal(0, -1, -2)
+        old_sigma_min = old_sigma_diag.min(0).values.sqrt()
+        old_sigma_max = old_sigma_diag.max(0).values.sqrt()
 
-        mu = []
-        for _ in range(nc):
-            mu1 = (old_mu_max - old_mu_min) * torch.rand([nk], **backend)
-            mu1 += old_mu_min
-            mu.append(mu1)
-        mu = torch.stack(mu, -1)
+        mu = torch.rand_like(
+            old_mu).mul_(old_mu_max - old_mu_min).add_(old_mu_min)
+        sigma = torch.rand_like(
+            old_sigma_diag).mul_(old_sigma_max - old_sigma_min).add_(old_sigma_min)
+        corr = torch.rand([len(old_mu), nc*(nc-1)//2], **backend).mul_(0.5)
 
-        sigma = []
-        for _ in range(nc):
-            s1 = (old_sigma_max - old_sigma_min) * torch.rand([nk], **backend)
-            s1 += old_sigma_min
-            sigma.append(s1)
-        sigma = torch.stack(sigma, -1)
-
-        corr = torch.rand([len(old_mu), nc*(nc-1)//2], **backend)
-
-        fullsigma = torch.eye(nc, **backend)
+        fullsigma = torch.eye(nc, **backend).expand([nk, nc, nc]).clone()
         cnt = 0
         for i in range(nc):
             for j in range(i+1, nc):
@@ -157,9 +148,10 @@ class ContrastLookupTransform(NonFinalTransform):
         def apply(self, x):
             edges, mu = self.edges.to(x), self.mu.to(x)
             mu0 = (edges[:-1] + edges[1:]) / 2
+            nk = len(mu)
 
             new_x = x.clone()
-            for k in range(self.nk):
+            for k in range(nk):
                 mask = (edges[k] <= x) & (x < edges[k+1])
                 new_x[mask] += mu[k] - mu0[k]
             return new_x

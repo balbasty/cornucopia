@@ -1,7 +1,12 @@
-__all__ = ['GaussianNoiseTransform', 'RandomGaussianNoiseTransform',
-           'ChiNoiseTransform', 'RandomChiNoiseTransform',
-           'GammaNoiseTransform', 'RandomGammaNoiseTransform',
-           'GFactorTransform']
+__all__ = [
+    'GaussianNoiseTransform',
+    'RandomGaussianNoiseTransform',
+    'ChiNoiseTransform',
+    'RandomChiNoiseTransform',
+    'GammaNoiseTransform',
+    'RandomGammaNoiseTransform',
+    'GFactorTransform',
+]
 
 import torch
 import math
@@ -17,8 +22,10 @@ class GaussianNoiseTransform(NonFinalTransform):
     """Additive Gaussian noise"""
 
     class Final(AddValueTransform):
+
         def __init__(self, value, **kwargs):
             super().__init__(value, value_name='noise', **kwargs)
+            self.Parent = GaussianNoiseTransform
 
         @property
         def noise(self):
@@ -108,6 +115,7 @@ class ChiNoiseTransform(NonFinalTransform):
         def __init__(self, noise, **kwargs):
             super().__init__(**kwargs)
             self.noise = noise
+            self.Parent = ChiNoiseTransform
 
         def apply(self, x):
             noise = self.noise.to(x)
@@ -215,6 +223,7 @@ class GFactorTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.noisetrf = noisetrf
             self.gfactor = gfactor
+            self.Parent = GFactorTransform
 
         @property
         def is_final(self):
@@ -230,7 +239,8 @@ class GFactorTransform(NonFinalTransform):
 
         def apply(self, x):
             noisetrf = self.noisetrf.make_final(x)
-            noise = noisetrf.noise.to(x)
+            with ctx.returns(noisetrf, 'noise'):
+                noise = noisetrf(x)
             with ctx.returns(self.gfactor, ['output', 'field']):
                 scalednoise, gfactor = self.gfactor(noise)
             self.noisetrf.noise = scalednoise
@@ -286,6 +296,7 @@ class GammaNoiseTransform(NonFinalTransform):
     class Final(MulValueTransform):
         def __init__(self, value, **kwargs):
             super().__init__(value, value_name='noise', **kwargs)
+            self.Parent = GammaNoiseTransform
 
         @property
         def noise(self):

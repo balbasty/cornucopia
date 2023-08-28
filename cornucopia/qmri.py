@@ -7,6 +7,7 @@ __all__ = [
     'RandomSusceptibilityMixtureTransform',
     'SusceptibilityToFieldmapTransform',
     'ShimTransform',
+    'OptimalShimTransform',
     'RandomShimTransform',
     'HertzToPhaseTransform',
     'GradientEchoTransform',
@@ -21,7 +22,7 @@ from .labels import GaussianMixtureTransform
 from .intensity import (
     RandomMulFieldTransform, AddValueTransform, MulValueTransform
 )
-from .random import Sampler, Uniform, make_range
+from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import ensure_list, make_vector
 from .utils import b0
 
@@ -157,8 +158,8 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
     Convert a susceptibiity map (in ppm) into a field map (in Hz)
     """
 
-    def __int__(self, axis=-1, field_strength=3, larmor=42.576E6,
-                s0=0.4, s1=-9.5, voxel_size=1, mask_air=False, **kwargs):
+    def __init__(self, axis=-1, field_strength=3, larmor=42.576E6,
+                 s0=0.4, s1=-9.5, voxel_size=1, mask_air=False, **kwargs):
         """
 
         Parameters
@@ -296,7 +297,7 @@ class OptimalShimTransform(NonFinalTransform):
                        lam_abs=self.lam_abs, lam_grad=self.lam_grad,
                        returns='correction').neg_()
         return AddValueTransform(
-            shim, value='shim', **self.get_prm()
+            shim, value_name='shim', **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -324,7 +325,7 @@ class RandomShimTransform(NonFinalTransform):
         """
         super().__init__(shared=shared, **kwargs)
         self.coefficients = Uniform.make(make_range(0, coefficients))
-        self.max_order = Uniform.make(make_range(0, max_order))
+        self.max_order = RandInt.make(make_range(0, max_order))
 
     def make_final(self, x, max_depth=float('inf')):
         ndim = x.ndim - 1
@@ -363,7 +364,7 @@ class RandomShimTransform(NonFinalTransform):
 class HertzToPhaseTransform(FinalTransform):
     """Converts a ΔB0 field (in Hz) into a Phase shift field Δφ (in rad)"""
 
-    def __int__(self, te, **kwargs):
+    def __init__(self, te=0, **kwargs):
         """
 
         Parameters
@@ -405,7 +406,7 @@ class GradientEchoTransform(FinalTransform):
             Apparent transverse relaxation time (T2*), in sec.
             If None, the third input channel is T2*.
         b1 : float, optional
-            Transmit efficiency (B1+).
+            Transmit efficiency (B1+). `1` means 100% efficiency.
             If None, the fourth input channel is B1+.
         mt : float, optional
             Magnetization transfer saturation (MTsat).
@@ -453,6 +454,19 @@ class GradientEchoTransform(FinalTransform):
         return pd, t1, t2, b1, mt
 
     def apply(self, x):
+        """
+        Parameters
+        ----------
+        x : (K, *spatial)
+            Parameters that were not set during class instantiation
+            (i.e., whose value was `None`), in the order:
+
+                - pd: Proton density
+                - t1: Longitudinal relaxation time (T1), in sec.
+                - t2: Apparent transverse relaxation time (T2*), in sec.
+                - b1: Transmit efficiency (B1+). `1` means 100% efficiency.
+                - mt: Magnetization transfer saturation (MTsat).
+        """
         pd, t1, t2, b1, mt = self.get_parameters(x)
         alpha = (math.pi * self.alpha / 180) * b1
         if torch.is_tensor(alpha):
@@ -477,35 +491,6 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
     """
     Generate a Spoiled Gradient Echo image from synthetic PD/T1/T2 maps.
     """
-
-    class GREParameters(FinalTransform):
-        """Store parameter maps"""
-        def __init__(self, param, **kwargs):
-            super().__init__(**kwargs)
-            self.param = param
-
-        def apply(self, x):
-            dtype = x.dtype
-            if not dtype.is_floating_point:
-                dtype = torch.get_default_dtype()
-            return self.param.to(x.device, dtype)
-
-    class Final(FinalTransform):
-        """Apply GRE forward model to parameters, then mask"""
-        def __init__(self, prm, fwd, mask, **kwargs):
-            super().__init__(**kwargs)
-            self.prm = prm
-            self.fwd = fwd
-            self.mask = mask
-
-        def apply(self, x):
-            y = self.prm(x)
-            y = self.fwd(y)
-
-            out = returns_find('output', y, self.fwd.returns)
-            if out is not None:
-                out.copy_(self.mask(out))
-            return y
 
     def __init__(self, tr=50e-3, te=50e-3, alpha=90,
                  pd=1, t1=10, t2=100, mt=0.1,
@@ -636,3 +621,32 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
                                   **self.get_prm()),
             MulValueTransform(mask),
         )
+
+    class GREParameters(FinalTransform):
+        """Store parameter maps"""
+        def __init__(self, param, **kwargs):
+            super().__init__(**kwargs)
+            self.param = param
+
+        def apply(self, x):
+            dtype = x.dtype
+            if not dtype.is_floating_point:
+                dtype = torch.get_default_dtype()
+            return self.param.to(x.device, dtype)
+
+    class Final(FinalTransform):
+        """Apply GRE forward model to parameters, then mask"""
+        def __init__(self, prm, fwd, mask, **kwargs):
+            super().__init__(**kwargs)
+            self.prm = prm
+            self.fwd = fwd
+            self.mask = mask
+
+        def apply(self, x):
+            y = self.prm(x)
+            y = self.fwd(y)
+
+            out = returns_find('output', y, self.fwd.returns)
+            if out is not None:
+                out.copy_(self.mask(out))
+            return y

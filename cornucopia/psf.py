@@ -1,5 +1,5 @@
 """
-This module contains transforms that modify the resolution and/or 
+This module contains transforms that modify the resolution and/or
 point spread function of an image.
 """
 __all__ = [

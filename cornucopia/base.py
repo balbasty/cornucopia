@@ -11,7 +11,7 @@ from .random import Sampler
 from .utils.py import ensure_list, cumsum
 from .baseutils import (
     Args, Kwargs, ArgsAndKwargs, Returned, VirtualTensor,
-    get_first_element, prepare_output, unset,
+    get_first_element, prepare_output, unset, recursive_cat,
 )
 
 
@@ -328,11 +328,12 @@ class SharedMixin:
         return _fallback(*a, **k)
 
     def make_per_channel(self, x, max_depth=float('inf'), *args, **kwargs):
-        return PerChannelTransform(
-            [self.make_final(x[i:i+1], max_depth, *args, **kwargs)
-                for i in range(len(x))],
-            **self.get_prm()
-        ).make_final(x, max_depth-1)
+        prm = dict(self.get_prm())
+        prm.pop('shared', None)
+        return PerChannelTransform([
+            self.make_final(x[i:i+1], max_depth, *args, **kwargs)
+            for i in range(len(x))
+        ], **prm).make_final(x, max_depth-1)
 
 
 class NonFinalTransform(SharedMixin, Transform):
@@ -516,18 +517,26 @@ class PerChannelTransform(SpecialMixin, Transform):
         if max_depth == 0:
             return self
         trf = []
-        for i, t in enumerate(self):
+        for i, t in enumerate(self.transforms):
             t = t.make_final(x[i:i+1], max_depth=max_depth-1)
             trf.append(t)
-        trf = PerChannelTransform(trf, **self.get_prm())
+        prm = dict(self.get_prm())
+        prm.pop('shared', None)
+        trf = PerChannelTransform(trf, **prm)
         return trf
 
     def apply(self, x):
-        return torch.stack([t(x[i:i+1]) for i, t in enumerate(self)])
+        results = []
+        for i, t in enumerate(self.transforms):
+            with ReturningTransform(t, self.returns), \
+                 IncludeKeysTransform(t, self.include), \
+                 ExcludeKeysTransform(t, self.exclude):
+                results.append(t(x[i:i+1]))
+        return Returned(recursive_cat(results))
 
     @property
     def is_final(self):
-        return all(t.is_final for t in self)
+        return all(t.is_final for t in self.transforms)
 
 
 class MaybeTransform(SpecialMixin, SharedMixin, Transform):

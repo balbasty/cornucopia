@@ -131,8 +131,8 @@ class ElasticTransform(NonFinalTransform):
                         'bilinear' if len(fullshape) == 2 else
                         'linear')
                 flow = interpolate(
-                    controls[None], fullshape, mode=mode, align_corners=True
-                )[0]
+                    controls, fullshape, mode=mode, align_corners=True
+                )
             else:
                 flow = interpol.resize(
                     controls, shape=fullshape, interpolation=self.order,
@@ -707,7 +707,7 @@ class AffineElasticTransform(NonFinalTransform):
         if self.patch:
             # 1.b) randomly sample patch location and add offset
             patch_origin = [random.randint(0, s-p)
-                            for s, p in zip(fullshape, self.patch)]
+                            for s, p in zip(fullshape, patchshape)]
             flow += torch.as_tensor(patch_origin, **backend)
 
         # 2.) apply affine transform
@@ -1059,18 +1059,18 @@ class SlicewiseAffineTransform(NonFinalTransform):
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
 
-        rotations = [
+        rotations = ensure_list([
             ensure_list(r, ndim * (ndim - 1) // 2) for r in self.rotations
-        ]
-        shears = [
+        ], nb_slice)
+        shears = ensure_list([
             ensure_list(s, ndim * (ndim - 1) // 2) for s in self.shears
-        ]
-        translations = [
+        ], nb_slice)
+        translations = ensure_list([
             ensure_list(t, ndim) for t in self.translations
-        ]
-        zooms = [
+        ], nb_slice)
+        zooms = ensure_list([
             ensure_list(z, ndim) for z in self.zooms
-        ]
+        ], nb_slice)
 
         bulk_rotations = ensure_list(
             self.bulk_rotations, ndim * (ndim - 1) // 2
@@ -1119,6 +1119,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
         F = torch.eye(ndim+1, **backend)
         F[:ndim, -1] = -offsets
         Z = E.clone()
+        print(zooms.shape, Z.shape)
         Z.diagonal(0, -1, -2)[:, :-1].copy_(1 + zooms)
         T = E.clone()
         T[:, :ndim, -1] = translations
@@ -1437,12 +1438,14 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             cubic interpolation of motion parameters
             (nb_nodes, nprm) -> (nb_slices, nprm)
             """
-            if len(x) in [1, nb_slices]:
+            if len(x) == nb_slices:
+                return x
+            if len(x) == 1:
                 return x.expand([nb_slices, x.shape[1]]).clone()
             x = torch.as_tensor(x, dtype=torch.float32).T  # [D, N]
             x = interpol.resize(x, shape=[nb_slices],
-                                interpolation=1, bound='replicate',
-                                prefilter=False).T  # [S, D]
+                                interpolation=3, bound='replicate',
+                                prefilter=True).T  # [S, D]
             return x
 
         def mangle_shots(x):
