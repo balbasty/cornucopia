@@ -35,4 +35,4 @@ runs:
       shell: bash -el {0}
       run: |
         pip install .
-        pytest pytest --pyargs cornucopia
+        pytest --pyargs cornucopia
