@@ -1,7 +1,7 @@
 <picture align="center">
   <source media="(prefers-color-scheme: dark)" srcset="docs/icons/cornucopia_lightorange.svg">
   <source media="(prefers-color-scheme: light)"  srcset="docs/icons/cornucopia_orange.svg">
-  <img alt="Cornucopia logo" src="docs/icons/cornucopia_orange.svg">
+  <img alt="Cornucopia logo" src="https://github.com/balbasty/cornucopia/raw/main/docs/icons/cornucopia_orange.svg">
 </picture>
 
 The `cornucopia` package provides a generic framework for preprocessing,
