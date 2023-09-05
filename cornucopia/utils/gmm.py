@@ -37,6 +37,7 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
 
     nc, *shape = x.shape
     x = xfull = x.reshape([nc, -1])
+    device = x.device
 
     # --- use random subset ---
     x = x[:, (x != 0).all(0)]
@@ -65,10 +66,10 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
         fwhm = (mx[c] - mn[c]) / (nk+1)
         mu.append(centers)
         sigma.append(fwhm/2.355)
-    mu = torch.stack(mu, -1)
-    sigma = torch.stack(sigma).expand([nk, nc])
+    mu = torch.stack(mu, -1).to(device)
+    sigma = torch.stack(sigma).expand([nk, nc]).to(device)
     sigma = torch.diag_embed(sigma)
-    pi = mu.new_ones([nk]).div_(nk)
+    pi = mu.new_ones([nk], device=device).div_(nk)
 
     # --- initialize responsibilities ---
     z = (x - mu[:, :, None]).div_(sigma.diagonal(0, -1, -2)[:, :, None])
