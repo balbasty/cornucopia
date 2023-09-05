@@ -40,6 +40,9 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
     dtype = x.dtype
     device = x.device
 
+    # --- add some noise to image --> stabilizes fit ---
+    x = x + (0.001*x.max())*torch.randn_like(x)
+
     # --- use random subset ---
     x = x[:, (x != 0).all(0)]
     nv0 = x.shape[-1]
