@@ -61,15 +61,15 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
     mn, mx = x.min(-1).values, x.max(-1).values
     mu, sigma = [], []
     for c in range(nc):
-        edges = torch.linspace(mn[c], mx[c], nk+1)
+        edges = torch.linspace(mn[c], mx[c], nk+1, device=device)
         centers = (edges[1:] + edges[:-1]) / 2
         fwhm = (mx[c] - mn[c]) / (nk+1)
         mu.append(centers)
         sigma.append(fwhm/2.355)
-    mu = torch.stack(mu, -1).to(device)
-    sigma = torch.stack(sigma).expand([nk, nc]).to(device)
+    mu = torch.stack(mu, -1)
+    sigma = torch.stack(sigma).expand([nk, nc])
     sigma = torch.diag_embed(sigma)
-    pi = mu.new_ones([nk], device=device).div_(nk)
+    pi = mu.new_ones([nk]).div_(nk)
 
     # --- initialize responsibilities ---
     z = (x - mu[:, :, None]).div_(sigma.diagonal(0, -1, -2)[:, :, None])
