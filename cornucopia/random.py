@@ -269,7 +269,7 @@ class RandKFrom(Sampler):
             random.shuffle(range)
             return range[:k]
         else:
-            index = RandInt(len(self.range))(k)
+            index = RandInt(len(self.range)-1)(k)
             return [self.range[i] for i in index]
 
 
