@@ -58,7 +58,7 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
     # --- wishart prior ---
     x0, x1, x2 = suffstat(x)
     scale = x2 / x0 - (x1 / x0).square()
-    df = nc * 0.1
+    df = nc * 1.0
     wishart = (scale.diag().diag(), df)
 
     # --- initialize clusters ---
