@@ -403,7 +403,8 @@ class SynthFromLabelTransform(NonFinalTransform):
         Other Parameters
         ----------------
         translations : float or Sampler or False
-            Distribution from which random translations (in voxels) are sampled.
+            Distribution from which random translations (in percentage of 
+            field-of-view) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
         rotation : float or Sampler or False
             Distribution from which random rotations (in degree) are sampled.
