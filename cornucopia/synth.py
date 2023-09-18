@@ -356,6 +356,7 @@ class SynthFromLabelTransform(NonFinalTransform):
                  elastic=0.05,
                  elastic_nodes=10,
                  elastic_steps=0,
+                 bound='border',
                  gmm_fwhm=10,
                  bias=7,
                  bias_strength=0.5,
@@ -431,7 +432,9 @@ class SynthFromLabelTransform(NonFinalTransform):
             diffeomorphic (one-to-one and onto).
             If 0, the field is not integrated, which is faster but may
             result in image foldings.
-
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode when sampling outside the field-of-view.
+            
         Other Parameters
         ----------------
         gmm_fwhm : float or Sampler or False
@@ -506,6 +509,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             zooms=zooms or 0,
             patch=patch,
             steps=elastic_steps,
+            bound=bound,
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
