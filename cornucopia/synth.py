@@ -349,6 +349,7 @@ class SynthFromLabelTransform(NonFinalTransform):
                  synth_labels=None,
                  synth_labels_maybe=None,
                  target_labels=None,
+                 translations=0.1,
                  rotation=15,
                  shears=0.012,
                  zooms=0.15,
@@ -401,6 +402,10 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
+        translations : float or Sampler or False
+            Distribution from which random translations (in percentage of 
+            field-of-view) are sampled.
+            If a `float`, sample from `Uniform(-value, value)`.
         rotation : float or Sampler or False
             Distribution from which random rotations (in degree) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
@@ -495,6 +500,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             elastic or 0,
             elastic_nodes,
             order=order,
+            translations=translations or 0,
             rotations=rotation or 0,
             shears=shears or 0,
             zooms=zooms or 0,
