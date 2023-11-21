@@ -447,7 +447,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        x = VirtualTensor.from_any(x, compute_stats=True)
+        # x = VirtualTensor.from_any(x, compute_stats=True)
         trf = []
         for t in self:
             t = t.make_final(x, max_depth=max_depth-1)
