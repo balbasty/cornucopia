@@ -329,7 +329,7 @@ class SynthFromLabelTransform(NonFinalTransform):
                 **self.get_prm(),
             ).make_final(x, max_depth-1)
 
-        def apply(self, lab):
+        def xform(self, lab):
             lab = self.load(lab)
             dfm = self.deform(lab)
             gen = self.preproc(dfm)
@@ -404,7 +404,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         Other Parameters
         ----------------
         translations : float or Sampler or False
-            Distribution from which random translations (in percentage of 
+            Distribution from which random translations (in percentage of
             field-of-view) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
         rotation : float or Sampler or False
@@ -434,7 +434,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             result in image foldings.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode when sampling outside the field-of-view.
-            
+
         Other Parameters
         ----------------
         gmm_fwhm : float or Sampler or False

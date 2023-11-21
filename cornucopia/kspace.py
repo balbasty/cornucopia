@@ -26,7 +26,7 @@ class ArrayCoilTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.sens = sens
 
-        def apply(self, x):
+        def xform(self, x):
             sens = self.sens.to(x.device)
             uncombined = x * sens
             netsens = sens.abs().square().sum(0).sqrt_()[None]
@@ -120,7 +120,7 @@ class ArrayCoilTransform(NonFinalTransform):
 class SumOfSquaresTransform(FinalTransform):
     """Compute the sum-of-squares across coils/channels"""
 
-    def apply(self, x):
+    def xform(self, x):
         return x.abs().square_().sum(0, keepdim=True).sqrt_()
 
 
@@ -146,7 +146,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             self.axis = axis
             self.freq = freq
 
-        def apply(self, x):
+        def xform(self, x):
             motions = self.motion
             patterns = self.patterns.to(x.device)
 

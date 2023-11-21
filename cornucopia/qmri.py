@@ -192,7 +192,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         self.mask_air = mask_air
         self.voxel_size = voxel_size
 
-    def apply(self, x):
+    def xform(self, x):
         axis = 1 + ((x.ndim - 1 + self.axis) if self.axis < 0 else self.axis)
         field = b0.chi_to_fieldmap(x, zdim=axis, dim=x.ndim-1,
                                    s0=self.s0, s1=self.s1, vx=self.voxel_size)
@@ -226,7 +226,7 @@ class ShimTransform(FinalTransform):
         self.quadratic = quadratic
         self.isocenter = isocenter
 
-    def apply(self, x):
+    def xform(self, x):
         ndim = x.ndim - 1
         order = 1 if self.quadratic is None else 1
         nb_lin = 3 if ndim == 3 else 1
@@ -376,7 +376,7 @@ class HertzToPhaseTransform(FinalTransform):
         super().__init__(**kwargs)
         self.te = te
 
-    def apply(self, x):
+    def xform(self, x):
         return (2 * math.pi * self.te) * x
 
 
@@ -453,7 +453,7 @@ class GradientEchoTransform(FinalTransform):
 
         return pd, t1, t2, b1, mt
 
-    def apply(self, x):
+    def xform(self, x):
         """
         Parameters
         ----------
@@ -628,7 +628,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.param = param
 
-        def apply(self, x):
+        def xform(self, x):
             dtype = x.dtype
             if not dtype.is_floating_point:
                 dtype = torch.get_default_dtype()
@@ -642,7 +642,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             self.fwd = fwd
             self.mask = mask
 
-        def apply(self, x):
+        def xform(self, x):
             y = self.prm(x)
             y = self.fwd(y)
 

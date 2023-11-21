@@ -40,7 +40,7 @@ class SmoothTransform(FinalTransform):
         super().__init__(**kwargs)
         self.fwhm = fwhm
 
-    def apply(self, x):
+    def xform(self, x):
         return smoothnd(x, fwhm=ensure_list(self.fwhm, x.dim()-1))
 
 
@@ -81,7 +81,7 @@ class LowResSliceTransform(NonFinalTransform):
             self.thickness = thickness
             self.noise = noise
 
-        def apply(self, x):
+        def xform(self, x):
             ndim = x.dim() - 1
             mode = ('trilinear' if ndim == 3 else
                     'bilinear' if ndim == 2 else
@@ -231,7 +231,7 @@ class LowResTransform(NonFinalTransform):
             self.resolution = resolution
             self.noise = noise
 
-        def apply(self, x):
+        def xform(self, x):
             ndim = x.dim() - 1
             mode = ('trilinear' if ndim == 3 else
                     'bilinear' if ndim == 2 else
