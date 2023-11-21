@@ -24,7 +24,7 @@ def get_first_element(x, include=None, exclude=None, types=None):
                 if ok:
                     return v, True
             return None, False
-        if torch.is_tensor(x) or isinstance(x, types):
+        if torch.is_tensor(x) or (types and isinstance(x, types)):
             return x, True
         return x, False
 
