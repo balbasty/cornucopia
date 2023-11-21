@@ -30,7 +30,7 @@ def connectivity_kernel(dim, conn=1, **backend):
     return kernel
 
 
-@torch.jit.script
+# @torch.jit.script
 def xor(x, y):
     return (x + y) == 1
 

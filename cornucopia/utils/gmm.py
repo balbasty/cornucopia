@@ -37,6 +37,11 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
 
     nc, *shape = x.shape
     x = xfull = x.reshape([nc, -1])
+    dtype = x.dtype
+    device = x.device
+
+    # --- add some noise to image --> stabilizes fit ---
+    x = x + (0.001*x.max())*torch.randn_like(x)
 
     # --- use random subset ---
     x = x[:, (x != 0).all(0)]
@@ -53,14 +58,14 @@ def fit_gmm(x, nk=5, max_iter=10, tol=1e-4, max_n='auto'):
     # --- wishart prior ---
     x0, x1, x2 = suffstat(x)
     scale = x2 / x0 - (x1 / x0).square()
-    df = nc * 0.1
-    wishart = (scale.diag(), df)
+    df = nc * 1.0
+    wishart = (scale.diag().diag(), df)
 
     # --- initialize clusters ---
     mn, mx = x.min(-1).values, x.max(-1).values
     mu, sigma = [], []
     for c in range(nc):
-        edges = torch.linspace(mn[c], mx[c], nk+1)
+        edges = torch.linspace(mn[c], mx[c], nk+1, dtype=dtype, device=device)
         centers = (edges[1:] + edges[:-1]) / 2
         fwhm = (mx[c] - mn[c]) / (nk+1)
         mu.append(centers)
@@ -116,7 +121,7 @@ def suffstat(x, z=None):
     else:
         x0 = z.sum(-1)  # [nk]
         x1 = torch.matmul(z, x.T)  # [nk, nc]
-        x2 = torch.matmul(x.T[:, None, :], x.T[:, :, None]).movedim(0, -1)
+        x2 = torch.matmul(x.T[:, :, None], x.T[:, None, :]).movedim(0, -1)
         x2 = torch.matmul(x2, z.T).movedim(-1, 0)  # [nk, nc, nc]
     return x0, x1, x2
 
@@ -135,7 +140,7 @@ def params(x0, x1, x2, wishart=None):
     else:
         scale, df0 = wishart
         sigma = df0 * scale + x2
-        sigma -= torch.matmul(x1[:, None, :], x1[:, :, None]) / x0[:, None, None]
+        sigma -= torch.matmul(x1[:, :, None,], x1[:, None, :]) / x0[:, None, None]
         sigma /= (x0[:, None, None] + df0)
 
     # --- update proportion ----

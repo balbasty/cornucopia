@@ -8,15 +8,33 @@ __all__ = [
 import torch
 import math
 import random
-from .base import Transform, prepare_output
-from .intensity import MultFieldTransform
+from .base import NonFinalTransform, FinalTransform
+from .baseutils import prepare_output, return_requires
+from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
-from .random import Sampler, Fixed
+from .random import Fixed
 from .utils.py import cartesian_grid
+from . import ctx
 
 
-class ArrayCoilTransform(Transform):
+class ArrayCoilTransform(NonFinalTransform):
     """Generate and apply random coil sensitivities (real or complex)"""
+
+    class FinalArrayCoilTransform(FinalTransform):
+
+        def __init__(self, sens, **kwargs):
+            super().__init__(**kwargs)
+            self.sens = sens
+
+        def apply(self, x):
+            sens = self.sens.to(x.device)
+            uncombined = x * sens
+            netsens = sens.abs().square().sum(0).sqrt_()[None]
+            sos = uncombined.abs().square().sum(0).sqrt_()[None]
+            return prepare_output(
+                dict(input=x, sos=sos, output=uncombined,
+                     uncombined=uncombined, netsens=netsens, sens=sens),
+                self.returns)
 
     def __init__(self, ncoils=8, fwhm=0.5, diameter=0.8, jitter=0.01,
                  unit='fov', shape=4, sos=True, *, shared=True, **kwargs):
@@ -36,6 +54,9 @@ class ArrayCoilTransform(Transform):
             Unit of `fwhm`, `diameter`, `jitter`
         shape : int
             Number of control points for the underlying smooth component.
+
+        Other Parameters
+        ------------------
         returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
             Default is 'uncombined'.
 
@@ -43,8 +64,10 @@ class ArrayCoilTransform(Transform):
             - 'uncombined': Uncombined (complex) coil images
             - 'sens': Uncombined (complex) coil sensitivities
             - 'netsens': Net (magnitude) coil sensitivity
-        shared : bool or {'channels', 'tensors'}
-        """
+
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Whether to share the sensitivities across channels/tensors
+        """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.ncoils = ncoils
         self.fwhm = fwhm
@@ -54,16 +77,20 @@ class ArrayCoilTransform(Transform):
         self.shape = shape
         self.sos = sos
 
-    def get_parameters(self, x):
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
 
         ndim = x.dim() - 1
         backend = dict(dtype=x.dtype, device=x.device)
-        fake_x = torch.zeros([], **backend).expand([2*self.ncoils, *x.shape[1:]])
+        fake_x = torch.ones([], **backend)
+        fake_x = fake_x.expand([2*self.ncoils, *x.shape[1:]])
 
-        smooth_bias = MultFieldTransform(shape=self.shape, vmin=-1, vmax=1)
-        smooth_bias = smooth_bias.get_parameters(fake_x)
+        smooth_bias = MulFieldTransform(shape=self.shape, vmin=-1, vmax=1)
+        smooth_bias = smooth_bias(fake_x)
         phase = smooth_bias[::2].atan2(smooth_bias[1::2])
-        magnitude = (smooth_bias[::2].square() + smooth_bias[1::2].square()).sqrt_()
+        magnitude = (smooth_bias[0::2].square() +
+                     smooth_bias[1::2].square()).sqrt_()
 
         fov = torch.as_tensor(x.shape[1:], **backend)
         grid = torch.stack(cartesian_grid(x.shape[1:], **backend), -1)
@@ -83,27 +110,106 @@ class ArrayCoilTransform(Transform):
                 loc *= fov
             exp_bias = (grid-loc).square_().mul_(lam).sum(-1).mul_(-0.5).exp_()
             magnitude[k] *= exp_bias
-        return (1j * phase).exp_().mul_(magnitude)
 
-    def apply_transform(self, x, parameters):
-        uncombined = x * parameters
-        netsens = parameters.abs().square().sum(0).sqrt_()[None]
-        sos = uncombined.abs().square().sum(0).sqrt_()[None]
-        return prepare_output(
-            dict(input=x, sos=sos, output=uncombined, uncombined=uncombined,
-                 netsens=netsens, sens=parameters),
-            self.returns)
+        sens = (1j * phase).exp_().mul_(magnitude)
+        return self.FinalArrayCoilTransform(
+            sens, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
-class SumOfSquaresTransform(Transform):
+class SumOfSquaresTransform(FinalTransform):
     """Compute the sum-of-squares across coils/channels"""
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         return x.abs().square_().sum(0, keepdim=True).sqrt_()
 
 
-class IntraScanMotionTransform(Transform):
+class IntraScanMotionTransform(NonFinalTransform):
     """Model intra-scan motion"""
+
+    class FinalIntraScanMotionTransform(FinalTransform):
+
+        def __init__(self, motion, patterns, sens=None, axis=-1, freq=False,
+                     **kwargs):
+            """
+            Parameters
+            ----------
+            motion : FinalTransform
+            patterns : tensor
+            sens : FinalTransform
+            axis : int
+            """
+            super().__init__(**kwargs)
+            self.motion = motion
+            self.patterns = patterns
+            self.sens = sens
+            self.axis = axis
+            self.freq = freq
+
+        def apply(self, x):
+            motions = self.motion
+            patterns = self.patterns.to(x.device)
+
+            if self.sens:
+                assert len(x) == 1
+                with ctx.returns(self.sens, ['sens', 'netsens']):
+                    sens, netsens = self.sens(x)
+                # sens = self.sens.to(x.device)
+                # netsens = sens.abs().square_().sum(0).sqrt_()[None]
+                y = x.new_empty([len(sens), *x.shape[1:]],
+                                dtype=torch.complex64)
+            else:
+                ydtype = torch.complex64 if self.freq else x.dtype
+                y = torch.empty_like(x, dtype=ydtype)
+                sens = netsens = None
+
+            x = x.movedim(self.axis, 1)
+            y = y.movedim(self.axis, 1)
+
+            matrix, flow = [], []
+            returned = return_requires(self.returns)
+            returns = dict(moved='output')
+            if 'matrix' in returned:
+                returns['matrix'] = 'matrix'
+            if 'flow' in returned:
+                returns['flow'] = 'flow'
+            for motion_trf, pattern in zip(motions, patterns):
+                with ctx.returns(motion_trf, returns):
+                    moved = motion_trf(x)
+                matrix.append(moved.get('matrix', None))
+                flow.append(moved.get('flow', None))
+                moved = moved['moved']
+                if sens is not None:
+                    moved = moved * sens
+                if self.freq:
+                    moved = torch.fft.ifftshift(moved)
+                    moved = torch.fft.fft(moved, dim=1)
+                    moved = torch.fft.fftshift(moved)
+                y[:, pattern] = moved[:, pattern]
+
+            if self.freq:
+                y = torch.fft.ifftshift(y)
+                y = torch.fft.ifft(y, dim=1)
+                y = torch.fft.fftshift(y)
+            y = y.movedim(1, self.axis)
+            x = x.movedim(1, self.axis)
+
+            sos = y.abs().square_().sum(0, keepdim=True).sqrt_()
+
+            if 'matrix' in returned:
+                matrix = torch.stack(matrix)
+            else:
+                matrix = None
+            if 'flow' in returned:
+                flow = torch.stack(flow)
+            else:
+                flow = None
+
+            return prepare_output(
+                dict(input=x, sos=sos, output=sos, uncombined=y, sens=sens,
+                     netsens=netsens, pattern=patterns, flow=flow,
+                     matrix=matrix),
+                self.returns)
 
     def __init__(self,
                  shots=4,
@@ -144,6 +250,9 @@ class IntraScanMotionTransform(Transform):
             Sampler (or upper-bound) for random rotations (in deg)
         coils : Transform
             A transform that generates a set of complex sensitivity profiles
+
+        Other Parameters
+        ------------------
         returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens', 'flow', 'matrix', 'pattern'}
             Default is 'sos'
 
@@ -154,8 +263,11 @@ class IntraScanMotionTransform(Transform):
             - 'flow': Displacement field in each shot `(N, 3, X, Y, Z)`
             - 'matrix': Rigid matrix in each shot `(N, 4, 4)`
             - 'pattern': Frequencies acquired in each shot `(N, X)`
-        shared : bool or {'channels', 'tensors'}
-        """
+
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
+            Whether to share the parameters across channels/tensors
+
+        """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.shots = shots
         self.axis = axis
@@ -205,72 +317,27 @@ class IntraScanMotionTransform(Transform):
             pattern = self.pattern
         return pattern.to(device, torch.bool)
 
-    def get_parameters(self, x):
-
+    def make_final(self, x, max_depth=float('inf')):
+        # compute number of motion shots
         shots = min(self.shots, x.shape[self.axis])
 
-        parameters = {}
-        parameters['motion'] = []
+        # sample motion parameters for each shot
+        motion = []
         for shot in range(shots):
-            motion_trf = self.motion
-            motion_prm = motion_trf.get_parameters(x)
-            while isinstance(motion_prm, Transform):
-                motion_trf = motion_prm
-                motion_prm = motion_trf.get_parameters(x)
-            parameters['motion'].append([motion_trf, motion_prm])
+            motion_trf = self.motion.make_final(x)
+            motion.append(motion_trf)
 
-        parameters['pattern'] = self.get_pattern(x.shape[self.axis], x.device)
+        # compute sampling pattern
+        pattern = self.get_pattern(x.shape[self.axis], x.device)
 
+        # sample coil sensitivities
+        sens = None
         if self.coils:
-            coils = self.coils.get_parameters(x)
-            while isinstance(coils, Transform):
-                coils = coils.get_parameters(x)
-            parameters['coils'] = coils
+            sens = self.coils.make_final(x)
 
-        return parameters
-
-    def apply_transform(self, x, parameters):
-
-        motions = parameters['motion']
-        patterns = parameters['pattern']
-
-        if 'coils' in parameters:
-            assert len(x) == 1
-            sens = parameters['coils']
-            netsens = sens.abs().square_().sum(0).sqrt_()[None]
-            y = x.new_empty([len(sens), *x.shape[1:]], dtype=torch.complex64)
-        else:
-            y = torch.empty_like(x, dtype=torch.complex64)
-            sens = netsens = None
-
-        x = x.movedim(self.axis, 1)
-        y = y.movedim(self.axis, 1)
-
-        matrix = torch.stack(list(map(lambda x: x[1][1], motions)))
-        flow = torch.stack(list(map(lambda x: x[1][0], motions)))
-        for (motion_trf, motion_prm), pattern in zip(motions, patterns):
-            moved = motion_trf.apply_transform(x, motion_prm)
-            if sens is not None:
-                moved = moved * sens
-            if self.freq:
-                moved = torch.fft.ifftshift(moved)
-                moved = torch.fft.fft(moved, dim=1)
-                moved = torch.fft.fftshift(moved)
-            y[:, pattern] = moved[:, pattern]
-
-        if self.freq:
-            y = torch.fft.ifftshift(y)
-            y = torch.fft.ifft(y, dim=1)
-            y = torch.fft.fftshift(y)
-        y = y.movedim(1, self.axis)
-        x = x.movedim(1, self.axis)
-
-        sos = y.abs().square_().sum(0, keepdim=True).sqrt_()
-
-        return prepare_output(
-            dict(input=x, sos=sos, output=sos, uncombined=y, sens=sens,
-                 netsens=netsens, pattern=patterns, flow=flow, matrix=matrix),
-            self.returns)
+        return self.FinalIntraScanMotionTransform(
+            motion, pattern, sens, self.axis, self.freq, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class SmallIntraScanMotionTransform(IntraScanMotionTransform):
@@ -288,7 +355,7 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
             Sampler (or upper-bound) for random rotations (in deg)
         axis : int
             Axis along which shots are acquired (slice or phase-encode)
-        shared : bool or {'channels', 'tensors'}
+        shared : {'channels', 'tensors', 'channels+tensors', ''}
         """
         super().__init__(translations=translations, rotations=rotations,
                          shared=shared, shots=2, axis=axis, **kwargs)
@@ -297,5 +364,4 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
         k = random.randint(0, n-1)
         mask = torch.zeros(n, dtype=torch.bool, device=device)
         mask[:k] = 1
-        return [mask, ~mask]
-
+        return torch.stack([mask, ~mask])

@@ -2,11 +2,11 @@ __all__ = ['ToTensorTransform', 'LoadTransform']
 
 import torch
 import os.path
-from .base import Transform
+from .base import FinalTransform
 from .utils.io import loaders
 
 
-class ToTensorTransform(Transform):
+class ToTensorTransform(FinalTransform):
     """Convert to Tensor (or to other dtype/device)"""
 
     def __init__(self, dim=None, dtype=None, device=None, **kwargs):
@@ -21,7 +21,7 @@ class ToTensorTransform(Transform):
         self.dtype = dtype
         self.device = device
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         x = torch.as_tensor(x, dtype=self.dtype, device=self.device).squeeze()
         if self.dim:
             for _ in range(max(0, self.dim + 1 - x.dim())):
@@ -32,13 +32,14 @@ class ToTensorTransform(Transform):
         return x
 
 
-class LoadTransform(Transform):
+class LoadTransform(FinalTransform):
     """
     Load data from disk
     """
 
-    def __init__(self, ndim=None, dtype=None,
-                 *, device=None, returns=None, append=False, **kwargs):
+    def __init__(self, ndim=None, dtype=None, *, device=None,
+                 returns=None, append=False, include=None, exclude=None,
+                 **kwargs):
         """
         Parameters
         ----------
@@ -49,7 +50,7 @@ class LoadTransform(Transform):
         device : str or torch.device
             Device on which to load data (default: cpu)
 
-        Keyword Parameters
+        Other Parameters
         ------------------
         to_ras : bool, default=True
             Reorient data so that it has a RAS layout.
@@ -61,13 +62,18 @@ class LoadTransform(Transform):
             Field to load from a npz file.
             Only used by Numpy reader.
         """
-        super().__init__(shared='channels', returns=returns, append=append)
+        super().__init__(
+            returns=returns,
+            append=append,
+            include=include,
+            exclude=exclude,
+        )
         self.ndim = ndim
         self.dtype = dtype
         self.device = device
         self.kwargs = kwargs
 
-    def apply_transform(self, x, parameters):
+    def apply(self, x):
         try:
             return torch.as_tensor(x, dtype=self.dtype, device=self.device)
         except Exception:
@@ -101,6 +107,3 @@ class LoadTransform(Transform):
         message = [f'Could not load {x}:'] + exceptions
         message = '\n'.join(message)
         raise ValueError(message)
-
-
-

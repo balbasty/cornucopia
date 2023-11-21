@@ -8,21 +8,28 @@ these boundary conditions.
 =========   ===========   ===============================   =======================   =======================
 NITorch     SciPy         PyTorch                           Other                     Description
 =========   ===========   ===============================   =======================   =======================
-replicate   border        nearest                           repeat                    a  a | a b c d |  d  d
+replicate   nearest       nearest                           repeat, border            a  a | a b c d |  d  d
 zero        constant(0)   zero                              zeros                     0  0 | a b c d |  0  0
 dct2        reflect       reflection(align_corners=True)    neumann                   b  a | a b c d |  d  c
 dct1        mirror        reflection(align_corners=False)                             c  b | a b c d |  c  b
 dft         wrap                                            circular                  c  d | a b c d |  a  b
 dst2                                                        antireflect, dirichlet   -b -a | a b c d | -d -c
 dst1                                                        antimirror               -a  0 | a b c d |  0 -d
-"""
+"""  # noqa: E501
 import torch
 from torch import Tensor
 from typing import Tuple
 
 
+doc_bounds = ('nearest', 'zero', 'reflect', 'mirror', 'wrap',
+              'antireflect', 'antimirror')
+pad_bounds = ('nearest', 'constant', 'reflect', 'mirror', 'wrap',
+              'antireflect', 'antimirror')
+doc_bounds_str = '{' + ', '.join(doc_bounds) + '}'
+pad_bounds_str = '{' + ', '.join(pad_bounds) + '}'
+
 nitorch_bounds = ('replicate', 'zero', 'dct2', 'dct1', 'dst2', 'dst1', 'dft')
-scipy_bounds = ('border', 'constant', 'reflect', 'mirror', 'wrap')
+scipy_bounds = ('nearest', 'constant', 'reflect', 'mirror', 'wrap')
 pytorch_bounds = ('nearest', 'zero', 'reflection')
 other_bounds = ('repeat', 'zeros', 'neumann', 'circular',
                 'antireflect', 'dirichlet', 'antimirror')
@@ -210,7 +217,8 @@ def replicate(i, n):
         Sign of the transformation (always 1 for replicate)
 
     """
-    return replicate_script(i, n) if torch.is_tensor(i) else replicate_int(i, n)
+    fn = replicate_script if torch.is_tensor(i) else replicate_int
+    return fn(i, n)
 
 
 def replicate_int(i, n):

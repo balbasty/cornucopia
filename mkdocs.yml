@@ -48,16 +48,22 @@ nav:
 - Installation: install.md
 - Getting Started: start.md
 - Examples:
-  -  Random coil sensitivities: examples/coils.ipynb
-  -  Contrast augmentation: examples/contrast.ipynb
+  -  Overview: examples/overview.md
+  -  Field-of-view transforms: examples/fov.ipynb
+  -  Noise transforms: examples/noise.ipynb
   -  Geometric transforms: examples/geom.ipynb
   -  Random intra-scan motion: examples/motion.ipynb
+  -  Contrast augmentation: examples/contrast.ipynb
+  -  Label augmentation: examples/labels.ipynb
   -  Synthetic MRIs: examples/synth.ipynb
+  -  Quantitative MRIs: examples/qmri.ipynb
+  -  Random coil sensitivities: examples/coils.ipynb
   -  Benchmark: examples/benchmark.ipynb
 - API:
   - overview: api/overview.md
   - base: api/base.md
   - contrast: api/contrast.md
+  - ctx: api/ctx.md
   - fov: api/fov.md
   - geometric: api/geometric.md
   - intensity: api/intensity.md
@@ -66,7 +72,9 @@ nav:
   - labels: api/labels.md
   - noise: api/noise.md
   - psf: api/psf.md
+  - qmri: api/qmri.md
   - random: api/random.md
+  - special: api/special.md
   - synth: api/synth.md
 
 watch:

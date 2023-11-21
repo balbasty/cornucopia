@@ -1,5 +1,12 @@
-__all__ = ['Sampler', 'Fixed', 'Uniform', 'RandInt', 'Normal', 'LogNormal',
-           'RandKFrom']
+__all__ = [
+    'Sampler',
+    'Fixed',
+    'Uniform',
+    'RandInt',
+    'Normal',
+    'LogNormal',
+    'RandKFrom',
+]
 
 import random
 import copy
@@ -182,7 +189,9 @@ class Uniform(Sampler):
 
     def __call__(self, n=None, **backend):
         if isinstance(n, (list, tuple)):
-            return torch.rand(n, **backend).mul_(self.max - self.min).add_(self.min)
+            return torch.rand(
+                n, **backend
+            ).mul_(self.max - self.min).add_(self.min)
         return self.map(random.uniform, self.min, self.max, n=n)
 
 
@@ -219,7 +228,9 @@ class RandInt(Sampler):
     def __call__(self, n=None, **backend):
         if isinstance(n, (list, tuple)):
             n = tuple(n)
-            return torch.randint(1 + self.max - self.min, n, **backend).add_(self.min)
+            return torch.randint(
+                1 + self.max - self.min, n, **backend
+            ).add_(self.min)
         return self.map(random.randint, self.min, self.max, n=n)
 
 
@@ -241,14 +252,16 @@ class RandKFrom(Sampler):
         super().__init__()
         range = list(range)
         if not replacement and k and k > len(range):
-            raise ValueError('Cannot sample more element than available. '
-                             'To sample with replacement, use `replacement=True`')
+            raise ValueError(
+                'Cannot sample more element than available. '
+                'To sample with replacement, use `replacement=True`'
+            )
         self.range = range
         self.k = k
         self.replacement = replacement
 
     def __call__(self, n=None, **backend):
-        k = self.k or (1 + RandInt(len(self.range))())
+        k = self.k or RandInt(len(self.range))()
         if isinstance(n, (list, tuple)) or n:
             raise ValueError('RandKFrom cannot sample multiple elements')
         if not self.replacement:
@@ -296,7 +309,9 @@ class LogNormal(Sampler):
 
     def __call__(self, n=None, **backend):
         if isinstance(n, (list, tuple)):
-            return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu).exp_()
+            return torch.randn(
+                n, **backend
+            ).mul_(self.sigma).add_(self.mu).exp_()
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
 
 
@@ -507,4 +522,3 @@ def make_range(*args, **kwargs):
     else:
         assert len(args) > 0
         return vmid - args[0], vmid + args[0]
-
