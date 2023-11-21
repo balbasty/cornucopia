@@ -215,7 +215,7 @@ class VirtualTensor:
         if compute_stats:
             vmin = x.reshape([len(x), -1]).min(dim=-1).values
             vmax = x.reshape([len(x), -1]).max(dim=-1).values
-            vmean = x.mean(dim=list(range(1, x.ndim)))
+            vmean = x.float().mean(dim=list(range(1, x.ndim)))
         else:
             vmin = vmax = vmean = None
         return VirtualTensor(x.shape, dtype=x.dtype, device=x.device,
