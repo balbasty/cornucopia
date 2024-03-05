@@ -11,6 +11,9 @@ from cornucopia.fov import (
     CropTransform,
     PadTransform,
     PowerTwoTransform,
+    Rot90Transform,
+    Rot180Transform,
+    RandomRot90Transform,
 )
 
 SEED = 12345678
@@ -50,6 +53,37 @@ def test_run_fov_permute_random(size):
     torch.random.manual_seed(SEED)
     x = torch.randn(size)
     _ = RandomPermuteAxesTransform()(x)
+    assert True
+
+
+@pytest.mark.parametrize("size", sizes)
+@pytest.mark.parametrize("axes", [0, 1, [0, 1], [0, 0]])
+@pytest.mark.parametrize("negative", [False, True])
+@pytest.mark.parametrize("double", [False, True])
+def test_run_rot90_permute(size, axes, negative, double):
+    random.seed(SEED)
+    torch.random.manual_seed(SEED)
+    x = torch.randn(size)
+    _ = Rot90Transform(axes, negative, double)(x)
+    assert True
+
+
+@pytest.mark.parametrize("size", sizes)
+@pytest.mark.parametrize("axes", [0, 1, [0, 1], [0, 0]])
+def test_run_rot180_permute(size, axes):
+    random.seed(SEED)
+    torch.random.manual_seed(SEED)
+    x = torch.randn(size)
+    _ = Rot180Transform(axes)(x)
+    assert True
+
+
+@pytest.mark.parametrize("size", sizes)
+def test_run_rot90_random(size):
+    random.seed(SEED)
+    torch.random.manual_seed(SEED)
+    x = torch.randn(size)
+    _ = RandomRot90Transform()(x)
     assert True
 
 
