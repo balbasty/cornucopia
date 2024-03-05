@@ -166,6 +166,7 @@ class Rot90Transform(FinalTransform):
         # this implementation is suboptimal. We should fuse all transpose
         # and all flips into a single "transpose + flip" operation so that
         # a single allocation happens. This will be fine for now.
+
         ndim = x.ndim - 1
         axis = [1 + (ndim + a if a < 0 else a) for a in self.axis]
         for ax, neg, dbl in zip(axis, self.negative, self.double):
@@ -202,7 +203,7 @@ class Rot180Transform(Rot90Transform):
 class RandomRot90Transform(NonFinalTransform):
     """Random set of 90 transforms"""
 
-    def __init__(self, axes=None, max_rot=2, *, shared=True, **kwargs):
+    def __init__(self, axes=None, max_rot=2, negative=False, *, shared=True, **kwargs):
         """
         Parameters
         ----------
@@ -219,7 +220,8 @@ class RandomRot90Transform(NonFinalTransform):
         """
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
-        self.max_rot = RandInt.make(make_range(0, max_rot))
+        self.max_rot = RandInt.make(make_range(1, max_rot))
+        self.negative = negative
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -240,8 +242,11 @@ class RandomRot90Transform(NonFinalTransform):
             axes = ensure_list(axes, max_rot, crop=False)
         if not isinstance(axes, Sampler):
             axes = RandKFrom(axes, max_rot, replacement=True)
+
         axes = ensure_list(axes(), max_rot)
-        negative = RandKFrom([False, True], max_rot, replacement=True)()
+        negative = RandKFrom([False, True], max_rot, replacement=True)() \
+            if self.negative else [False] * max_rot
+        # breakpoint()
         return Rot90Transform(
             axes, negative, **self.get_prm()
         ).make_final(max_depth-1)

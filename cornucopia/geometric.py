@@ -1119,7 +1119,6 @@ class SlicewiseAffineTransform(NonFinalTransform):
         F = torch.eye(ndim+1, **backend)
         F[:ndim, -1] = -offsets
         Z = E.clone()
-        print(zooms.shape, Z.shape)
         Z.diagonal(0, -1, -2)[:, :-1].copy_(1 + zooms)
         T = E.clone()
         T[:, :ndim, -1] = translations
@@ -1230,16 +1229,16 @@ class SlicewiseAffineTransform(NonFinalTransform):
             y = warps.apply_flow(x[None], coord[None], has_identity=True,
                                  padding_mode=self.bound)[0]
 
-            if y.is_floating_point():
-                # not a label map -> apply PSF
-                kernel = torch.full(
-                    [nb_repeat, 1],
-                    1 / math.sqrt(nb_repeat),
-                    dtype=y.dtype, device=y.device
-                )
-                y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
-                y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
-                y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
+            # if y.is_floating_point():
+            # not a label map -> apply PSF
+            kernel = torch.full(
+                [nb_repeat, 1],
+                1 / math.sqrt(nb_repeat),
+                dtype=y.dtype, device=y.device
+            )
+            y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
+            y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
+            y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
 
             return prepare_output(
                 dict(input=x, output=y, flow=flow, matrix=matrix),
@@ -1362,7 +1361,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         # get slice direction
         slice = self.slice
         if slice is None:
-            slice = RandInt(0, ndim)
+            slice = RandInt(0, ndim - 1)
         if isinstance(slice, Sampler):
             slice = slice()
 
@@ -1445,7 +1444,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             x = torch.as_tensor(x, dtype=torch.float32).T  # [D, N]
             x = interpol.resize(x, shape=[nb_slices],
                                 interpolation=3, bound='replicate',
-                                prefilter=True).T  # [S, D]
+                                prefilter=False).T  # [S, D]
             return x
 
         def mangle_shots(x):
