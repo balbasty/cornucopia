@@ -203,7 +203,8 @@ class Rot180Transform(Rot90Transform):
 class RandomRot90Transform(NonFinalTransform):
     """Random set of 90 transforms"""
 
-    def __init__(self, axes=None, max_rot=2, negative=False, *, shared=True, **kwargs):
+    def __init__(self, axes=None, max_rot=2, negative=True,
+                 *, shared=True, **kwargs):
         """
         Parameters
         ----------
@@ -212,6 +213,8 @@ class RandomRot90Transform(NonFinalTransform):
             If `None`, all axes.
         max_rot : int or Sampler
             Maximum number of consecutive rotations.
+        negative : bool
+            Whether to authorize negative rotations.
 
         Other Parameters
         ----------------
@@ -246,7 +249,6 @@ class RandomRot90Transform(NonFinalTransform):
         axes = ensure_list(axes(), max_rot)
         negative = RandKFrom([False, True], max_rot, replacement=True)() \
             if self.negative else [False] * max_rot
-        # breakpoint()
         return Rot90Transform(
             axes, negative, **self.get_prm()
         ).make_final(max_depth-1)
