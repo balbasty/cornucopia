@@ -21,7 +21,7 @@ class ToTensorTransform(FinalTransform):
         self.dtype = dtype
         self.device = device
 
-    def apply(self, x):
+    def xform(self, x):
         x = torch.as_tensor(x, dtype=self.dtype, device=self.device).squeeze()
         if self.dim:
             for _ in range(max(0, self.dim + 1 - x.dim())):
@@ -73,7 +73,7 @@ class LoadTransform(FinalTransform):
         self.device = device
         self.kwargs = kwargs
 
-    def apply(self, x):
+    def xform(self, x):
         try:
             return torch.as_tensor(x, dtype=self.dtype, device=self.device)
         except Exception:

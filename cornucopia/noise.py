@@ -117,7 +117,7 @@ class ChiNoiseTransform(NonFinalTransform):
             self.noise = noise
             self.Parent = ChiNoiseTransform
 
-        def apply(self, x):
+        def xform(self, x):
             noise = self.noise.to(x)
             y = x.square().add_(noise.square()).sqrt_()
             return prepare_output(
@@ -237,7 +237,7 @@ class GFactorTransform(NonFinalTransform):
                 self.gfactor.make_final(x, max_depth-1),
             ).make_final(x, max_depth-1)
 
-        def apply(self, x):
+        def xform(self, x):
             noisetrf = self.noisetrf.make_final(x)
             with ctx.returns(noisetrf, 'noise'):
                 noise = noisetrf(x)

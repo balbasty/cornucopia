@@ -54,7 +54,7 @@ class OpConstTransform(FinalTransform):
         self.op = op or self._op
         self.value_name = value_name
 
-    def apply(self, x):
+    def xform(self, x):
         value = self.value
         if torch.is_tensor(value):
             value = value.to(x)
@@ -103,7 +103,7 @@ class FillValueTransform(FinalTransform):
         self.mask_name = mask_name
         self.value_name = value_name
 
-    def apply(self, x):
+    def xform(self, x):
         mask, value = self.mask, self.value
         mask = mask.to(x.device)
         if torch.is_tensor(value):
@@ -133,7 +133,7 @@ class AddMulTransform(FinalTransform):
         self.slope = slope
         self.offset = offset
 
-    def apply(self, x):
+    def xform(self, x):
         slope, offset = self.slope, self.offset
         if torch.is_tensor(slope):
             slope = slope.to(x)
@@ -167,7 +167,7 @@ class ClipTransform(FinalTransform):
         self.vmin = vmin
         self.vmax = vmax
 
-    def apply(self, x):
+    def xform(self, x):
         vmin, vmax = self.vmin, self.vmax
         if torch.is_tensor(vmin):
             vmin = vmin.to(x)
@@ -245,7 +245,8 @@ class RandomAddMulTransform(RandomizedTransform):
         """
         super().__init__(
             AddMulTransform,
-            (Uniform.make(make_range(slope)), Uniform.make(make_range(offset))),
+            (Uniform.make(make_range(slope)),
+             Uniform.make(make_range(offset))),
             shared=shared,
             **kwargs
         )
@@ -268,7 +269,7 @@ class SplineUpsampleTransform(FinalTransform):
         self.order = order
         self.prefilter = prefilter
 
-    def apply(self, x):
+    def xform(self, x):
         fullshape = x.shape[1:]
         if self.order == 1:
             mode = ('trilinear' if len(fullshape) == 3 else
@@ -675,7 +676,7 @@ class GammaTransform(NonFinalTransform):
             self.vmin = vmin
             self.vmax = vmax
 
-        def apply(self, x):
+        def xform(self, x):
             vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
             vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
             gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
@@ -847,7 +848,7 @@ class QuantileTransform(NonFinalTransform):
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return self.make_per_channel(x, max_depth)
-        
+
         nmax = 10000
         x = x[x != 0]
         x = x[torch.rand_like(x) < (nmax / x.numel())]

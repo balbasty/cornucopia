@@ -20,9 +20,6 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 
 ## Installation
 
-
-## Installation
-
 ### Dependencies
 
 - `pytorch >= 1.8`
@@ -37,10 +34,16 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 conda install cornucopia -c balbasty -c pytorch -c conda-forge
 ```
 
-### Pip
+### Pip (release)
 
 ```sh
 pip install cornucopia
+```
+
+### Pip (dev)
+
+```sh
+pip install cornucopia@git+https://github.com/balbasty/cornucopia
 ```
 
 ## Documentation

@@ -148,7 +148,7 @@ class Transform(nn.Module):
                 return x
 
         # now we're working with a single tensor (or str)
-        y = self.apply(x)
+        y = self.xform(x)
         if not isinstance(y, Returned):
             if not isinstance(y, type(self.returns)):
                 y = dict(input=x, output=y)
@@ -240,7 +240,7 @@ class FinalTransform(Transform):
     def is_final(self):
         return True
 
-    def apply(self, x):
+    def xform(self, x):
         """Apply the transform to a tensor
 
         Parameters
@@ -283,7 +283,7 @@ class IdentityTransform(FinalTransform):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def apply(self, x):
+    def xform(self, x):
         return x
 
     def make_inverse(self):
@@ -305,12 +305,12 @@ class SharedMixin:
             shared = ''
         return shared
 
-    def apply(self, x):
+    def xform(self, x):
         if 'channels' in self.shared:
             xform = self.make_final(x[:1], max_depth=1)
         else:
             xform = self.make_final(x, max_depth=1)
-        return xform.apply(x)
+        return xform.xform(x)
 
     def forward(self, *a, **k):
         return self._shared_forward(*a, **k)
@@ -447,7 +447,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        x = VirtualTensor.from_any(x, compute_stats=True)
+        # x = VirtualTensor.from_any(x, compute_stats=True)
         trf = []
         for t in self:
             t = t.make_final(x, max_depth=max_depth-1)
@@ -525,7 +525,7 @@ class PerChannelTransform(SpecialMixin, Transform):
         trf = PerChannelTransform(trf, **prm)
         return trf
 
-    def apply(self, x):
+    def xform(self, x):
         results = []
         for i, t in enumerate(self.transforms):
             with ReturningTransform(t, self.returns), \

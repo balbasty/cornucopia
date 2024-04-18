@@ -106,7 +106,7 @@ class OneHotTransform(NonFinalTransform):
             self.keep_background = keep_background
             self.dtype = dtype
 
-        def apply(self, x):
+        def xform(self, x):
             if len(x) != 1:
                 raise ValueError('Cannot one-hot multi-channel tensors')
             x = x[0]
@@ -130,7 +130,7 @@ class OneHotTransform(NonFinalTransform):
 
 class ArgMaxTransform(FinalTransform):
 
-    def apply(self, x):
+    def xform(self, x):
         return x.argmax(0)[None]
 
 
@@ -174,7 +174,7 @@ class RelabelTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.labels = labels
 
-        def apply(self, x):
+        def xform(self, x):
             if self.labels is None:
                 return self.make_final(x)(x)
             assert self.labels is not None
@@ -242,7 +242,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             self.background = background
             self.dtype = dtype
 
-        def apply(self, x):
+        def xform(self, x):
             mu, sigma = self.mu, self.sigma
             ndim = x.ndim - 1
 
@@ -409,7 +409,7 @@ class SmoothLabelMap(NonFinalTransform):
             super().__init__(**kwargs)
             self.labelmap = labelmap
 
-        def apply(self, x):
+        def xform(self, x):
             return self.labelmap.to(x.device)
 
 
@@ -491,7 +491,7 @@ class ErodeLabelTransform(FinalTransform):
         self.method = method
         self.new_labels = new_labels
 
-    def apply(self, x):
+    def xform(self, x):
         if self.new_labels is not False:
             return self._apply_newlabels(x)
 
@@ -610,7 +610,7 @@ class DilateLabelTransform(FinalTransform):
         self.radius = ensure_list(radius, min(len(self.labels), 1))
         self.method = method
 
-    def apply(self, x):
+    def xform(self, x):
         max_radius = max(self.radius)
         if self.method == 'conv':
             def dist(x, r):
@@ -837,7 +837,7 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
             self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
             self.method = method
 
-        def apply(self, x):
+        def xform(self, x):
             max_abs_radius = 1 + int(pymath.ceil(max(
                 max(map(abs, self.min_radius)),
                 max(map(abs, self.max_radius))
@@ -1036,7 +1036,7 @@ class SmoothShallowLabelTransform(NonFinalTransform):
             self.background_labels = background_labels
             self.method = method
 
-        def apply(self, x):
+        def xform(self, x):
             if self.method == 'l1':
                 def dist(x):
                     return distmap.l1_signed_transform(

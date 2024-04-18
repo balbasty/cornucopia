@@ -218,7 +218,7 @@ class ElasticTransform(NonFinalTransform):
                 ).movedim(-1, 1)
             return flow
 
-        def apply(self, x):
+        def xform(self, x):
             """Deform the input tensor
 
             Parameters
@@ -503,7 +503,7 @@ class AffineTransform(NonFinalTransform):
         def make_flow(self, matrix, shape):
             return warps.affine_flow(matrix, shape).movedim(-1, 0)
 
-        def apply(self, x):
+        def xform(self, x):
             flow = cast_like(self.flow, x)
             matrix = cast_like(self.matrix, x)
             required = return_requires(self.returns)
@@ -766,7 +766,7 @@ class AffineElasticTransform(NonFinalTransform):
             self.affine = affine
             self.bound = bound
 
-        def apply(self, x):
+        def xform(self, x):
             flow = cast_like(self.flow, x)
             controls = cast_like(self.controls, x)
             affine = cast_like(self.affine, x)
@@ -954,7 +954,7 @@ class MakeAffinePair(NonFinalTransform):
             self.left = left
             self.right = right
 
-        def apply(self, x):
+        def xform(self, x):
             x1 = self.left(x)
             x2 = self.right(x)
             mat1, mat2 = self.left.matrix, self.right.matrix
@@ -1204,7 +1204,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
             self.subsample = subsample
             self.bound = bound
 
-        def apply(self, x):
+        def xform(self, x):
             flow = cast_like(self.flow, x)
             matrix = cast_like(self.matrix, x)
 

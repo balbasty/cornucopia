@@ -45,7 +45,7 @@ class ContrastMixtureTransform(NonFinalTransform):
             self.mu = mu
             self.sigma = sigma
 
-        def apply(self, x):
+        def xform(self, x):
             z = self.z.to(x)
             mu0 = self.mu0.to(x)
             sigma0 = self.sigma0.to(x)
@@ -114,7 +114,8 @@ class ContrastMixtureTransform(NonFinalTransform):
         mu = torch.rand_like(
             old_mu).mul_(old_mu_max - old_mu_min).add_(old_mu_min)
         sigma = torch.rand_like(
-            old_sigma_diag).mul_(old_sigma_max - old_sigma_min).add_(old_sigma_min)
+            old_sigma_diag
+        ).mul_(old_sigma_max - old_sigma_min).add_(old_sigma_min)
         corr = torch.rand([len(old_mu), nc*(nc-1)//2], **backend).mul_(0.5)
 
         fullsigma = torch.eye(nc, **backend).expand([nk, nc, nc]).clone()
@@ -145,7 +146,7 @@ class ContrastLookupTransform(NonFinalTransform):
             self.edges = edges
             self.mu = mu
 
-        def apply(self, x):
+        def xform(self, x):
             edges, mu = self.edges.to(x), self.mu.to(x)
             mu0 = (edges[:-1] + edges[1:]) / 2
             nk = len(mu)

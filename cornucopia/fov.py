@@ -32,7 +32,7 @@ class FlipTransform(FinalTransform):
         super().__init__(**kwargs)
         self.axis = axis
 
-    def apply(self, x):
+    def xform(self, x):
         axis = self.axis
         if axis is None:
             axis = list(range(1, x.ndim))
@@ -86,7 +86,7 @@ class PermuteAxesTransform(FinalTransform):
         super().__init__(**kwargs)
         self.permutation = permutation
 
-    def apply(self, x):
+    def xform(self, x):
         permutation = self.permutation
         if permutation is None:
             permutation = list(reversed(range(x.dim()-1)))
@@ -151,7 +151,7 @@ class CropPadTransform(FinalTransform):
         self.bound = bound
         self.value = value
 
-    def apply(self, x):
+    def xform(self, x):
         crop = tuple([Ellipsis, *self.crop])
         x = x[crop]
         x = pad(x, self.pad, mode=self.bound, value=self.value)
