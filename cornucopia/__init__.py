@@ -1,4 +1,5 @@
-"""Flexible transforms for pre-processing and augmentation
+"""
+Flexible transforms for pre-processing and augmentation
 
 Example on how to use this machinery to generate within-subject
 image pairs with a random affine deformation between them::
@@ -30,19 +31,25 @@ image pairs with a random affine deformation between them::
 
 """
 
-# TODO:
-#   [x] Make it a standalone package?
-#   [x] Move samplers in their own file
-#   [x] Add IO transforms (that transform filenames in tensors)
-#   [ ] Better deal with separable/shared transforms
-#       [ ] Add a SharedTransform class (like Randomized) that does the heavy
-#           lifting
-#       [ ] By default (non shared), let Transforms handle multi-channel
-#           data (currently we loop across channels in the base class)
-
 from . import random                        # noqa: F401
 from . import ctx                           # noqa: F401
-from .ctx import batch                      # noqa: F401
+from . import base                          # noqa: F401
+from . import special                       # noqa: F401
+from . import contrast                      # noqa: F401
+from . import geometric                     # noqa: F401
+from . import intensity                     # noqa: F401
+from . import io                            # noqa: F401
+from . import fov                           # noqa: F401
+from . import kspace                        # noqa: F401
+from . import labels                        # noqa: F401
+from . import noise                         # noqa: F401
+from . import psf                           # noqa: F401
+from . import qmri                          # noqa: F401
+from . import synth                         # noqa: F401
+from . import utils                         # noqa: F401
+
+from .random import *                       # noqa: F401,F403
+from .ctx import *                          # noqa: F401,F403
 from .base import *                         # noqa: F401,F403
 from .special import *                      # noqa: F401,F403
 from .contrast import *                     # noqa: F401,F403

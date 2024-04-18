@@ -52,7 +52,7 @@ class RandomSmoothTransform(RandomizedTransform):
 
         Parameters
         ----------
-        fwhm : Sampler or  float
+        fwhm : Sampler or float
             Sampler or upper bound for the full-width at half-maximum
 
         Other Parameters

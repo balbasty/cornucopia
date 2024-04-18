@@ -163,6 +163,7 @@ class Uniform(Sampler):
     def __init__(self, *args, **kwargs):
         """
         ```python
+        Uniform()
         Uniform(max)
         Uniform(min, max)
         ```
@@ -171,10 +172,10 @@ class Uniform(Sampler):
         ----------
         min : float or sequence[float], default=0
             Lower bound (inclusive)
-        max : float or sequence[float]
+        max : float or sequence[float], default=1
             Upper bound (inclusive or exclusive, depending on rounding)
         """
-        min, max = 0, None
+        min, max = 0, 1
         if len(args) == 2:
             min, max = args
         elif len(args) == 1:
@@ -183,8 +184,6 @@ class Uniform(Sampler):
             min = kwargs['min']
         if 'max' in kwargs:
             max = kwargs['max']
-        if max is None:
-            raise ValueError('Expected at least one argument')
         super().__init__(min=min, max=max)
 
     def __call__(self, n=None, **backend):
