@@ -1119,7 +1119,6 @@ class SlicewiseAffineTransform(NonFinalTransform):
         F = torch.eye(ndim+1, **backend)
         F[:ndim, -1] = -offsets
         Z = E.clone()
-        print(zooms.shape, Z.shape)
         Z.diagonal(0, -1, -2)[:, :-1].copy_(1 + zooms)
         T = E.clone()
         T[:, :ndim, -1] = translations
@@ -1362,7 +1361,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         # get slice direction
         slice = self.slice
         if slice is None:
-            slice = RandInt(0, ndim)
+            slice = RandInt(0, ndim - 1)
         if isinstance(slice, Sampler):
             slice = slice()
 

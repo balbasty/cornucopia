@@ -359,7 +359,7 @@ class NonFinalTransform(SharedMixin, Transform):
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
 
-    def make_final(self, x, max_depth=float('inf'), *args, **kwargs):
+    def make_final(self, x, max_depth=float('inf')):
         if self.is_final or max_depth == 0:
             return self
         return NotImplemented
