@@ -260,7 +260,7 @@ class RandKFrom(Sampler):
         self.replacement = replacement
 
     def __call__(self, n=None, **backend):
-        k = self.k or RandInt(len(self.range))()
+        k = self.k or RandInt(1, len(self.range))()
         if isinstance(n, (list, tuple)) or n:
             raise ValueError('RandKFrom cannot sample multiple elements')
         if not self.replacement:
@@ -268,7 +268,7 @@ class RandKFrom(Sampler):
             random.shuffle(range)
             return range[:k]
         else:
-            index = RandInt(len(self.range))(k)
+            index = RandInt(0, len(self.range)-1)(k)
             return [self.range[i] for i in index]
 
 
