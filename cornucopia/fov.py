@@ -162,7 +162,7 @@ class Rot90Transform(FinalTransform):
         self.negative = ensure_list(negative, len(self.axis))
         self.double = ensure_list(double, len(self.axis))
 
-    def apply(self, x):
+    def xform(self, x):
         # this implementation is suboptimal. We should fuse all transpose
         # and all flips into a single "transpose + flip" operation so that
         # a single allocation happens. This will be fine for now.
