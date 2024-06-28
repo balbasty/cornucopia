@@ -82,7 +82,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
             To use a fixed value, pass `Fixed(value)`.
 
         Other Parameters
-        ------------------
+        ----------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
         shared : {'channels', 'tensors', 'channels+tensors', ''}
@@ -177,6 +177,7 @@ class RandomChiNoiseTransform(RandomizedTransform):
     def __init__(self, sigma=0.1, nb_channels=8,
                  *, shared=False, shared_noise=None, **kwargs):
         """
+
         Parameters
         ----------
         sigma : Sampler or float

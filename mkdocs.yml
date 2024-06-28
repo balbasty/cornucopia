@@ -4,7 +4,7 @@ repo_url: https://github.com/balbasty/cornucopia
 edit_uri: blob/main/docs
 site_dir: html
 docs_dir: docs
-theme: 
+theme:
   name: material
   palette:
     primary: orange
@@ -13,6 +13,8 @@ theme:
     repo: fontawesome/brands/github
   logo:
     icons/cc_full_white.svg
+extra_css:
+  - stylesheets/extra.css
 plugins:
 - mkdocs-jupyter
 - mkdocstrings:
