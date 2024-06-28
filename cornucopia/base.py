@@ -556,9 +556,11 @@ class MaybeTransform(SpecialMixin, SharedMixin, Transform):
         img = (0.2 * gauss)(img)
         ```
         ```
-    """
 
-    def __init__(self, transform, prob=0.5, *, shared=False, **kwargs):
+    !!! changedin "![v0.4](https://img.shields.io/badge/v0.4-yellow) \
+                   Default for `shared` changed from `False` to `True`"
+    """
+    def __init__(self, transform, prob=0.5, *, shared=True, **kwargs):
         """
 
         Parameters
@@ -617,9 +619,12 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
         ```python
         img = cc.switch({gauss: 0.5, chi: 0.5})(img)
         ```
+
+    !!! changedin "![v0.4](https://img.shields.io/badge/v0.4-yellow) \
+                   Default for `shared` changed from `False` to `True`"
     """
 
-    def __init__(self, transforms, prob=0, *, shared=False, **kwargs):
+    def __init__(self, transforms, prob=0, *, shared=True, **kwargs):
         """
 
         Parameters
