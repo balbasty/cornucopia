@@ -184,7 +184,7 @@ class ContrastLookupTransform(NonFinalTransform):
 
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)
-        new_mu = torch.rand(self.nk) * (vmax - vmin) + vmin
+        new_mu = torch.rand(self.nk).to(x.device) * (vmax - vmin) + vmin
         return self.LookupFinalTransform(
             edges, new_mu, **self.get_prm()
         ).make_final(x, max_depth-1)
