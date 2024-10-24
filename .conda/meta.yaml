@@ -1,5 +1,5 @@
 {% set name = "cornucopia" %}
-{% set version = "0.1.0" %}
+{% set version = "0.3.0" %}
 
 package:
   name: "{{ name|lower }}"
@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
-  sha256: 5e8d6d086deddb702b03558b386c3cacf05d4d461e948f75ad8fc5a0cf251553
+  sha256: af50fabddd9b5d363ad4daa7dfbe5a0bbd2e4a721953814a2d339577f703ee66
 
 build:
   number: 0
