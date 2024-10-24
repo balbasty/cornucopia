@@ -684,7 +684,9 @@ class GammaTransform(NonFinalTransform):
             vmax = vmax.reshape([-1] + [1] * (x.ndim-1))
             gamma = gamma.reshape([-1] + [1] * (x.ndim-1))
 
-            y = x.sub(vmin).div_(vmax - vmin)
+            # we add a little epsilon to avoid have nans when the
+            # image is full of zeros
+            y = x.sub(vmin).div_((vmax - vmin).clamp_min_(1e-8))
             y = y.pow_(gamma)
             y = y.mul_(vmax - vmin).add_(vmin)
 
