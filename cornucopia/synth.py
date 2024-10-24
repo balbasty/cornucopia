@@ -366,6 +366,7 @@ class SynthFromLabelTransform(NonFinalTransform):
                  snr=10,
                  gfactor=5,
                  order=3,
+                 sample_in_background=False,
                  returns=Kwargs(image='image', label='label')):
         """
 
@@ -483,6 +484,9 @@ class SynthFromLabelTransform(NonFinalTransform):
             variance. The sampled value controls the smoothness of
             the g-factor field.
             If a `float`, sample from `RandInt(2, value)`.
+        sample_in_background : bool
+            If True, sample a Gaussian in the background class.
+            Otherwise, keep it zeros.
         """
         super().__init__(shared=False, returns=returns)
         self.load = (
@@ -513,7 +517,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
-            background=0,
+            background=None if sample_in_background else 0,
         )
         self.intensity = IntensityTransform(
             bias=bias,
