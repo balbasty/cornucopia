@@ -27,7 +27,7 @@ class ElasticTransform(NonFinalTransform):
     """
     Elastic transform encoded by cubic splines.
     The number of control points is fixed but coefficients are
-    randomly sampled.
+    randomly sampled from a uniform distribution.
     """
 
     def __init__(
@@ -38,6 +38,7 @@ class ElasticTransform(NonFinalTransform):
             bound: str = 'border',
             steps: int = 0,
             order: int = 3,
+            zero_center: bool = False,
             *,
             shared: Union[bool, str] = True,
             **kwargs
@@ -58,6 +59,9 @@ class ElasticTransform(NonFinalTransform):
             Number of scaling-and-squaring integration steps
         order : int
             Spline order
+        zero_center : bool
+            Subtract its mean displacement to the flow field so that
+            it has an empirical mean of zero.
 
         Other Parameters
         ------------------
@@ -86,6 +90,7 @@ class ElasticTransform(NonFinalTransform):
         self.shape = shape
         self.steps = steps
         self.order = order
+        self.zero_center = zero_center
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         """
@@ -142,10 +147,15 @@ class ElasticTransform(NonFinalTransform):
                 flow = warps.exp_velocity(
                     flow.movedim(1, -1), self.steps
                 ).movedim(-1, 1)
+            if self.zero_center:
+                mean_flow = flow.reshape([batch, ndim, -1]).mean(-1)
+                mean_flow = mean_flow.reshape([batch, ndim] + [1] * ndim)
+                flow -= mean_flow
         else:
             flow = None
         return self.Final(
-            flow, controls, self.steps, self.order, self.bound,
+            flow, controls,
+            self.steps, self.order, self.bound, self.zero_center,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -159,6 +169,7 @@ class ElasticTransform(NonFinalTransform):
                 steps: int = 0,
                 order: int = 3,
                 bound: str = 'border',
+                zero_center: bool = False,
                 **kwargs
         ):
             """
@@ -176,6 +187,9 @@ class ElasticTransform(NonFinalTransform):
                 Spline order
             bound : str
                 Boundary condition
+            zero_center : bool
+                Subtract its mean displacement to the flow field so that
+                it has an empirical mean of zero.
             """
             super().__init__(**kwargs)
             self.flow = flow
@@ -183,6 +197,7 @@ class ElasticTransform(NonFinalTransform):
             self.steps = steps
             self.order = order
             self.bound = bound
+            self.zero_center = zero_center
 
         def make_flow(self, control, fullshape):
             """Upsample the control points to the final full size
@@ -216,6 +231,11 @@ class ElasticTransform(NonFinalTransform):
                 flow = warps.exp_velocity(
                     flow.movedim(1, -1), self.steps
                 ).movedim(-1, 1)
+            if self.zero_center:
+                batch, ndim = flow.shape[:2]
+                mean_flow = flow.reshape([batch, ndim, -1]).mean(-1)
+                mean_flow = mean_flow.reshape([batch, ndim] + [1] * ndim)
+                flow -= mean_flow
             return flow
 
         def xform(self, x):
@@ -262,6 +282,7 @@ class RandomElasticTransform(NonFinalTransform):
             bound: str = 'border',
             steps: int = 0,
             order: int = 3,
+            zero_center: bool = False,
             *,
             shared: Union[bool, str] = True,
             shared_flow: Optional[Union[bool, str]] = None,
@@ -283,6 +304,9 @@ class RandomElasticTransform(NonFinalTransform):
             Number of scaling-and-squaring integration steps
         order : int
             Spline order
+        zero_center : bool
+            Subtract its mean displacement to the flow field so that
+            it has an empirical mean of zero.
 
         Other Parameters
         ------------------
@@ -305,6 +329,7 @@ class RandomElasticTransform(NonFinalTransform):
         self.bound = bound
         self.steps = steps
         self.order = order
+        self.zero_center = zero_center
         self.shared_flow = shared_flow
 
     def make_final(self, x, max_depth=float('inf')):
@@ -326,7 +351,8 @@ class RandomElasticTransform(NonFinalTransform):
         return ElasticTransform(
             dmax=dmax, shape=shape, order=order,
             unit=self.unit, bound=self.bound, steps=self.steps,
-            shared=shared_flow,
+            zero_center=self.zero_center, shared=shared_flow,
+            **self.get_prm(),
         ).make_final(x, max_depth-1)
 
 
@@ -616,10 +642,24 @@ class AffineElasticTransform(NonFinalTransform):
     Affine + Elastic [+ Patch] transform.
     """
 
-    def __init__(self, dmax=0.1, shape=5, steps=0,
-                 translations=0, rotations=0, shears=0, zooms=0,
-                 unit='fov', bound='border', patch=None, order=3,
-                 *, shared=True, **kwargs):
+    def __init__(
+        self,
+        dmax: Union[float, List[float]] = 0.1,
+        shape: Union[int, List[int]] = 5,
+        steps: int = 0,
+        translations: Union[float, List[float]] = 0,
+        rotations: Union[float, List[float]] = 0,
+        shears: Union[float, List[float]] = 0,
+        zooms: Union[float, List[float]] = 0,
+        unit: str = 'fov',
+        bound: str = 'border',
+        patch: Optional[Union[int, list[int]]] = None,
+        order: int = 3,
+        zero_center: bool = False,
+        *,
+        shared: bool = True,
+        **kwargs
+    ):
         """
 
         Parameters
@@ -646,6 +686,10 @@ class AffineElasticTransform(NonFinalTransform):
             Size of random patch to extract
         order : int
             Spline order
+        zero_center : bool
+            Subtract its mean displacement to the elastic flow field so
+            that it has an empirical mean of zero. This has no effect on
+            the affine component.
 
         Other Parameters
         ------------------
@@ -663,9 +707,13 @@ class AffineElasticTransform(NonFinalTransform):
         self.patch = patch
         self.steps = steps
         self.affine = AffineTransform(
-            translations, rotations, shears, zooms, unit, bound, shared=shared)
+            translations, rotations, shears, zooms,
+            unit, bound, shared=shared
+        )
         self.elastic = ElasticTransform(
-            dmax,  unit, shape, bound, steps, order, shared=shared)
+            dmax,  unit, shape, bound, steps, order, zero_center,
+            shared=shared
+        )
 
     def make_final(self, x, max_depth=float('inf')):
         """
@@ -786,21 +834,22 @@ class RandomAffineElasticTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax=0.1,
-        shape=5,
-        steps=0,
-        translations=0.1,
-        rotations=15,
-        shears=0.012,
-        zooms=0.15,
-        iso=False,
-        unit='fov',
-        bound='border',
-        patch=None,
-        order=3,
+        dmax: Union[Sampler, float, List[float]] = 0.1,
+        shape: Union[Sampler, int, List[int]] = 5,
+        steps: int = 0,
+        translations: Union[Sampler, float, List[float]] = 0,
+        rotations: Union[Sampler, float, List[float]] = 0,
+        shears: Union[Sampler, float, List[float]] = 0,
+        zooms: Union[Sampler, float, List[float]] = 0,
+        iso: bool = False,
+        unit: str = 'fov',
+        bound: str = 'border',
+        patch: Optional[Union[int, list[int]]] = None,
+        order: int = 3,
+        zero_center: bool = False,
         *,
-        shared=True,
-        shared_flow=None,
+        shared: bool = True,
+        shared_flow: bool = None,
         **kwargs
     ):
         """
@@ -831,6 +880,10 @@ class RandomAffineElasticTransform(NonFinalTransform):
             Size of random patch to extract
         order : int
             Spline order
+        zero_center : bool
+            Subtract its mean displacement to the elastic flow field so
+            that it has an empirical mean of zero. This has no effect on
+            the affine component.
 
         Other Parameters
         ------------------
@@ -853,6 +906,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.steps = steps
         self.patch = patch
         self.order = order
+        self.zero_center = zero_center
         self.shared_flow = shared_flow
 
     def make_final(self, x, max_depth=float('inf')):
@@ -871,6 +925,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         steps = self.steps
         patch = self.patch
         order = self.order
+        zero_center = self.zero_center
         shared_flow = self.shared_flow
 
         if isinstance(dmax, Sampler):
@@ -902,6 +957,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
             steps=steps,
             patch=patch,
             order=order,
+            zero_center=zero_center,
             shared=shared_flow,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
