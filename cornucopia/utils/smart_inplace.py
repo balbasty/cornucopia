@@ -152,3 +152,9 @@ def log_(x, **kwargs):
     if not torch.is_tensor(x):
         return math.log(x)
     return x.log(**kwargs) if x.requires_grad else x.log_(**kwargs)
+
+
+def atan_(x, **kwargs):
+    if not torch.is_tensor(x):
+        return math.atan(x)
+    return x.atan(**kwargs) if x.requires_grad else x.atan_(**kwargs)

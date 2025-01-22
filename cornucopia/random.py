@@ -152,9 +152,21 @@ class Fixed(Sampler):
         """
         super().__init__(value=value)
 
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.value) or
+            isinstance(n, (list, tuple))
+        )
+
     def __call__(self, n=None, **backend):
-        if isinstance(n, (list, tuple)):
-            return torch.full(n, self.value, **backend)
+        if self._use_torch(n):
+            n = tuple(ensure_list(n or []))
+            if not torch.is_tensor(self.value):
+                return torch.full(n, self.value, **backend)
+            else:
+                value = self.value[(None,) * len(n)]
+                n = n + (1,) * self.value.ndim
+                return torch.tile(value, n)
         return self.map(copy.deepcopy, self.value, n=n)
 
 
@@ -196,7 +208,8 @@ class Uniform(Sampler):
 
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
-            x = torch.rand(n or [], **backend)
+            n = tuple(ensure_list(n or []))
+            x = torch.rand(n, **backend)
             x = add_(mul_(x, self.max - self.min), self.min)
             return x
         return self.map(random.uniform, self.min, self.max, n=n)
@@ -241,7 +254,7 @@ class RandInt(Sampler):
 
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
-            n = tuple(n or [])
+            n = tuple(ensure_list(n or []))
             return torch.randint(
                 1 + self.max - self.min, n, **backend
             ).add_(self.min)
@@ -310,7 +323,8 @@ class Normal(Sampler):
 
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
-            x = torch.randn(n or [], **backend)
+            n = tuple(ensure_list(n or []))
+            x = torch.randn(n, **backend)
             x = add_(mul_(x, self.sigma), self.mu)
             return x
         return self.map(random.normalvariate, self.mu, self.sigma, n=n)
@@ -339,8 +353,10 @@ class LogNormal(Sampler):
 
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
-            x = torch.randn(n or [], **backend)
+            n = tuple(ensure_list(n or []))
+            x = torch.randn(n, **backend)
             x = exp_(add_(mul_(x, self.sigma), self.mu))
+            return x
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
 
 

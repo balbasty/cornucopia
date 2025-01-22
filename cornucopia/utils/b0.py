@@ -12,7 +12,8 @@ from torch import fft
 import math
 import itertools
 from .warps import identity as identity_grid, cartesian_grid
-from .py import prod
+from .py import prod, make_vector
+from .smart_inplace import mul_, div_
 
 
 r"""
@@ -207,8 +208,7 @@ def chi_to_fieldmap(
     shape = ds.shape[-dim:]
     zdim = zdim - ds.dim() if zdim >= 0 else zdim
     # ^ number from end so that we can apply to vx
-    vx = torch.as_tensor(vx).flatten().tolist()
-    vx += vx[-1:] * max(0, dim - len(vx))
+    vx = make_vector(vx, dim)
 
     if ds.dtype is torch.bool:
         ds = ds.to(**backend)
@@ -264,14 +264,14 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
     """
     def atan(num, den):
         """Robust atan"""
-        return torch.where(den.abs() > 1e-8,
-                           torch.atan_(num / den),
-                           torch.atan2(num, den))
+        den = den.clone()
+        den[(den < 1e-8) & (den >= 0)] += 1e-8
+        den[(den > -1e-8) & (den < 0)] -= 1e-8
+        return torch.atan2(num, den)
 
     dim = len(list(shape))
     dims = list(range(-dim, 0))
-    voxel_size = torch.as_tensor(voxel_size).flatten().tolist()
-    voxel_size += voxel_size[-1:] * max(0, dim - len(voxel_size))
+    voxel_size = make_vector(voxel_size, dim)
     zdim = -dim + zdim if zdim >= 0 else zdim  # use negative indexing
 
     if dim not in (2, 3):
@@ -291,15 +291,10 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
     # make zero-centered meshgrid
     g0 = identity_grid(shape, dtype=dtype, device=device)
     for g1, s in zip(g0.unbind(-1), shape):
-        # g1 -= int(math.ceil(s / 2))
         g1 -= (s-1) / 2
 
     def shift_and_scale_grid(grid, shift):
-        g = grid.clone()
-        for g1, v, t in zip(g.unbind(-1), voxel_size, shift):
-            g1 += t                         # apply shift
-            g1 *= v                         # convert to mm
-        return g
+        return mul_(grid + make_vector(shift).to(grid), voxel_size.to(grid))
 
     g = 0
     for shift in itertools.product([-0.5, 0.5], repeat=dim):
@@ -310,7 +305,7 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
         # G" is the second derivative of G wrt z.
         z = g1[..., zdim]
         if dim == 3:
-            r = g1.square().sum(-1).sqrt_()
+            r = g1.square().sum(-1).clamp_min_(1e-8).sqrt_()
             x = g1[..., odims[0]]
             y = g1[..., odims[1]]
             g1 = atan(x * y, z * r)
@@ -322,7 +317,7 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
         else:
             g += g1
 
-    g /= (2 ** (dim-1)) * math.pi
+    g = div_(g, (2 ** (dim-1)) * math.pi)
     g = fft.ifftshift(g, dims)  # move center voxel to first voxel
 
     # fourier transform
@@ -382,19 +377,24 @@ def susceptibility_phantom(shape, radius=None, dtype=None, device=None):
     f = identity_grid(shape, dtype=dtype, device=device)
     for comp, s in zip(f.unbind(-1), shape):
         comp -= s / 2
-    f = f.square().sum(-1).sqrt() <= radius
+    f = f.square().sum(-1).clamp_min_(1e-8).sqrt() <= radius
     return f
 
 
 def diff(x, ndim):
     """Forward finite differences"""
+
+    def diff1(out, inp, dim):
+        out = out.transpose(dim, 0)
+        inp = inp.transpose(dim, 0)
+        if inp.requires_grad:
+            out[:-1] = torch.sub(inp[1:], inp[:-1])
+        else:
+            torch.sub(inp[1:], inp[:-1], out=out[:-1])
+
     g = x.new_zeros([ndim, *x.shape])
-    for dim, g1 in enumerate(g):
-        dim = dim - ndim
-        g1 = g1.transpose(dim, 0)
-        x = x.transpose(dim, 0)
-        torch.sub(x[1:], x[:-1], out=g1[:-1])
-        x = x.transpose(dim, 0)
+    for dim in range(ndim):
+        diff1(g[dim], x, dim - ndim)
     g = g.movedim(0, -1)
     return g
 

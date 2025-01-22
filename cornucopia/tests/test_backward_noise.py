@@ -124,7 +124,7 @@ def test_backward_noise_gaussian_gfactor(shared, shared_field):
 
 @pytest.mark.parametrize("shared", [True, False])
 @pytest.mark.parametrize("shared_field", [True, False])
-def test_backward_noise_chi_gfactor(size, shared, shared_field):
+def test_backward_noise_chi_gfactor(shared, shared_field):
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     x = torch.zeros(SIZE)
@@ -138,7 +138,10 @@ def test_backward_noise_chi_gfactor(size, shared, shared_field):
         (s.grad is not None) and
         (mn.grad is not None) and
         (mx.grad is not None)
-    )
+    ),  [
+        k for k, v in {'s': s, 'mn': mn, 'mx': mx}.items()
+        if v.grad is None
+    ]
 
 
 @pytest.mark.parametrize("shared", [True, False])
@@ -160,4 +163,7 @@ def test_backward_noise_chi_random_gfactor(shared, shared_noise, shared_field):
         (s.grad is not None) and
         (mn.grad is not None) and
         (mx.grad is not None)
-    )
+    ), [
+        k for k, v in {'s': s, 'mn': mn, 'mx': mx}.items()
+        if v.grad is None
+    ]

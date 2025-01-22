@@ -30,7 +30,7 @@ from .base import FinalTransform, NonFinalTransform
 from .baseutils import prepare_output
 from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
 from .utils.conv import smoothnd
-from .utils.py import ensure_list
+from .utils.py import ensure_list, make_vector
 from .utils.morpho import bounded_distance
 from .utils.smart_inplace import mul_, div_, add_, sub_
 from . import ctx
@@ -240,7 +240,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.mu = mu
             self.sigma = sigma
-            self.fwhm = fwhm
+            self.fwhm = 0 if fwhm is None else fwhm
             self.background = background
             self.dtype = dtype
 
@@ -254,7 +254,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             if x.is_floating_point():
                 backend = dict(dtype=x.dtype, device=x.device)
                 y = torch.zeros_like(x[0])
-                fwhm = ensure_list(self.fwhm or [0], len(x))
+                fwhm = make_vector(self.fwhm, len(x), **backend)
                 for k in range(len(x)):
                     muk, sigmak = to(mu[k], y), to(sigma[k], y)
                     if self.background is not None and k == self.background:
@@ -269,7 +269,7 @@ class GaussianMixtureTransform(NonFinalTransform):
                                device=x.device)
                 y = torch.zeros_like(x, **backend)
                 nk = x.max().item()+1
-                fwhm = ensure_list(self.fwhm or [0], nk)
+                fwhm = make_vector(self.fwhm, nk, **backend)
                 for k in range(nk):
                     muk, sigmak = to(mu[k], y), to(sigma[k], y)
                     if self.background is not None and k == self.background:

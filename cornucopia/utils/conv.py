@@ -1,5 +1,5 @@
 from torch.nn import functional as F
-from .py import ensure_list
+from .py import ensure_list, make_vector
 from .padding import pad
 from .kernels import smoothing_kernel
 
@@ -256,7 +256,7 @@ def smoothnd(input, type='gauss', fwhm=1, basis=1, bound='dct2',
         This differs from the behaviour of torch's `conv*d`.
     """
     backend = dict(dtype=input.dtype, device=input.device)
-    fwhm = ensure_list(fwhm)
+    fwhm = make_vector(fwhm)
     if kernel is None or len(kernel) == 0:
         kernel = smoothing_kernel(type, fwhm, basis, **backend)
 

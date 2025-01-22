@@ -11,7 +11,7 @@ __all__ = [
 import torch
 import math
 from .baseutils import prepare_output
-from .base import FinalTransform, NonFinalTransform
+from .base import FinalTransform, NonFinalTransform, PerChannelTransform
 from .special import RandomizedTransform
 from .intensity import MulFieldTransform, AddValueTransform, MulValueTransform
 from .random import Uniform, RandInt, Fixed, make_range
@@ -242,13 +242,16 @@ class GFactorTransform(NonFinalTransform):
 
         def xform(self, x):
             noisetrf = self.noisetrf.make_final(x)
+            print(noisetrf)
             with ctx.returns(noisetrf, 'noise'):
                 noise = noisetrf(x)
             with ctx.returns(self.gfactor, ['output', 'field']):
                 scalednoise, gfactor = self.gfactor(noise)
-            self.noisetrf.noise = scalednoise
-            y = self.noisetrf(x)
-            self.noisetrf.noise = noise
+            if isinstance(noisetrf, PerChannelTransform):
+                # FIXME this is messy -- hope this works in most cases
+                noisetrf = noisetrf.transforms[0]
+            scalednoisetrf = type(noisetrf)(scalednoise)
+            y = scalednoisetrf(x)
             return prepare_output(
                 dict(input=x, output=y, noise=noise,
                      scalednoise=scalednoise, gfactor=gfactor),

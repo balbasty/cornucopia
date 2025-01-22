@@ -18,7 +18,7 @@ from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform
 from .baseutils import prepare_output
 from .utils.conv import smoothnd
-from .utils.py import ensure_list
+from .utils.py import make_vector
 from .random import Sampler, Uniform, RandInt, make_range
 
 
@@ -42,7 +42,7 @@ class SmoothTransform(FinalTransform):
         self.fwhm = fwhm
 
     def xform(self, x):
-        return smoothnd(x, fwhm=ensure_list(self.fwhm, x.dim()-1))
+        return smoothnd(x, fwhm=make_vector(self.fwhm, x.dim()-1))
 
 
 class RandomSmoothTransform(RandomizedTransform):
@@ -243,7 +243,7 @@ class LowResTransform(NonFinalTransform):
                     x[None], size=shape, align_corners=True, mode=mode
                 )[0]
 
-            resolution = ensure_list(self.resolution, ndim)
+            resolution = make_vector(self.resolution, ndim)
             y = smoothnd(x, fwhm=resolution)
             factor = [1/r for r in resolution]
             ishape = x.shape[1:]
@@ -279,7 +279,7 @@ class LowResTransform(NonFinalTransform):
         noise = None
         if self.noise:
             ndim = x.dim() - 1
-            resolution = ensure_list(self.resolution, ndim)
+            resolution = make_vector(self.resolution, ndim)
             factor = [1/r for r in resolution]
             oshape = [math.ceil(s*f) for s, f in zip(x.shape[1:], factor)]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])

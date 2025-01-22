@@ -13,7 +13,7 @@ SEED = 12345678
 SIZE = (1, 32, 32)
 
 
-def test_run_kspace_coils():
+def test_backward_kspace_coils():
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     f = torch.full([], 0.5, requires_grad=True)
@@ -29,7 +29,7 @@ def test_run_kspace_coils():
     )
 
 
-def test_run_kspace_ssq():
+def test_backward_kspace_ssq():
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     x = torch.randn(SIZE)
@@ -51,7 +51,7 @@ def test_run_kspace_ssq():
 @pytest.mark.parametrize("pattern", ('sequential', 'random'))
 @pytest.mark.parametrize("axis", (1, -1))
 @pytest.mark.parametrize("freq", (True, False))
-def test_run_kspace_motion(pattern, axis, freq):
+def test_backward_kspace_motion(pattern, axis, freq):
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     x = torch.randn(SIZE)
@@ -71,7 +71,7 @@ def test_run_kspace_motion(pattern, axis, freq):
     )
 
 
-def test_run_kspace_motion_coils():
+def test_backward_kspace_motion_coils():
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     x = torch.randn(SIZE)
@@ -97,7 +97,7 @@ def test_run_kspace_motion_coils():
 
 
 @pytest.mark.parametrize("axis", (1, -1))
-def test_run_kspace_motion_small(axis):
+def test_backward_kspace_motion_small(axis):
     random.seed(SEED)
     torch.random.manual_seed(SEED)
     x = torch.randn(SIZE)
