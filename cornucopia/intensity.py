@@ -28,6 +28,7 @@ from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
+from .utils.smart_inplace import add_, mul_, div_, pow_
 
 
 class OpConstTransform(FinalTransform):
@@ -118,7 +119,7 @@ class FillValueTransform(FinalTransform):
 
 
 class AddMulTransform(FinalTransform):
-    """Constant intensity affine transform"""
+    """Constant intensity affine transform: `y = x * slope + offset`"""
 
     def __init__(self, slope=1, offset=0, **kwargs):
         """
@@ -441,7 +442,7 @@ class BaseFieldTransform(NonFinalTransform):
         if len(b) < batch:
             b = b.expand([batch, *b.shape[1:]]).clone()
 
-        b.mul_(self.vmax-self.vmin).add_(self.vmin)
+        b = add_(mul_(b, self.vmax-self.vmin), self.vmin)
 
         return self.finalklass(
             b, value_name=self.value_name, **self.get_prm()
@@ -686,9 +687,16 @@ class GammaTransform(NonFinalTransform):
 
             # we add a little epsilon to avoid have nans when the
             # image is full of zeros
-            y = x.sub(vmin).div_((vmax - vmin).clamp_min_(1e-8))
-            y = y.pow_(gamma)
-            y = y.mul_(vmax - vmin).add_(vmin)
+
+            y = div_(x.sub(vmin), (vmax - vmin).clamp_min_(1e-8))
+            y = pow_(y, gamma)
+            if gamma.requires_grad:
+                # When gamma requires grad,  mul_(y, vmax-vmin) is happy
+                # to overwrite y, but we cant because we need y to
+                # backprop through pow. So we need an explicit branch.
+                y = torch.add(torch.mul(y, vmax - vmin), vmin)
+            else:
+                y = add_(mul_(y, vmax - vmin), vmin)
 
             return prepare_output(
                 dict(input=x, output=y, vmin=vmin, vmax=vmax, gamma=gamma),
@@ -812,9 +820,13 @@ class ZTransform(NonFinalTransform):
             opt = dict()
         else:
             opt = dict(dim=list(range(1, x.ndim)), keepdim=True)
-        mu, sigma = x.mean(**opt), x.std(**opt)
+        mu0, sigma0 = x.mean(**opt), x.std(**opt)
+        mu1 = self.mu if self.mu is not None else mu0
+        sigma1 = self.sigma if self.sigma is not None else sigma0
+        scale = sigma1 / sigma0
+        offset = mu1 - mu0 * scale
         return AddMulTransform(
-            1/sigma, -mu/sigma, **self.get_prm()
+            scale, offset, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 

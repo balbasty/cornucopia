@@ -117,6 +117,29 @@ def returns_find(flag, returned, returns):
             return None
 
 
+def returns_update(value, flag, returned, returns):
+    """Find tensor corresponding to flag in returned structure"""
+    if returns is None:
+        if flag == 'output':
+            return value
+        else:
+            return None
+    if isinstance(returns, dict):
+        if flag in returns:
+            returned[flag] = value
+        return returned
+    elif isinstance(returns, (list, tuple)):
+        if flag in returns:
+            returned[returns.index(flag)] = value
+        return returned
+    else:
+        assert isinstance(returns, str)
+        if returns == flag:
+            return value
+        else:
+            return None
+
+
 def flatstruct(x):
     """Flatten a nested structure of tensors"""
 

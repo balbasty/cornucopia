@@ -11,10 +11,11 @@ __all__ = [
 import torch
 import math
 from .baseutils import prepare_output
-from .base import FinalTransform, NonFinalTransform
+from .base import FinalTransform, NonFinalTransform, PerChannelTransform
 from .special import RandomizedTransform
 from .intensity import MulFieldTransform, AddValueTransform, MulValueTransform
 from .random import Uniform, RandInt, Fixed, make_range
+from .utils.smart_inplace import mul_, add_, sqrt_
 from . import ctx
 
 
@@ -62,7 +63,7 @@ class GaussianNoiseTransform(NonFinalTransform):
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
         noise = torch.randn(shape, dtype=dtype, device=x.device)
-        noise = noise.mul_(self.sigma)
+        noise = mul_(noise, self.sigma)
         return self.Final(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -119,7 +120,7 @@ class ChiNoiseTransform(NonFinalTransform):
 
         def xform(self, x):
             noise = self.noise.to(x)
-            y = x.square().add_(noise.square()).sqrt_()
+            y = sqrt_(add_(x.square(), noise.square()))
             return prepare_output(
                 dict(input=x, output=y, noise=noise),
                 self.returns
@@ -160,11 +161,12 @@ class ChiNoiseTransform(NonFinalTransform):
         mu = math.sqrt(2) * math.gamma((df+1)/2) / math.gamma(df/2)
         noise = 0
         for _ in range(self.nb_channels):
-            noise += torch.randn(
-                shape, dtype=dtype, device=x.device
-            ).square_()
+            noise += torch.randn(shape, dtype=dtype, device=x.device).square_()
         noise = noise.sqrt_()
-        noise *= self.sigma / math.sqrt(df - mu*mu)
+
+        # scale to reach target variance
+        sigma = self.sigma / math.sqrt(df - mu*mu)
+        noise = mul_(noise, sigma)
 
         return self.Final(
             noise, **self.get_prm()
@@ -240,13 +242,16 @@ class GFactorTransform(NonFinalTransform):
 
         def xform(self, x):
             noisetrf = self.noisetrf.make_final(x)
+            print(noisetrf)
             with ctx.returns(noisetrf, 'noise'):
                 noise = noisetrf(x)
             with ctx.returns(self.gfactor, ['output', 'field']):
                 scalednoise, gfactor = self.gfactor(noise)
-            self.noisetrf.noise = scalednoise
-            y = self.noisetrf(x)
-            self.noisetrf.noise = noise
+            if isinstance(noisetrf, PerChannelTransform):
+                # FIXME this is messy -- hope this works in most cases
+                noisetrf = noisetrf.transforms[0]
+            scalednoisetrf = type(noisetrf)(scalednoise)
+            y = scalednoisetrf(x)
             return prepare_output(
                 dict(input=x, output=y, noise=noise,
                      scalednoise=scalednoise, gfactor=gfactor),
@@ -338,7 +343,8 @@ class GammaNoiseTransform(NonFinalTransform):
         alpha = self.mean * beta
         alpha = torch.as_tensor(alpha, dtype=x.dtype, device=x.device)
         beta = torch.as_tensor(beta, dtype=x.dtype, device=x.device)
-        noise = torch.distributions.Gamma(alpha, beta).sample(shape)
+        noise = torch.distributions.Gamma(alpha, beta).rsample(shape)
+        # ^ rsample() allows backprop, whereas sample() does not
         return self.Final(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)

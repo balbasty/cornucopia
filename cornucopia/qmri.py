@@ -16,14 +16,15 @@ __all__ = [
 
 import torch
 import math
-from .base import FinalTransform, NonFinalTransform
-from .baseutils import prepare_output, returns_find
+from .base import FinalTransform, NonFinalTransform, Transform
+from .baseutils import prepare_output, returns_find, returns_update
 from .labels import GaussianMixtureTransform
 from .intensity import (
     RandomMulFieldTransform, AddValueTransform, MulValueTransform
 )
 from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import ensure_list, make_vector
+from .utils.smart_inplace import exp_, div_
 from .utils import b0
 
 
@@ -101,7 +102,7 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         if isinstance(self.mu_tissue, Sampler):
             for i in label_tissue:
                 mu[i] = self.mu_tissue()
-        elif isinstance(self.mu, (list, tuple)):
+        elif isinstance(self.mu_tissue, (list, tuple)):
             for i in label_tissue:
                 mu[i] = self.mu_tissue[i]
         else:
@@ -111,7 +112,7 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         if isinstance(self.sigma_tissue, Sampler):
             for i in label_tissue:
                 sigma[i] = self.sigma_tissue()
-        elif isinstance(self.mu, (list, tuple)):
+        elif isinstance(self.sigma_tissue, (list, tuple)):
             for i in label_tissue:
                 sigma[i] = self.sigma_tissue[i]
         else:
@@ -121,17 +122,17 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         if isinstance(self.mu_bone, Sampler):
             for i in label_bone:
                 mu[i] = self.mu_bone()
-        elif isinstance(self.mu, (list, tuple)):
+        elif isinstance(self.mu_bone, (list, tuple)):
             for i in label_bone:
                 mu[i] = self.mu_bone[i]
         else:
             for i in label_tissue:
-                mu[i] = self.mu_tissue
+                mu[i] = self.mu_bone
 
         if isinstance(self.sigma_bone, Sampler):
             for i in label_bone:
                 sigma[i] = self.sigma_bone()
-        elif isinstance(self.mu, (list, tuple)):
+        elif isinstance(self.sigma_bone, (list, tuple)):
             for i in label_bone:
                 sigma[i] = self.sigma_bone[i]
         else:
@@ -180,7 +181,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
             Voxel size
         mask_air : bool
             Mask air (where delta susceptibility == 0) from
-            reuslting fieldmap.
+            resulting fieldmap.
 
         """
         super().__init__(**kwargs)
@@ -228,17 +229,17 @@ class ShimTransform(FinalTransform):
 
     def xform(self, x):
         ndim = x.ndim - 1
-        order = 1 if self.quadratic is None else 1
+        order = 1 if self.quadratic is None else 2
         nb_lin = 3 if ndim == 3 else 1
-        nb_quad = 2 if ndim == 3 else 1
+        nb_quad = 0 if order < 2 else 2 if ndim == 3 else 1
         if self.linear is None:
             linear = [0] * nb_lin
         else:
-            linear = make_vector(self.linear, nb_lin).tolist()
+            linear = make_vector(self.linear, nb_lin).unbind()
         if self.quadratic is None:
             quadratic = [0] * nb_quad
         else:
-            quadratic = make_vector(self.quadratic, nb_quad).tolist()
+            quadratic = make_vector(self.quadratic, nb_quad).unbind()
         basis = b0.yield_spherical_harmonics(x.shape[1:], order=order)
 
         shim = 0
@@ -252,7 +253,7 @@ class ShimTransform(FinalTransform):
             shim += alpha * b
         y = x + shim
         return prepare_output(
-            dict(input=x, outut=y, shim=shim), self.returns
+            dict(input=x, output=y, shim=shim), self.returns
         )
 
 
@@ -316,7 +317,7 @@ class RandomShimTransform(NonFinalTransform):
         coefficients : int or Sampler
             Sampler for spherical harmonics coefficients (or upper bound)
         max_order : int or Sampler
-            Sampler for spherical harminocs order (or upper bound)
+            Sampler for spherical harmonics order (or upper bound)
 
         Other Parameters
         ------------------
@@ -325,7 +326,7 @@ class RandomShimTransform(NonFinalTransform):
         """
         super().__init__(shared=shared, **kwargs)
         self.coefficients = Uniform.make(make_range(0, coefficients))
-        self.max_order = RandInt.make(make_range(0, max_order))
+        self.max_order = RandInt.make(make_range(1, max_order))
 
     def make_final(self, x, max_depth=float('inf')):
         ndim = x.ndim - 1
@@ -357,7 +358,7 @@ class RandomShimTransform(NonFinalTransform):
         quad = coefficients[nb_lin:]
 
         return ShimTransform(
-            lin, quad, **self.get_prm()
+            lin, None if order < 2 else quad, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
@@ -476,10 +477,10 @@ class GradientEchoTransform(FinalTransform):
 
         e1 = (-self.tr) / t1
         e2 = (-self.te) / t2
-        e1 = e1.exp() if torch.is_tensor(e1) else math.exp(e1)
-        e2 = e2.exp() if torch.is_tensor(e2) else math.exp(e2)
+        e1 = exp_(e1)
+        e2 = exp_(e2)
         s = pd * sinalpha * e2 * (1 - mt) * (1 - e1)
-        s /= (1 - (1 - mt) * cosalpha * e1)
+        s = div_(s, (1 - (1 - mt) * cosalpha * e1))
 
         return prepare_output(
             dict(input=x, pd=pd, t1=t1, t2=t2, b1=b1, mt=mt,
@@ -528,44 +529,49 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         self.t1 = Uniform.make(make_range(0, t1))
         self.t2 = Uniform.make(make_range(0, t2))
         self.mt = Uniform.make(make_range(0, mt))
-        self.b1 = b1
         self.sigma = 1 + Uniform.make(make_range(0, sigma))
         self.fwhm = Uniform.make(make_range(0, fwhm))
+        self.b1 = b1
 
     def get_parameters(self, x):
         dtype = (x.dtype if x.dtype.is_floating_point
                  else torch.get_default_dtype())
+        backend = dict(dtype=dtype, device=x.device)
         n = len(x) if x.dtype.is_floating_point else x.max() + 1
         tr = self.tr() if isinstance(self.tr, Sampler) else self.tr
         te = self.te() if isinstance(self.te, Sampler) else self.te
         alpha = self.alpha() if isinstance(self.alpha, Sampler) else self.alpha
-        pd = ensure_list(
+        pd = make_vector(
             self.pd(n) if isinstance(self.pd, Sampler) else self.pd,
-            n
+            n, **backend
         )
-        t1 = ensure_list(
+        t1 = make_vector(
             self.t1(n) if isinstance(self.t1, Sampler) else self.t1,
-            n
+            n, **backend
         )
-        t2 = ensure_list(
+        t2 = make_vector(
             self.t2(n) if isinstance(self.t2, Sampler) else self.t2,
-            n
+            n, **backend
         )
-        mt = ensure_list(
+        mt = make_vector(
             self.mt(n) if isinstance(self.mt, Sampler) else self.mt,
-            n
+            n, **backend
         )
-        sigma = ensure_list(
+        sigma = make_vector(
             self.sigma(n*4) if isinstance(self.sigma, Sampler) else self.sigma,
-            n*4
+            n*4, **backend
         )
-        fwhm = ensure_list(
+        fwhm = make_vector(
             self.fwhm(n*4) if isinstance(self.fwhm, Sampler) else self.fwhm,
-            n*4
+            n*4, **backend
         )
-        if self.b1:
-            b1 = self.b1.make_final(x)
-            b1 = b1(x.new_ones([], dtype=dtype).expand(x.shape))
+        if self.b1 is not None:
+            b1 = self.b1
+            if isinstance(b1, Transform):
+                b1 = b1.make_final(x)
+                b1 = b1(x.new_ones([], dtype=dtype).expand(x.shape))
+            elif isinstance(self.b1, Sampler):
+                b1 = b1()
         else:
             b1 = 1
         return tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm
@@ -577,34 +583,37 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm = self.get_parameters(x)
 
         def logit(x):
-            return math.log(x) - math.log(1-x)
+            return (x).log() - (1-x).log()
 
         def sigmoid_(x):
-            return x.neg_().exp_().add_(1).reciprocal_()
+            if x.requires_grad:
+                return x.neg().exp().add(1).reciprocal()
+            else:
+                return x.neg_().exp_().add_(1).reciprocal_()
 
-        logpd = list(map(math.log, pd))
-        logt1 = list(map(math.log, t1))
-        logt2 = list(map(math.log, t2))
-        logmt = list(map(logit, mt))
-        logsigma = list(map(math.log, sigma))
+        logpd = pd.log()
+        logt1 = t1.log()
+        logt2 = t2.log()
+        logmt = logit(mt)
+        logsigma = sigma.log()
 
         dtype = x.dtype if x.is_floating_point() else torch.get_default_dtype()
         y = x.new_zeros([5, *x.shape[1:]], dtype=dtype)
         # PD
-        y[0] = GaussianMixtureTransform(
+        y[0] = exp_(GaussianMixtureTransform(
             mu=logpd, sigma=logsigma[:n], fwhm=fwhm[:n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # T1
-        y[1] = GaussianMixtureTransform(
+        y[1] = exp_(GaussianMixtureTransform(
             mu=logt1, sigma=logsigma[n:2*n], fwhm=fwhm[n:2*n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # T2*
-        y[2] = GaussianMixtureTransform(
+        y[2] = exp_(GaussianMixtureTransform(
             mu=logt2, sigma=logsigma[2*n:3*n], fwhm=fwhm[2*n:3*n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # B1
         y[4:] = b1
         # MT
@@ -647,6 +656,5 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             y = self.fwd(y)
 
             out = returns_find('output', y, self.fwd.returns)
-            if out is not None:
-                out.copy_(self.mask(out))
+            y = returns_update(self.mask(out), 'output', y, self.fwd.returns)
             return y

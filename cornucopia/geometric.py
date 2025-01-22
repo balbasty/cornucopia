@@ -20,7 +20,8 @@ from .base import NonFinalTransform, FinalTransform
 from .baseutils import prepare_output, return_requires
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils import warps
-from .utils.py import ensure_list, cast_like
+from .utils.py import ensure_list, cast_like, make_vector
+from .utils.smart_inplace import add_
 
 
 class ElasticTransform(NonFinalTransform):
@@ -128,8 +129,13 @@ class ElasticTransform(NonFinalTransform):
         if self.unit == 'fov':
             dmax = [d * f for d, f in zip(dmax, fullshape)]
         controls = torch.rand([batch, ndim, *smallshape], **backend)
+        controls = controls.sub_(0.5).mul_(2)
         for d in range(ndim):
-            controls[:, d].sub_(0.5).mul_(2*dmax[d])
+            if getattr(dmax[d], 'requires_grad', False):
+                controls1 = controls[:, d].clone()
+                controls[:, d].copy_(dmax[d]*controls1)
+            else:
+                controls[:, d].mul_(dmax[d])
         if flow:
             if self.order == 1:
                 mode = ('trilinear' if len(fullshape) == 3 else
@@ -431,21 +437,17 @@ class AffineTransform(NonFinalTransform):
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
 
-        rotations = ensure_list(self.rotations, ndim * (ndim - 1) // 2)
-        shears = ensure_list(self.shears, ndim * (ndim - 1) // 2)
-        translations = ensure_list(self.translations, ndim)
-        zooms = ensure_list(self.zooms, ndim)
-        offsets = [(n-1)/2 for n in fullshape]
+        rotations = make_vector(
+            self.rotations, ndim * (ndim - 1) // 2, **backend
+        )
+        shears = make_vector(self.shears, ndim * (ndim - 1) // 2, **backend)
+        translations = make_vector(self.translations, ndim, **backend)
+        zooms = make_vector(self.zooms, ndim, **backend)
+        offsets = torch.as_tensor([(n-1)/2 for n in fullshape], **backend)
 
         if self.unit == 'fov':
-            translations = [t * n for t, n in zip(translations, fullshape)]
-        rotations = [r * math.pi / 180 for r in rotations]
-
-        rotations = torch.as_tensor(rotations, **backend)
-        shears = torch.as_tensor(shears, **backend)
-        translations = torch.as_tensor(translations, **backend)
-        zooms = torch.as_tensor(zooms, **backend)
-        offsets = torch.as_tensor(offsets, **backend)
+            translations = translations * torch.as_tensor(fullshape, **backend)
+        rotations = rotations * (math.pi/180)
 
         E = torch.eye(ndim+1, **backend)
         # offset to center
@@ -741,12 +743,12 @@ class AffineElasticTransform(NonFinalTransform):
         if self.steps:
             # request the blown up and exponentiated field
             xform = self.elastic.make_final(x, flow=True)
-            eslasticflow, controls = xform.flow, xform.controls
+            elasticflow, controls = xform.flow, xform.controls
             # (C, D, *shape)
         else:
             # request only the spline control points
             controls = self.elastic.make_final(x, flow=False).controls
-            eslasticflow = None
+            elasticflow = None
 
         # 1) start from identity
         patchshape = ensure_list(self.patch or fullshape, ndim)
@@ -760,17 +762,20 @@ class AffineElasticTransform(NonFinalTransform):
 
         # 2.) apply affine transform
         flow = A[:ndim, :ndim].matmul(flow.unsqueeze(-1)).squeeze(-1)
-        flow = flow.add_(A[:ndim, -1])
+        flow = add_(flow, A[:ndim, -1])
 
         # 3) compose with elastic transform
-        if eslasticflow is not None:
+        if elasticflow is not None:
             # we sample into the blown up elastic flow,
             # which has the size of the full image
-            flow = warps.apply_flow(
-                eslasticflow, flow,
-                padding_mode='zeros',
-                has_identity=True,
-            ).add_(flow.movedim(-1, 0))
+            flow = add_(
+                warps.apply_flow(
+                    elasticflow, flow,
+                    padding_mode='zeros',
+                    has_identity=True,
+                ),
+                flow.movedim(-1, 0)
+            )
         else:
             # we sample into the spline control points
             # and must rescale the sampling coordinates accordingly
@@ -779,18 +784,25 @@ class AffineElasticTransform(NonFinalTransform):
             scale = torch.as_tensor(scale, **backend)
             if self.elastic.order == 1:
                 # we can use pytorch
-                flow = warps.apply_flow(
-                    controls, flow * scale,
-                    padding_mode='zeros',
-                    has_identity=True,
-                ).add_(flow.movedim(-1, 0))
+                flow = add_(
+                    warps.apply_flow(
+                        controls, flow * scale,
+                        padding_mode='zeros',
+                        has_identity=True,
+                    ),
+                    flow.movedim(-1, 0),
+                )
             else:
                 # we must use torch-interpol
-                flow = interpol.grid_pull(
-                    controls, flow * scale,
-                    bound='zero',
-                    interpolation=self.elastic.order,
-                ).add_(flow.movedim(-1, 0))
+                # (for some reason we cannot add inplace here)
+                flow = (
+                    interpol.grid_pull(
+                        controls, flow * scale,
+                        bound='zero',
+                        interpolation=self.elastic.order,
+                    ) +
+                    flow.movedim(-1, 0)
+                )
 
         return self.Final(
             flow, controls, A, self.elastic.bound, **self.get_prm()
