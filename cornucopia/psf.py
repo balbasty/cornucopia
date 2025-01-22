@@ -11,14 +11,15 @@ __all__ = [
     'RandomLowResSliceTransform',
 ]
 
+import math
+from torch.nn.functional import interpolate
+
 from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform
 from .baseutils import prepare_output
 from .utils.conv import smoothnd
 from .utils.py import ensure_list
 from .random import Sampler, Uniform, RandInt, make_range
-from torch.nn.functional import interpolate
-import math
 
 
 class SmoothTransform(FinalTransform):

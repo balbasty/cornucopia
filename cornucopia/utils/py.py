@@ -70,7 +70,10 @@ def make_vector(input, n=None, crop=True, *args,
         default = kwargs['default']
     else:
         default = input[-1]
-    default = input.new_full([n-len(input)], default)
+    if torch.is_tensor(default):
+        default = torch.stack([default] * (n-len(input)))
+    else:
+        default = input.new_full([n-len(input)], default)
     return torch.cat([input, default])
 
 

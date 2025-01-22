@@ -13,6 +13,7 @@ import copy
 import torch
 from numbers import Number
 from .utils.py import ensure_list
+from .utils.smart_inplace import add_, mul_, exp_
 
 
 class Sampler:
@@ -186,11 +187,18 @@ class Uniform(Sampler):
             max = kwargs['max']
         super().__init__(min=min, max=max)
 
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.min) or
+            torch.is_tensor(self.max) or
+            isinstance(n, (list, tuple))
+        )
+
     def __call__(self, n=None, **backend):
-        if isinstance(n, (list, tuple)):
-            return torch.rand(
-                n, **backend
-            ).mul_(self.max - self.min).add_(self.min)
+        if self._use_torch(n):
+            x = torch.rand(n or [], **backend)
+            x = add_(mul_(x, self.max - self.min), self.min)
+            return x
         return self.map(random.uniform, self.min, self.max, n=n)
 
 
@@ -224,9 +232,16 @@ class RandInt(Sampler):
             raise ValueError('Expected at least one argument')
         super().__init__(min=min, max=max)
 
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.min) or
+            torch.is_tensor(self.max) or
+            isinstance(n, (list, tuple))
+        )
+
     def __call__(self, n=None, **backend):
-        if isinstance(n, (list, tuple)):
-            n = tuple(n)
+        if self._use_torch(n):
+            n = tuple(n or [])
             return torch.randint(
                 1 + self.max - self.min, n, **backend
             ).add_(self.min)
@@ -286,9 +301,18 @@ class Normal(Sampler):
         """
         super().__init__(mu=mu, sigma=sigma)
 
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.mu) or
+            torch.is_tensor(self.sigma) or
+            isinstance(n, (list, tuple))
+        )
+
     def __call__(self, n=None, **backend):
-        if isinstance(n, (list, tuple)):
-            return torch.randn(n, **backend).mul_(self.sigma).add_(self.mu)
+        if self._use_torch(n):
+            x = torch.randn(n or [], **backend)
+            x = add_(mul_(x, self.sigma), self.mu)
+            return x
         return self.map(random.normalvariate, self.mu, self.sigma, n=n)
 
 
@@ -306,11 +330,17 @@ class LogNormal(Sampler):
         """
         super().__init__(mu=mu, sigma=sigma)
 
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.mu) or
+            torch.is_tensor(self.sigma) or
+            isinstance(n, (list, tuple))
+        )
+
     def __call__(self, n=None, **backend):
-        if isinstance(n, (list, tuple)):
-            return torch.randn(
-                n, **backend
-            ).mul_(self.sigma).add_(self.mu).exp_()
+        if self._use_torch(n):
+            x = torch.randn(n or [], **backend)
+            x = exp_(add_(mul_(x, self.sigma), self.mu))
         return self.map(random.lognormvariate, self.mu, self.sigma, n=n)
 
 

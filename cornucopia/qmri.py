@@ -24,6 +24,7 @@ from .intensity import (
 )
 from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import ensure_list, make_vector
+from .utils.smart_inplace import exp_, div_, add_, neg_, reciprocal_
 from .utils import b0
 
 
@@ -476,10 +477,10 @@ class GradientEchoTransform(FinalTransform):
 
         e1 = (-self.tr) / t1
         e2 = (-self.te) / t2
-        e1 = e1.exp() if torch.is_tensor(e1) else math.exp(e1)
-        e2 = e2.exp() if torch.is_tensor(e2) else math.exp(e2)
+        e1 = exp_(e1)
+        e2 = exp_(e2)
         s = pd * sinalpha * e2 * (1 - mt) * (1 - e1)
-        s /= (1 - (1 - mt) * cosalpha * e1)
+        s = div_(s, (1 - (1 - mt) * cosalpha * e1))
 
         return prepare_output(
             dict(input=x, pd=pd, t1=t1, t2=t2, b1=b1, mt=mt,
@@ -580,7 +581,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             return math.log(x) - math.log(1-x)
 
         def sigmoid_(x):
-            return x.neg_().exp_().add_(1).reciprocal_()
+            return reciprocal_(add_(exp_(neg_(x)), 1))
 
         logpd = list(map(math.log, pd))
         logt1 = list(map(math.log, t1))
@@ -591,20 +592,20 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         dtype = x.dtype if x.is_floating_point() else torch.get_default_dtype()
         y = x.new_zeros([5, *x.shape[1:]], dtype=dtype)
         # PD
-        y[0] = GaussianMixtureTransform(
+        y[0] = exp_(GaussianMixtureTransform(
             mu=logpd, sigma=logsigma[:n], fwhm=fwhm[:n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # T1
-        y[1] = GaussianMixtureTransform(
+        y[1] = exp_(GaussianMixtureTransform(
             mu=logt1, sigma=logsigma[n:2*n], fwhm=fwhm[n:2*n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # T2*
-        y[2] = GaussianMixtureTransform(
+        y[2] = exp_(GaussianMixtureTransform(
             mu=logt2, sigma=logsigma[2*n:3*n], fwhm=fwhm[2*n:3*n],
             background=0, dtype=dtype
-        )(x).exp_().squeeze(0)
+        )(x)).squeeze(0)
         # B1
         y[4:] = b1
         # MT

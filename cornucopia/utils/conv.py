@@ -1,4 +1,3 @@
-import torch
 from torch.nn import functional as F
 from .py import ensure_list
 from .padding import pad
@@ -54,18 +53,24 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
     batch = tensor.shape[:-(ndim+has_channels)]
     spatial_in = tensor.shape[(-ndim):]
     if has_channels and tensor.shape[-(ndim+has_channels)] != channels_in:
-        raise ValueError('Number of input channels not consistent: '
-                         'Got {} (kernel) and {} (tensor).' .format(
-                         channels_in, tensor.shape[-(ndim+has_channels)]))
+        raise ValueError(
+            'Number of input channels not consistent: '
+            'Got {} (kernel) and {} (tensor).'.format(
+                channels_in, tensor.shape[-(ndim+has_channels)]
+            )
+        )
     tensor = tensor.reshape([-1, channels_in, *spatial_in])
     if bias:
         bias = bias.flatten()
         if bias.numel() == 1:
             bias = bias.expand(channels_out)
         elif bias.numel() != channels_out:
-            raise ValueError('Number of output channels not consistent: '
-                             'Got {} (kernel) and {} (bias).' .format(
-                             channels_out, bias.numel()))
+            raise ValueError(
+                'Number of output channels not consistent: '
+                'Got {} (kernel) and {} (bias).' .format(
+                    channels_out, bias.numel()
+                )
+            )
 
     # Perform padding
     dilation = ensure_list(dilation, ndim)

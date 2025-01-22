@@ -13,7 +13,8 @@ from .baseutils import prepare_output, return_requires
 from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
 from .random import Fixed
-from .utils.py import cartesian_grid
+from .utils.warps import identity
+from .utils.smart_inplace import sqrt_, square_, abs_, mul_, exp_, sub_, add_
 from . import ctx
 
 
@@ -29,8 +30,8 @@ class ArrayCoilTransform(NonFinalTransform):
         def xform(self, x):
             sens = self.sens.to(x.device)
             uncombined = x * sens
-            netsens = sens.abs().square().sum(0).sqrt_()[None]
-            sos = uncombined.abs().square().sum(0).sqrt_()[None]
+            netsens = sqrt_(square_(sens.abs()).sum(0))[None]
+            sos = sqrt_(square_(uncombined.abs()).sum(0))[None]
             return prepare_output(
                 dict(input=x, sos=sos, output=uncombined,
                      uncombined=uncombined, netsens=netsens, sens=sens),
@@ -89,29 +90,35 @@ class ArrayCoilTransform(NonFinalTransform):
         smooth_bias = MulFieldTransform(shape=self.shape, vmin=-1, vmax=1)
         smooth_bias = smooth_bias(fake_x)
         phase = smooth_bias[::2].atan2(smooth_bias[1::2])
-        magnitude = (smooth_bias[0::2].square() +
-                     smooth_bias[1::2].square()).sqrt_()
+        magnitude = sqrt_(smooth_bias[0::2].square() +
+                          smooth_bias[1::2].square())
 
         fov = torch.as_tensor(x.shape[1:], **backend)
-        grid = torch.stack(cartesian_grid(x.shape[1:], **backend), -1)
         fwhm = self.fwhm
         if self.unit == 'fov':
             fwhm = fwhm * fov
         lam = (2.355 / fwhm) ** 2
         for k in range(self.ncoils):
             loc = torch.randn(ndim, **backend)
-            loc /= loc.square().sum().sqrt()
-            loc *= self.diameter
+            loc /= loc.square().sum().sqrt_()
+            loc = mul_(loc, self.diameter)
             if self.jitter:
-                jitter = torch.rand(ndim, **backend) * self.jitter
-                loc += jitter
+                jitter = torch.rand(ndim, **backend)
+                jitter = mul_(jitter, self.jitter)
+                loc = add_(loc, jitter)
             loc = (1 + loc) / 2
             if self.unit == 'fov':
-                loc *= fov
-            exp_bias = (grid-loc).square_().mul_(lam).sum(-1).mul_(-0.5).exp_()
-            magnitude[k] *= exp_bias
+                loc = mul_(loc, fov)
+            exp_bias = sub_(identity(x.shape[1:], **backend), loc)
+            exp_bias = mul_(square_(exp_bias), lam).sum(-1)
+            exp_bias = exp_(mul_(exp_bias, -0.5))
+            if exp_bias.requires_grad:
+                magnitude_k = magnitude[k].clone()
+                magnitude[k].copy_(magnitude_k * exp_bias)
+            else:
+                mul_(magnitude[k], exp_bias)
 
-        sens = (1j * phase).exp_().mul_(magnitude)
+        sens = mul_(exp_(1j * phase), magnitude)
         return self.FinalArrayCoilTransform(
             sens, **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -121,7 +128,7 @@ class SumOfSquaresTransform(FinalTransform):
     """Compute the sum-of-squares across coils/channels"""
 
     def xform(self, x):
-        return x.abs().square_().sum(0, keepdim=True).sqrt_()
+        return sqrt_(square_(abs_(x)).sum(0, keepdim=True))
 
 
 class IntraScanMotionTransform(NonFinalTransform):
