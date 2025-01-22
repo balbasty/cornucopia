@@ -504,7 +504,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             postproc = IdentityTransform()
         self.postproc_labels = postproc
         self.deform = RandomAffineElasticTransform(
-            elastic or 0,
+            0 if elastic in (None, False) else elastic or 0,
             elastic_nodes,
             order=order,
             translations=translations or 0,

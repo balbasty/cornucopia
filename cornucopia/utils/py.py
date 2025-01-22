@@ -59,7 +59,21 @@ def make_vector(input, n=None, crop=True, *args,
         Output vector.
 
     """
-    input = torch.as_tensor(input, dtype=dtype, device=device).flatten()
+    if (
+        not torch.is_tensor(input) and
+        hasattr(input, '__iter__') and
+        any(map(torch.is_tensor, input))
+    ):
+        # we need to be careful if we want to preserve the graph
+        input = list(map(
+            lambda x: torch.as_tensor(x, dtype=dtype, device=device).flatten(),
+            input
+        ))
+        input = torch.cat(input)
+    else:
+        # either already a tensor, or a sequence of non-tensors,
+        # so we're fine
+        input = torch.as_tensor(input, dtype=dtype, device=device).flatten()
     if n is None:
         return input
     if n is not None and input.numel() >= n:
@@ -70,7 +84,10 @@ def make_vector(input, n=None, crop=True, *args,
         default = kwargs['default']
     else:
         default = input[-1]
-    default = input.new_full([n-len(input)], default)
+    if torch.is_tensor(default):
+        default = torch.stack([default] * (n-len(input)))
+    else:
+        default = input.new_full([n-len(input)], default)
     return torch.cat([input, default])
 
 

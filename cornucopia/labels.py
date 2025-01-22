@@ -19,19 +19,21 @@ __all__ = [
     'BernoulliDiskTransform',
     'SmoothBernoulliDiskTransform',
 ]
+import math as pymath
 
 import torch
+import interpol
+import distmap
+
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
 from .base import FinalTransform, NonFinalTransform
 from .baseutils import prepare_output
 from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
 from .utils.conv import smoothnd
-from .utils.py import ensure_list
+from .utils.py import ensure_list, make_vector
 from .utils.morpho import bounded_distance
+from .utils.smart_inplace import mul_, div_, add_, sub_
 from . import ctx
-import interpol
-import distmap
-import math as pymath
 
 
 class OneHotTransform(NonFinalTransform):
@@ -238,7 +240,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             super().__init__(**kwargs)
             self.mu = mu
             self.sigma = sigma
-            self.fwhm = fwhm
+            self.fwhm = 0 if fwhm is None else fwhm
             self.background = background
             self.dtype = dtype
 
@@ -246,42 +248,43 @@ class GaussianMixtureTransform(NonFinalTransform):
             mu, sigma = self.mu, self.sigma
             ndim = x.ndim - 1
 
-            def getitem(x):
-                return x.item() if torch.is_tensor(x) else x
+            def to(x, y):
+                return x.to(y) if torch.is_tensor(x) else x
 
             if x.is_floating_point():
                 backend = dict(dtype=x.dtype, device=x.device)
                 y = torch.zeros_like(x[0])
-                fwhm = ensure_list(self.fwhm or [0], len(x))
+                fwhm = make_vector(self.fwhm, len(x), **backend)
                 for k in range(len(x)):
-                    muk, sigmak = getitem(mu[k]), getitem(sigma[k])
+                    muk, sigmak = to(mu[k], y), to(sigma[k], y)
                     if self.background is not None and k == self.background:
                         continue
                     y1 = torch.randn(x.shape[1:], **backend)
                     if fwhm[k]:
                         y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
-                    y += y1.mul_(sigmak).add_(muk).mul_(x[k])
+                    y += mul_(add_(mul_(y1, sigmak), muk), x[k])
                 y = y[None]
             else:
                 backend = dict(dtype=self.dtype or torch.get_default_dtype(),
                                device=x.device)
                 y = torch.zeros_like(x, **backend)
                 nk = x.max().item()+1
-                fwhm = ensure_list(self.fwhm or [0], nk)
+                fwhm = make_vector(self.fwhm, nk, **backend)
                 for k in range(nk):
-                    muk, sigmak = getitem(mu[k]), getitem(sigma[k])
+                    muk, sigmak = to(mu[k], y), to(sigma[k], y)
                     if self.background is not None and k == self.background:
                         continue
                     if fwhm[k]:
+                        mask = x != k
                         y1 = torch.randn(x.shape, **backend)
                         y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
-                        y += y1.mul_(sigmak).add_(muk).masked_fill_(x != k, 0)
+                        y += add_(mul_(y1, sigmak), muk).masked_fill_(mask, 0)
                     else:
                         mask = x == k
                         numel = mask.sum()
                         if numel:
                             y1 = torch.randn(numel, **backend)
-                            y1 = y1.mul_(sigmak).add_(muk)
+                            y1 = add_(mul_(y1, sigmak), muk)
                             y[mask] = y1
             return y
 
@@ -887,10 +890,13 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
                     min_radius = foreground_min_radius[label_index]
                     max_radius = foreground_max_radius[label_index]
                     radius = self.fields(z)
-                    radius.mul_(max_radius - min_radius).add_(min_radius)
+                    radius = add_(
+                        mul_(radius, max_radius - min_radius),
+                        min_radius
+                    )
                 else:
                     radius = 0
-                d1 = dist(x0).to(d).sub_(radius)
+                d1 = sub_(dist(x0).to(d), radius)
                 mask = d1 < d
                 if mask.any():
                     d = torch.where(mask, d1, d)
@@ -1270,8 +1276,8 @@ class SmoothBernoulliTransform(NonFinalTransform):
         z = z.expand([batch, *shape])
 
         prob = AddFieldTransform(self.shape, shared=self.shared)(z)
-        prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
-        prob *= self.prob * x.shape[1:].numel()
+        prob = div_(prob, prob.sum(list(range(-ndim, 0)), keepdim=True))
+        prob = mul_(prob, self.prob * x.shape[1:].numel())
 
         shared_noise = self.shared_noise
         if shared_noise is None:
@@ -1342,7 +1348,7 @@ class BernoulliDiskTransform(NonFinalTransform):
             elif value == 'min':
                 value = x.min()
             elif value.startswith('rand'):
-                mn, mx = x.min().item(), x.max().item()
+                mn, mx = x.min(), x.max()
                 if x.dtype.is_floating_point:
                     value = Uniform(mn, mx)()
                 else:
@@ -1415,8 +1421,8 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
         # sample seeds
         with ctx.shared(self.field, shared_field):
             prob = self.field(fake_x)
-        prob /= prob.sum(list(range(-ndim, 0)), keepdim=True)
-        prob *= self.prob * x.shape[1:].numel() / nvoxball
+        prob = div_(prob, prob.sum(list(range(-ndim, 0)), keepdim=True))
+        prob = mul_(prob, self.prob * x.shape[1:].numel() / nvoxball)
 
         dtype = x.dtype
         if not dtype.is_floating_point:
@@ -1435,7 +1441,7 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
             elif value == 'min':
                 value = x.min()
             elif value.startswith('rand'):
-                mn, mx = x.min().item(), x.max().item()
+                mn, mx = x.min(), x.max()
                 if x.dtype.is_floating_point:
                     value = Uniform(mn, mx)()
                 else:

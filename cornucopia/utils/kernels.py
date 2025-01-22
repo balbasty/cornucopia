@@ -3,6 +3,7 @@
 # TODO:
 # [ ] Implement Sinc kernel
 import torch
+import math
 
 
 def make_separable(ker, channels):
@@ -22,7 +23,7 @@ def make_separable(ker, channels):
     return ker
 
 
-def _integrate_poly(l, h, *args):
+def _integrate_poly(L, H, *args):
     """Integrate a polynomial on an interval.
 
     k = _integrate_poly(l, h, a, b, c, ...)
@@ -33,16 +34,15 @@ def _integrate_poly(l, h, *args):
     # NOTE: operations are not performed inplace (+=, *=) so that autograd
     # can backpropagate.
     # TODO: (maybe) use inplace if gradients not required
-    zero = torch.zeros(tuple(), dtype=torch.bool)
-    k = torch.zeros(l.shape, dtype=l.dtype, device=l.device)
-    hh = h
-    ll = l
+    K = 0
+    HH = H
+    LL = L
     for i in range(len(args)):
-        if torch.any(args[i] != zero):
-            k = k + (args[i]/(i+1))*(hh-ll)
-        hh = hh * h
-        ll = ll * l
-    return k
+        if torch.any(args[i] != 0):
+            K += (args[i] / (i+1)) * (HH - LL)
+        HH = HH * H
+        LL = LL * L
+    return K
 
 
 def _dirac1d(fwhm, basis, x):
@@ -72,103 +72,113 @@ def _triangle1d(fwhm, basis, x):
         return _triangle1d0(fwhm, x)
 
 
-def _gauss1d0(w, x):
-    logtwo = torch.tensor(2., dtype=w.dtype, device=w.device).log()
-    sqrttwo = torch.tensor(2., dtype=w.dtype, device=w.device).sqrt()
-    s = w/(8.*logtwo).sqrt() + 1E-7  # standard deviation
-    if x is None:
-        lim = torch.floor(4*s+0.5).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    w1 = 1./(sqrttwo*s)
-    ker = 0.5*((w1*(x+0.5)).erf() - (w1*(x-0.5)).erf())
-    ker = ker.clamp(min=0)
-    return ker, x
+def _gauss1d0(W, X):
+    LOG2 = math.log(2)
+    SQRT2 = math.sqrt(2)
+    S = W / math.sqrt(8 * LOG2) + 1E-7  # standard deviation
+    if X is None:
+        L = torch.floor(4*S + 0.5).int()
+        X = torch.arange(-L, L+1).to(W)
+    W1 = 1. / (SQRT2*S)
+    K = 0.5 * (
+        (W1 * (X + 0.5)).erf() -
+        (W1 * (X - 0.5)).erf()
+    )
+    K = K.clamp_min_(0)
+    return K, X
 
 
-def _gauss1d1(w, x):
-    import math
-    logtwo = torch.tensor(2., dtype=w.dtype, device=w.device).log()
-    sqrttwo = torch.tensor(2., dtype=w.dtype, device=w.device).sqrt()
-    sqrtpi = torch.tensor(math.pi, dtype=w.dtype, device=w.device).sqrt()
-    s = w/(8.*logtwo).sqrt() + 1E-7  # standard deviation
-    if x is None:
-        lim = torch.floor(4*s+1).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    w1 = 0.5*sqrttwo/s
-    w2 = -0.5/s.pow(2)
-    w3 = s/(sqrttwo*sqrtpi)
-    ker = 0.5*((w1*(x+1)).erf()*(x+1)
-               + (w1*(x-1)).erf()*(x-1)
-               - 2*(w1*x).erf()*x) \
-        + w3*((w2*(x+1).pow(2)).exp()
-              + (w2*(x-1).pow(2)).exp()
-              - 2*(w2*x.pow(2)).exp())
-    ker = ker.clamp(min=0)
-    return ker, x
+def _gauss1d1(W, X):
+    LOG2 = math.log(2)
+    SQRT2 = math.sqrt(2)
+    SQRTPI = math.sqrt(math.pi)
+    S = W / math.sqrt(8*LOG2) + 1E-7  # standard deviation
+    if X is None:
+        L = torch.floor(4*S + 1).int()
+        X = torch.arange(-L, L+1).to(W)
+    W1 = 0.5 * SQRT2 / S
+    W2 = -0.5 / (S * S)
+    W3 = S / (SQRT2 * SQRTPI)
+    K = (
+        0.5 * (
+            (W1 * (X + 1)).erf() * (X + 1) +
+            (W1 * (X - 1)).erf() * (X - 1) -
+            (W1 * X).erf() * X * 2
+        ) +
+        W3 * (
+            (W2 * (X + 1).square()).exp() +
+            (W2 * (X - 1).square()).exp() -
+            (W2 * X.square()).exp() * 2
+        )
+    )
+    K = K.clamp_min_(0)
+    return K, X
 
 
-def _rect1d0(w, x):
-    if x is None:
-        lim = torch.floor((w+1)/2).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    zero = torch.zeros(tuple(), dtype=w.dtype, device=w.device)
-    ker = torch.max(torch.min(x+0.5, w/2) - torch.max(x-0.5, -w/2), zero)
-    ker = ker/w
-    return ker, x
+def _rect1d0(W, X):
+    if X is None:
+        L = torch.floor((W+1)/2).int()
+        X = torch.arange(-L, L+1).to(W)
+    K = (
+        torch.min(X + 0.5,  W / 2) -
+        torch.max(X - 0.5, -W / 2)
+    ).clamp_min_(0)
+    K = K / W
+    return K, X
 
 
-def _rect1d1(w, x):
-    if x is None:
-        lim = torch.floor((w+2)/2).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    zero = torch.zeros(tuple(), dtype=w.dtype, device=w.device)
-    one = torch.ones(tuple(), dtype=w.dtype, device=w.device)
-    neg_low = torch.min(torch.max(x-w/2, -one),   zero)
-    neg_upp = torch.max(torch.min(x+w/2,  zero), -one)
-    pos_low = torch.min(torch.max(x-w/2,  zero),  one)
-    pos_upp = torch.max(torch.min(x+w/2,  one),   zero)
-    ker = _integrate_poly(neg_low, neg_upp, one,  one) \
-        + _integrate_poly(pos_low, pos_upp, one, -one)
-    ker = ker/w
-    return ker, x
+def _rect1d1(W, X):
+    if X is None:
+        L = torch.floor((W+2)/2).int()
+        X = torch.arange(-L, L+1).to(W)
+    neg_low = torch.clamp(X - W/2, -1, 0)
+    neg_upp = torch.clamp(X + W/2, -1, 0)
+    pos_low = torch.clamp(X - W/2,  0, 1)
+    pos_upp = torch.clamp(X + W/2,  0, 1)
+    K = (
+        _integrate_poly(neg_low, neg_upp, 1,  1) +
+        _integrate_poly(pos_low, pos_upp, 1, -1)
+    )
+    K = K/W
+    return K, X
 
 
-def _triangle1d0(w, x):
-    if x is None:
-        lim = torch.floor((2*w+1)/2).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    zero = torch.zeros(tuple(), dtype=w.dtype, device=w.device)
-    one = torch.ones(tuple(), dtype=w.dtype, device=w.device)
-    neg_low = torch.min(torch.max(x-0.5, -w),     zero)
-    neg_upp = torch.max(torch.min(x+0.5,  zero), -w)
-    pos_low = torch.min(torch.max(x-0.5,  zero),  w)
-    pos_upp = torch.max(torch.min(x+0.5,  w),     zero)
-    ker = _integrate_poly(neg_low, neg_upp, one,  1/w) \
-        + _integrate_poly(pos_low, pos_upp, one, -1/w)
-    ker = ker/w
-    return ker, x
+def _triangle1d0(W, X):
+    if X is None:
+        L = torch.floor((2*W+1)/2).int()
+        X = torch.arange(-L, L+1).to(W)
+    neg_low = torch.clamp(X - 0.5, -W, 0)
+    neg_upp = torch.clamp(X + 0.5, -W, 0)
+    pos_low = torch.clamp(X - 0.5,  0, W)
+    pos_upp = torch.clamp(X + 0.5,  0, W)
+    K = (
+        _integrate_poly(neg_low, neg_upp, 1,  1/W) +
+        _integrate_poly(pos_low, pos_upp, 1, -1/W)
+    )
+    K = K / W
+    return K, X
 
 
-def _triangle1d1(w, x):
-    if x is None:
-        lim = torch.floor((2*w+2)/2).type(torch.int)
-        x = torch.tensor(range(-lim, lim+1), dtype=w.dtype, device=w.device)
-    zero = torch.zeros(tuple(), dtype=w.dtype, device=w.device)
-    one = torch.ones(tuple(), dtype=w.dtype, device=w.device)
-    neg_neg_low = torch.min(torch.max(x,   -one),   zero)
-    neg_neg_upp = torch.max(torch.min(x+w,  zero), -one)
-    neg_pos_low = torch.min(torch.max(x,    zero),  one)
-    neg_pos_upp = torch.max(torch.min(x+w,  one),   zero)
-    pos_neg_low = torch.min(torch.max(x-w, -one),   zero)
-    pos_neg_upp = torch.max(torch.min(x,    zero), -one)
-    pos_pos_low = torch.min(torch.max(x-w,  zero),  one)
-    pos_pos_upp = torch.max(torch.min(x,    one),   zero)
-    ker = _integrate_poly(neg_neg_low, neg_neg_upp, 1+x/w,  1+x/w-1/w, -1/w) \
-        + _integrate_poly(neg_pos_low, neg_pos_upp, 1+x/w, -1-x/w-1/w,  1/w) \
-        + _integrate_poly(pos_neg_low, pos_neg_upp, 1-x/w,  1-x/w+1/w,  1/w) \
-        + _integrate_poly(pos_pos_low, pos_pos_upp, 1-x/w, -1+x/w+1/w, -1/w)
-    ker = ker/w
-    return ker, x
+def _triangle1d1(W, X):
+    if X is None:
+        L = torch.floor((2*W+2)/2).int()
+        X = torch.arange(-L, L+1).to(W)
+    neg_neg_low = torch.clamp(X,     -1, 0)
+    neg_neg_upp = torch.clamp(X + W, -1, 0)
+    neg_pos_low = torch.clamp(X,      0, 1)
+    neg_pos_upp = torch.clamp(X + W,  0, 1)
+    pos_neg_low = torch.clamp(X - W, -1, 0)
+    pos_neg_upp = torch.clamp(X,     -1, 0)
+    pos_pos_low = torch.clamp(X - W,  0, 1)
+    pos_pos_upp = torch.clamp(X,      0, 1)
+    K = (
+        _integrate_poly(neg_neg_low, neg_neg_upp, 1+X/W,  1+X/W-1/W, -1/W) +
+        _integrate_poly(neg_pos_low, neg_pos_upp, 1+X/W, -1-X/W-1/W,  1/W) +
+        _integrate_poly(pos_neg_low, pos_neg_upp, 1-X/W,  1-X/W+1/W,  1/W) +
+        _integrate_poly(pos_pos_low, pos_pos_upp, 1-X/W, -1+X/W+1/W, -1/W)
+    )
+    K = K/W
+    return K, X
 
 
 _smooth_switcher = {
@@ -210,16 +220,16 @@ def smoothing_kernel(types='gauss', fwhm=1, basis=1, x=None, sep=True,
         -  1 or 'tri'   : Triangular function (1st order B-spline)
         -  2 or 'gauss' : Gaussian
     fwhm : int or sequence[int], default=1
-        Full-width at half-maximum of the smoothing function 
+        Full-width at half-maximum of the smoothing function
         (in voxels), in each dimension.
     basis : int, default=1
         Image encoding basis (B-spline order)
     x : tuple or vector_like, optional
-        Coordinates at which to evaluate the kernel. 
-        If None, evaluate at all integer coordinates from its support 
+        Coordinates at which to evaluate the kernel.
+        If None, evaluate at all integer coordinates from its support
         (truncated support for 'gauss').
     sep : bool, default=True
-        Return separable 1D kernels. 
+        Return separable 1D kernels.
         If False, the 1D kernels are combined to form an N-D kernel.
     dtype : torch.dtype, optional
     device : torch.device, optional
@@ -228,7 +238,7 @@ def smoothing_kernel(types='gauss', fwhm=1, basis=1, x=None, sep=True,
     -------
     tuple or (channel_in, channel_out, *kernel_size) tensor
         If `sep is False` or all input parameters are scalar,
-        a single kernel is returned. 
+        a single kernel is returned.
         Else, a tuple of kernels is returned.
 
 
@@ -252,8 +262,8 @@ def smoothing_kernel(types='gauss', fwhm=1, basis=1, x=None, sep=True,
     # Ensure all sizes are consistant
     nker = max(fwhm.numel(), len(x), len(types))
     fwhm = torch.cat((fwhm, fwhm[-1].repeat(max(0, nker-fwhm.numel()))))
-    x = x + (x[-1],)*max(0, nker-len(x))
-    types += (types[-1],)*max(0, nker-len(types))
+    x = x + (x[-1],) * max(0, nker-len(x))
+    types += (types[-1],) * max(0, nker-len(types))
 
     # Loop over dimensions
     ker = tuple()
@@ -276,4 +286,3 @@ def smoothing_kernel(types='gauss', fwhm=1, basis=1, x=None, sep=True,
         ker = ker[0]
 
     return ker
-
