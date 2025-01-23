@@ -447,6 +447,8 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
+        if self.is_final:
+            return self
         # x = VirtualTensor.from_any(x, compute_stats=True)
         trf = []
         for t in self:
@@ -477,11 +479,22 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
             x = args[0]
         else:
             return None
-        for trf in self.transforms:
+        for trf in self:
             with IncludeKeysTransform(trf, self.include), \
                  ExcludeKeysTransform(trf, self.exclude):
                 x = trf(x)
         return x
+
+    def xform(self, x):
+        # This should only be called when a Layer's `make_final` returns
+        # a `SequentialTransform`` (i.e., it is created implictly under
+        # the hood, not explicitly by the user).
+        # In such cases, `shared=False` and hopefully we can just fallback
+        # to `forward()`.
+        #
+        # FIXME
+        #   what happens if there's weird stuff in returns/include/exclude?
+        return self(x)
 
     def __len__(self):
         return len(self.transforms)

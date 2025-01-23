@@ -834,7 +834,7 @@ class QuantileTransform(NonFinalTransform):
     """Match lower and upper quantiles to (0, 1)"""
 
     def __init__(self, pmin=0.01, pmax=0.99, vmin=0, vmax=1,
-                 clip=False, **kwargs):
+                 clip=False, max_samples=10000, **kwargs):
         """
 
         Parameters
@@ -856,27 +856,37 @@ class QuantileTransform(NonFinalTransform):
         self.vmin = vmin
         self.vmax = vmax
         self.clip = clip
+        self.max_samples = max_samples
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        if 'channels' not in self.shared and len(x) > 1:
-            return self.make_per_channel(x, max_depth)
+        # if 'channels' not in self.shared and len(x) > 1:
+        #     return self.make_per_channel(x, max_depth)
 
-        nmax = 10000
-        x = x[x != 0]
-        x = x[torch.rand_like(x) < (nmax / x.numel())]
-        pmin = torch.quantile(x, self.pmin)
-        pmax = torch.quantile(x, self.pmax)
+        ndim = x.ndim - 1
+
+        x_ = x.reshape([len(x), -1])
+        x_ = x_[:, (x_ != 0).all(0) & x_.isfinite().all(0)]
+        if self.max_samples and self.max_samples < x_.shape[1]:
+            idx_ = torch.randperm(x_.shape[-1], device=x_.device)
+            idx_ = idx_[self.max_samples]
+            x_ = x_[:, idx_]
+
+        qdim = (-1 if 'channels' not in self.shared else None)
+        pmin = torch.quantile(x_, self.pmin, dim=qdim)
+        pmax = torch.quantile(x_, self.pmax, dim=qdim)
+        pmin = pmin[(Ellipsis,) + (None,) * ndim]
+        pmax = pmax[(Ellipsis,) + (None,) * ndim]
 
         slope = (self.vmax - self.vmin) / (pmax - pmin)
         offset = self.vmin - pmin * slope
 
         if self.clip:
-            return SequentialTransform(
+            return SequentialTransform([
                 AddMulTransform(slope, offset, **self.get_prm()),
                 ClipTransform(self.vmin, self.vmax, **self.get_prm())
-            ).make_final(x, max_depth-1)
+            ]).make_final(x, max_depth-1)
         else:
             return AddMulTransform(
                 slope, offset, **self.get_prm()
