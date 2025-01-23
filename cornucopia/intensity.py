@@ -17,6 +17,7 @@ __all__ = [
     'RandomGammaTransform',
     'ZTransform',
     'QuantileTransform',
+    'MinMaxTransform',
 ]
 
 import torch
@@ -861,8 +862,6 @@ class QuantileTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        # if 'channels' not in self.shared and len(x) > 1:
-        #     return self.make_per_channel(x, max_depth)
 
         ndim = x.ndim - 1
 
@@ -891,3 +890,48 @@ class QuantileTransform(NonFinalTransform):
             return AddMulTransform(
                 slope, offset, **self.get_prm()
             ).make_final(x, max_depth-1)
+
+
+class MinMaxTransform(NonFinalTransform):
+    """Match min and max values to (0, 1)"""
+
+    def __init__(self, vmin=0, vmax=1, **kwargs):
+        """
+
+        Parameters
+        ----------
+        vmin : float
+            Lower target value
+        vmax : float
+            Upper target value
+        clip : bool
+            Clip values outside (vmin, vmax)
+        """
+        super().__init__(**kwargs)
+        self.vmin = vmin
+        self.vmax = vmax
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0:
+            return self
+
+        ndim = x.ndim - 1
+
+        x_ = x.reshape([len(x), -1])
+        x_ = x_[:, x_.isfinite().all(0)]
+
+        if 'channels' not in self.shared:
+            pmin = torch.min(x_, dim=-1).values
+            pmax = torch.max(x_, dim=-1).values
+        else:
+            pmin = torch.min(x_)
+            pmax = torch.max(x_)
+        pmin = pmin[(Ellipsis,) + (None,) * ndim]
+        pmax = pmax[(Ellipsis,) + (None,) * ndim]
+
+        slope = (self.vmax - self.vmin) / (pmax - pmin)
+        offset = self.vmin - pmin * slope
+
+        return AddMulTransform(
+            slope, offset, **self.get_prm()
+        ).make_final(x, max_depth-1)
