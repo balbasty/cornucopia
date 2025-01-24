@@ -44,6 +44,15 @@ _min = min
 _max = max
 
 
+def _shape_compat(x, y):
+    if not torch.is_tensor(y):
+        return True
+    ndim = x.ndim
+    if y.ndim > ndim:
+        return False
+    return all(dx >= dy for dx, dy in zip(x.shape[-ndim:], y.shape[-ndim:]))
+
+
 def add_(x, y, **kwargs):
     # d(x+a*y)/dx = 1
     # d(x+a*y)/dy = a
@@ -51,6 +60,8 @@ def add_(x, y, **kwargs):
     # -> we can overwrite x
     if not torch.is_tensor(x):
         return x + y * kwargs.get('alpha', 1)
+    if not _shape_compat(x, y):
+        return x.add(y, **kwargs)
     return x.add_(y, **kwargs)
 
 
@@ -67,6 +78,8 @@ def sub_(x, y, **kwargs):
     # -> we can overwrite x
     if not torch.is_tensor(x):
         return x - y * kwargs.get('alpha', 1)
+    if not _shape_compat(x, y):
+        return x.sub(y, **kwargs)
     return x.sub_(y, **kwargs)
 
 
@@ -82,6 +95,8 @@ def mul_(x, y, **kwargs):
     # -> we can overwrite x if we do not backprop through y
     if not torch.is_tensor(x):
         return x * y
+    if not _shape_compat(x, y):
+        return x.mul(y, **kwargs)
     return (
         x.mul(y, **kwargs) if getattr(y, 'requires_grad', False) else
         x.mul_(y, **kwargs)
@@ -100,6 +115,8 @@ def div_(x, y, **kwargs):
     # -> we can overwrite x if we do not backprop through y
     if not torch.is_tensor(x):
         return x / y
+    if not _shape_compat(x, y):
+        return x.div(y, **kwargs)
     return (
         x.div(y, **kwargs) if getattr(y, 'requires_grad', False) else
         x.div_(y, **kwargs)
@@ -118,6 +135,8 @@ def pow_(x, y, **kwargs):
     # -> we can overwrite x if we do not backprop through x or y
     if not torch.is_tensor(x):
         return x ** y
+    if not _shape_compat(x, y):
+        return x.pow(y, **kwargs)
     inplace = not (x.requires_grad or getattr(y, 'requires_grad', False))
     return x.pow(y, **kwargs) if not inplace else x.pow_(y, **kwargs)
 
@@ -165,8 +184,10 @@ def atan2_(x, y, **kwargs):
         x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
     if not torch.is_tensor(y):
         y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
+    if not _shape_compat(x, y):
+        return x.atan2(y, **kwargs)
     inplace = not (x.requires_grad or y.requires_grad)
-    return x.atan2(y, **kwargs) if not inplace else x.atan2_(y, **kwargs)
+    return x.atan2_(y, **kwargs) if inplace else x.atan2(y, **kwargs)
 
 
 def atan2(x, y, **kwargs):
@@ -282,3 +303,48 @@ def gammaln(x):
     if torch.is_tensor(x):
         return math.lgamma(x)
     return torch.special.gammaln(x)
+
+
+def gamma(x):
+    # !!! Assumes x is positive
+    return exp_(gammaln(x))
+
+
+def floor(x, to=None):
+    if torch.is_tensor(x):
+        to = {
+            int: torch.long,
+            float: torch.float,
+            complex: torch.complex32
+        }.get(to, to)
+        return x.floor().to(dtype=to)
+    to = {
+        torch.int: int,
+        torch.long: int,
+        torch.float: float,
+        torch.double: float,
+        torch.complex32: complex,
+        torch.complex64: complex,
+        None: (lambda x: x)
+    }.get(to, to)
+    return to(math.floor(x))
+
+
+def ceil(x, to=None):
+    if torch.is_tensor(x):
+        to = {
+            int: torch.long,
+            float: torch.float,
+            complex: torch.complex32
+        }.get(to, to)
+        return x.ceil().to(dtype=to)
+    to = {
+        torch.int: int,
+        torch.long: int,
+        torch.float: float,
+        torch.double: float,
+        torch.complex32: complex,
+        torch.complex64: complex,
+        None: (lambda x: x)
+    }.get(to, to)
+    return to(math.ceil(x))

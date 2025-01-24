@@ -17,9 +17,11 @@ __all__ = [
     "quantile_transform",
     "minmax_transform",
     "affine_intensity_transform",
+    "add_smooth_random_field",
+    "mul_smooth_random_field",
 ]
 # stdlib
-from typing import Union, Mapping, Sequence, Optional, Callable
+from typing import Sequence, Optional, Callable
 
 # external
 import torch
@@ -29,12 +31,9 @@ import torch.nn.functional as F
 # internal
 from ..baseutils import prepare_output, returns_update, return_requires
 from ..utils.smart_math import add_, mul_, pow_, div_
-from ._utils import _unsqz_spatial
-
-
-Tensor = torch.Tensor
-Value = Union[float, Tensor]
-Output = Union[Tensor, Mapping[Tensor], Sequence[Tensor]]
+from ..utils.py import ensure_list
+from ._utils import _unsqz_spatial, Tensor, Value, Output, OneOrMore
+from .random import random_field_like
 
 
 def binop_value(
@@ -1076,3 +1075,161 @@ def affine_intensity_transform(
         "omin": omin,
         "omax": omax,
     }, kwargs["returns"])
+
+
+def add_smooth_random_field(
+    input: Tensor,
+    shape: OneOrMore[int] = 8,
+    mean: Optional[Value] = None,
+    fwhm: Optional[Value] = None,
+    distrib: str = "uniform",
+    order: int = 3,
+    shared: bool = False,
+    **kwargs
+) -> Output:
+    """
+    Add a smooth random field to the input.
+
+    Parameters
+    ----------
+    input : (C, *spatial) tensor
+        Input tensor
+    shape : int | list[int]
+        Shape of the low-resolution spline coefficients (lower = smoother)
+    mean : float | ([C],) tensor, default=0
+        Distribution mean.
+    fwhm : float | ([C],) tensor, default=1
+        Distribution full width at half-maximum.
+    distrib : {"uniform", "gaussian", "generalized"}
+        Probability distribution.
+    order : int
+        Spline order
+    shared : bool
+        Apply the same field to all channels.
+        If True, probability parameters must be scalars.
+
+    Other Parameters
+    ----------------
+    peak, std, vmin, vmax, alpha, beta : float | ([C],) tensor
+        Other parameters of the probability distribution.
+    returns : [list or dict of] {"output", "input", "coeff", "field"}
+        Values to return.
+
+    Returns
+    -------
+    output : (C, *spatial) tensor
+
+    """  # noqa: E501
+    if (
+        (mean is None) and
+        (kwargs.get("mu", None) is not None) and
+        (kwargs.get("peak", None) is not None) and
+        (kwargs.get("vmin", None) is not None) and
+        (kwargs.get("vmax", None) is not None)
+    ):
+        mean = 0
+
+    if (
+        (fwhm is None) and
+        (kwargs.get("sigma", None) is not None) and
+        (kwargs.get("std", None) is not None) and
+        (kwargs.get("vmin", None) is not None) and
+        (kwargs.get("vmax", None) is not None) and
+        (kwargs.get("alpha", None) is not None)
+    ):
+        fwhm = 1
+
+    ndim = input.ndim - 1
+    shape = tuple(ensure_list(shape, ndim))
+    if shared:
+        shape = (1,) + shape
+    else:
+        shape = input.shape[:-1] + shape
+
+    returns = kwargs.pop("returns", "output")
+    kwargs["mean"] = mean
+    kwargs["fwhm"] = fwhm
+    coeff = random_field_like(distrib, input, shape, **kwargs)
+    output = add_field(input, coeff, order, prefilter=False, returns=returns)
+
+    output = returns_update(coeff, "coeff", output, returns)
+    return output
+
+
+def mul_smooth_random_field(
+    input: Tensor,
+    shape: OneOrMore[int] = 8,
+    mean: Optional[Value] = None,
+    fwhm: Optional[Value] = None,
+    distrib: str = "uniform",
+    order: int = 3,
+    shared: bool = False,
+    **kwargs
+) -> Output:
+    """
+    Multiple the input with a (positive) smooth random field.
+
+    Parameters
+    ----------
+    input : (C, *spatial) tensor
+        Input tensor
+    shape : int | list[int]
+        Shape of the low-resolution spline coefficients (lower = smoother)
+    mean : float | ([C],) tensor, default=1
+        Distribution mean.
+    fwhm : float | ([C],) tensor, default=1
+        Distribution full width at half-maximum.
+    distrib : {"uniform", "gamma", "lognormal"}
+        Probability distribution.
+    order : int
+        Spline order
+    shared : bool
+        Apply the same field to all channels.
+        If True, probability parameters must be scalars.
+
+    Other Parameters
+    ----------------
+    peak, std, vmin, vmax, alpha, beta, mu, sigma : float | ([C],) tensor
+        Other parameters of the probability distribution.
+    returns : [list or dict of] {"output", "input", "coeff", "field"}
+        Values to return.
+
+    Returns
+    -------
+    output : (C, *spatial) tensor
+
+    """  # noqa: E501
+    if (
+        (mean is None) and
+        (kwargs.get("mu", None) is not None) and
+        (kwargs.get("peak", None) is not None) and
+        (kwargs.get("vmin", None) is not None) and
+        (kwargs.get("vmax", None) is not None)
+    ):
+        mean = 1
+
+    if (
+        (fwhm is None) and
+        (kwargs.get("sigma", None) is not None) and
+        (kwargs.get("std", None) is not None) and
+        (kwargs.get("vmin", None) is not None) and
+        (kwargs.get("vmax", None) is not None) and
+        (kwargs.get("alpha", None) is not None)
+    ):
+        fwhm = 1
+
+    ndim = input.ndim - 1
+    shape = tuple(ensure_list(shape, ndim))
+    if shared:
+        shape = (1,) + shape
+    else:
+        shape = input.shape[:-1] + shape
+
+    returns = kwargs.pop("returns", "output")
+    kwargs["mean"] = mean
+    kwargs["fwhm"] = fwhm
+    coeff = random_field_like(distrib, input, shape, **kwargs)
+    output = add_field(input, coeff, order, prefilter=False, returns=returns)
+
+    output = returns_update(coeff, "coeff", output, returns)
+    return output

@@ -20,6 +20,15 @@ def _register_parameterization(names):
     return wrapper
 
 
+def _get_prm(*names, **kwargs):
+    value = None
+    for name in names:
+        value = kwargs.get(name, None)
+        if value is not None:
+            break
+    return value
+
+
 def distribution_parameters(name: str, **kwargs) -> dict:
     """
     Compute the natural parameters of a distribution from any parameterization.
@@ -28,7 +37,7 @@ def distribution_parameters(name: str, **kwargs) -> dict:
 
     Parameters
     ----------
-    name : {"uniform", "gaussian", "lognormal", "gamma", "generalized-normal"}
+    name : {"uniform", "gaussian", "lognormal", "gamma", "generalized"}
         Distribution name.
 
     Parameters common to most distribution
@@ -132,11 +141,11 @@ def uniform_parameters(**kwargs) -> dict:
         with keys {"a", "b", "vmin", "vmax", "mean", "std", "fwhm"}
 
     """
-    vmin = kwargs.get("a", kwargs.get("vmin", None))
-    vmax = kwargs.get("b", kwargs.get("vmax", None))
-    mean = kwargs.pop("mean", kwargs.pop("mu", None))
-    std = kwargs.pop("std", kwargs.pop("sigma", None))
-    fwhm = kwargs.pop("fwhm", None)
+    vmin = _get_prm("a", "vmin", **kwargs)
+    vmax = _get_prm("b", "vmax", **kwargs)
+    mean = _get_prm("mean", "mu", **kwargs)
+    std = _get_prm("std", "sigma", **kwargs)
+    fwhm = _get_prm("fwhm", **kwargs)
 
     if (mean is not None) or (std is not None) or (fwhm is not None):
         if ((mean is None) or (std is None and fwhm is None)):
@@ -194,9 +203,9 @@ def gaussian_parameters(**kwargs) -> dict:
         with keys {"mu", "sigma", "mean", "std", "peak", "fwhm"}
 
     """
-    mean = kwargs.pop("mean", kwargs.pop("mu", kwargs.pop("peak", None)))
-    std = kwargs.pop("std", kwargs.pop("sigma", None))
-    fwhm = kwargs.pop("fwhm", None)
+    mean = _get_prm("mean", "mu", "peak", **kwargs)
+    std = _get_prm("std", "sigma", **kwargs)
+    fwhm = _get_prm("fwhm", **kwargs)
 
     mean = 0 if mean is None else mean
     std = 1 if std is None else std
@@ -264,12 +273,12 @@ def lognormal_parameters(**kwargs) -> dict:
     # FWHM of lognormal taken here:
     # http://openafox.com/science/peak-function-derivations.html#lognormal
 
-    mean = kwargs.pop("mean", None)
-    std = kwargs.pop("std", None)
-    fwhm = kwargs.pop("fwhm", None)
-    peak = kwargs.pop("peak", None)
-    mu = kwargs.pop("mu", None)
-    sigma = kwargs.pop("sigma", None)
+    mean = _get_prm("mean", **kwargs)
+    std = _get_prm("std", **kwargs)
+    fwhm = _get_prm("fwhm", **kwargs)
+    peak = _get_prm("peak", **kwargs)
+    mu = _get_prm("mu", **kwargs)
+    sigma = _get_prm("sigma", **kwargs)
 
     if (mu is not None) or (sigma is not None):
         if ((mu is None) or (sigma is None)):
@@ -383,12 +392,12 @@ def gamma_parameters(**kwargs) -> dict:
         with keys {"alpha", "beta", "mean", "std", "peak", "fwhm"}
 
     """
-    mean = kwargs.pop("mu", kwargs.pop("mean", None))
-    std = kwargs.pop("sigma", kwargs.pop("std", None))
-    alpha = kwargs.pop("alpha", None)
-    beta = kwargs.pop("beta", None)
-    peak = kwargs.pop("peak", None)
-    fwhm = kwargs.pop("fwhm", None)
+    mean = _get_prm("mu", "mean", **kwargs)
+    std = _get_prm("sigma", "std", **kwargs)
+    alpha = _get_prm("alpha", **kwargs)
+    beta = _get_prm("beta", **kwargs)
+    peak = _get_prm("peak", **kwargs)
+    fwhm = _get_prm("fwhm", **kwargs)
 
     if (alpha is not None) or (beta is not None):
         if ((alpha is None) or (beta is None)):
@@ -444,7 +453,7 @@ def gamma_parameters(**kwargs) -> dict:
     )
 
 
-@_register_parameterization(["generalized-gaussian", "generalized-normal"])
+@_register_parameterization(["generalized", "generalised"])
 def generalized_normal_parameters(**kwargs) -> dict:
     """
     Compute the parameters of a generalized Gaussian distribution from
@@ -494,11 +503,11 @@ def generalized_normal_parameters(**kwargs) -> dict:
         with keys {"mu", "sigma", "mean", "std", "peak", "fwhm"}
 
     """
-    mean = kwargs.pop("mean", kwargs.pop("mu", kwargs.pop("peak", None)))
-    beta = kwargs.pop("beta", None)
-    alpha = kwargs.pop("alpha", None)
-    std = kwargs.pop("std", None)
-    fwhm = kwargs.pop("fwhm", None)
+    mean = _get_prm("mu", "mean", "peak", **kwargs)
+    beta = _get_prm("beta", **kwargs)
+    alpha = _get_prm("alpha", **kwargs)
+    std = _get_prm("std", **kwargs)
+    fwhm = _get_prm("fwhm", **kwargs)
 
     mean = 0 if mean is None else mean
     beta = 2 if beta is None else beta

@@ -41,7 +41,7 @@ def random_field(name: str, shape: Sequence[int], **kwargs) -> Output:
 
     Parameters
     ----------
-    name : {"uniform", "gaussian", "gamma", "lognormal", "generalized-gaussian"}
+    name : {"uniform", "gaussian", "gamma", "lognormal", "generalized"}
         Distribution name.
     shape : list[int]
         Output shape, including the channel dimension (!!): (C, *spatial).
@@ -74,8 +74,8 @@ def random_field(name: str, shape: Sequence[int], **kwargs) -> Output:
         return random_field_gamma(shape, **kwargs)
     if name in ("lognormal", "log-normal"):
         return random_field_lognormal(shape, **kwargs)
-    if name in ("generalized-normal", "generalized-gaussian"):
-        return random_field_generalized_normal(shape, **kwargs)
+    if name in ("generalized", "generalised"):
+        return random_field_generalized(shape, **kwargs)
 
 
 def random_field_uniform(
@@ -324,7 +324,7 @@ def random_field_gamma(
     return prepare_output({"output": output, **prm}, kwargs["returns"])
 
 
-def random_field_generalized_normal(
+def random_field_generalized(
     shape: Sequence[int],
     mean: Optional[Value] = None,
     std: Optional[Value] = None,
@@ -425,7 +425,7 @@ def random_field_like(
 
     Parameters
     ----------
-    name : {"uniform", "gaussian", "gamma", "lognormal", "generalized-gaussian"}
+    name : {"uniform", "gaussian", "gamma", "lognormal", "generalized"}
         Distribution name.
     input : tensor
         Tensor from which to copy the data type, device and shape
@@ -460,8 +460,8 @@ def random_field_like(
         return random_field_gamma_like(input, shape, **kwargs)
     if name in ("lognormal", "log-normal"):
         return random_field_lognormal_like(input, shape, **kwargs)
-    if name in ("generalized-normal", "generalized-gaussian"):
-        return random_field_generalized_normal_like(input, shape, **kwargs)
+    if name in ("generalized", "generalised"):
+        return random_field_generalized_like(input, shape, **kwargs)
 
 
 def _random_field_like(
@@ -694,7 +694,7 @@ def random_field_gamma_like(
     )
 
 
-def random_field_generalized_normal_like(
+def random_field_generalized_like(
     input: Tensor,
     shape: Optional[Sequence[int]] = None,
     mean: Optional[Value] = None,
@@ -760,5 +760,5 @@ def random_field_generalized_normal_like(
         Output tensor.
     """  # noqa: E501
     return _random_field_like(
-        random_field_lognormal, input, shape, mean, std, beta, **kwargs
+        random_field_generalized, input, shape, mean, std, beta, **kwargs
     )
