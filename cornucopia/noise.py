@@ -15,7 +15,7 @@ from .base import FinalTransform, NonFinalTransform, PerChannelTransform
 from .special import RandomizedTransform
 from .intensity import MulFieldTransform, AddValueTransform, MulValueTransform
 from .random import Uniform, RandInt, Fixed, make_range
-from .utils.smart_inplace import mul_, add_, sqrt_
+from .utils.smart_math import mul_, add_, sqrt_
 from . import ctx
 
 

@@ -39,6 +39,10 @@ c.backward()
 import math
 import torch
 
+_abs = abs
+_min = min
+_max = max
+
 
 def add_(x, y, **kwargs):
     # d(x+a*y)/dx = 1
@@ -50,6 +54,12 @@ def add_(x, y, **kwargs):
     return x.add_(y, **kwargs)
 
 
+def add(x, y, **kwargs):
+    if not torch.is_tensor(x):
+        return x + y * kwargs.get('alpha', 1)
+    return x.add(y, **kwargs)
+
+
 def sub_(x, y, **kwargs):
     # d(x-a*y)/dx = 1
     # d(x-a*y)/dy = -a
@@ -58,6 +68,12 @@ def sub_(x, y, **kwargs):
     if not torch.is_tensor(x):
         return x - y * kwargs.get('alpha', 1)
     return x.sub_(y, **kwargs)
+
+
+def sub(x, y, **kwargs):
+    if not torch.is_tensor(x):
+        return x - y * kwargs.get('alpha', 1)
+    return x.sub(y, **kwargs)
 
 
 def mul_(x, y, **kwargs):
@@ -72,6 +88,12 @@ def mul_(x, y, **kwargs):
     )
 
 
+def mul(x, y, **kwargs):
+    if not torch.is_tensor(x):
+        return x * y
+    return x.mul(y, **kwargs)
+
+
 def div_(x, y, **kwargs):
     # d(x/y)/dx = 1/y
     # d(x/y)/dy = -x/y**2
@@ -84,6 +106,12 @@ def div_(x, y, **kwargs):
     )
 
 
+def div(x, y, **kwargs):
+    if not torch.is_tensor(x):
+        return x / y
+    return x.div(y, **kwargs)
+
+
 def pow_(x, y, **kwargs):
     # d(x**y)/dx = y * x**(y-1)
     # d(x**y)/dy = (x**y) * log(|x|) * sign(x)**y
@@ -94,6 +122,12 @@ def pow_(x, y, **kwargs):
     return x.pow(y, **kwargs) if not inplace else x.pow_(y, **kwargs)
 
 
+def pow(x, y, **kwargs):
+    if not torch.is_tensor(x):
+        return x ** y
+    return x.pow(y, **kwargs)
+
+
 def square_(x, **kwargs):
     # d(x**2)/dx = 2*x
     # -> we can overwrite x if we do not backprop through x
@@ -102,12 +136,26 @@ def square_(x, **kwargs):
     return x.square(**kwargs) if x.requires_grad else x.square_(**kwargs)
 
 
+def square(x, **kwargs):
+    if not torch.is_tensor(x):
+        return x * x
+    return x.square(**kwargs)
+
+
 def sqrt_(x, **kwargs):
     # d(x**0.5)/dx = 0.5*x
     # -> we can overwrite x if we do not backprop through x
     if not torch.is_tensor(x):
         return x ** 0.5
     return x.sqrt(**kwargs) if x.requires_grad else x.sqrt_(**kwargs)
+
+
+def sqrt(x, **kwargs):
+    # d(x**0.5)/dx = 0.5*x
+    # -> we can overwrite x if we do not backprop through x
+    if not torch.is_tensor(x):
+        return x ** 0.5
+    return x.sqrt(**kwargs)
 
 
 def atan2_(x, y, **kwargs):
@@ -121,10 +169,26 @@ def atan2_(x, y, **kwargs):
     return x.atan2(y, **kwargs) if not inplace else x.atan2_(y, **kwargs)
 
 
+def atan2(x, y, **kwargs):
+    if not torch.is_tensor(x) and not torch.is_tensor(y):
+        return math.atan2(x, y)
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
+    if not torch.is_tensor(y):
+        y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
+    return x.atan2(y, **kwargs)
+
+
 def neg_(x, **kwargs):
     if not torch.is_tensor(x):
         return -x
     return x.neg_(**kwargs)
+
+
+def neg(x, **kwargs):
+    if not torch.is_tensor(x):
+        return -x
+    return x.neg(**kwargs)
 
 
 def reciprocal_(x, **kwargs):
@@ -136,10 +200,22 @@ def reciprocal_(x, **kwargs):
     )
 
 
+def reciprocal(x, **kwargs):
+    if not torch.is_tensor(x):
+        return 1/x
+    return x.reciprocal(**kwargs)
+
+
 def abs_(x, **kwargs):
     if not torch.is_tensor(x):
-        return abs(x)
+        return _abs(x)
     return x.abs(**kwargs) if x.requires_grad else x.abs_(**kwargs)
+
+
+def abs(x, **kwargs):
+    if not torch.is_tensor(x):
+        return _abs(x)
+    return x.abs(**kwargs)
 
 
 def exp_(x, **kwargs):
@@ -148,13 +224,61 @@ def exp_(x, **kwargs):
     return x.exp(**kwargs) if x.requires_grad else x.exp_(**kwargs)
 
 
+def exp(x, **kwargs):
+    if not torch.is_tensor(x):
+        return math.exp(x)
+    return x.exp(**kwargs)
+
+
 def log_(x, **kwargs):
     if not torch.is_tensor(x):
         return math.log(x)
     return x.log(**kwargs) if x.requires_grad else x.log_(**kwargs)
 
 
+def log(x, **kwargs):
+    if not torch.is_tensor(x):
+        return math.log(x)
+    return x.log(**kwargs)
+
+
 def atan_(x, **kwargs):
     if not torch.is_tensor(x):
         return math.atan(x)
     return x.atan(**kwargs) if x.requires_grad else x.atan_(**kwargs)
+
+
+def atan(x, **kwargs):
+    if not torch.is_tensor(x):
+        return math.atan(x)
+    return x.atan(**kwargs)
+
+
+def min(x, y):
+    if not torch.is_tensor(x) and not torch.is_tensor(y):
+        return _min(x, y)
+    elif torch.is_tensor(x) and torch.is_tensor(y):
+        return torch.minimum(x, y)
+    elif torch.is_tensor(x):
+        return x.clamp_max(y)
+    else:
+        assert torch.is_tensor(y)
+        return y.clamp_max(x)
+
+
+def max(x, y):
+    if not torch.is_tensor(x) and not torch.is_tensor(y):
+        return _max(x, y)
+    elif torch.is_tensor(x) and torch.is_tensor(y):
+        return torch.maximum(x, y)
+    elif torch.is_tensor(x):
+        return x.clamp_min(y)
+    else:
+        assert torch.is_tensor(y)
+        return y.clamp_min(x)
+
+
+def gammaln(x):
+    if torch.is_tensor(x):
+        return math.lgamma(x)
+    return torch.special.gammaln(x)

@@ -15,13 +15,8 @@ __all__ = [
     "gamma_transform",
     "z_transform",
     "quantile_transform",
+    "minmax_transform",
     "affine_intensity_transform",
-    "random_field_uniform",
-    "random_field_gaussian",
-    "random_field_lognormal",
-    "random_field_uniform_like",
-    "random_field_gaussian_like",
-    "random_field_lognormal_like",
 ]
 # stdlib
 from typing import Union, Mapping, Sequence, Optional, Callable
@@ -33,18 +28,13 @@ import torch.nn.functional as F
 
 # internal
 from ..baseutils import prepare_output, returns_update, return_requires
-from ..utils.smart_inplace import add_, mul_, pow_, div_, exp_
+from ..utils.smart_math import add_, mul_, pow_, div_
+from ._utils import _unsqz_spatial
 
 
 Tensor = torch.Tensor
 Value = Union[float, Tensor]
 Output = Union[Tensor, Mapping[Tensor], Sequence[Tensor]]
-
-
-def _unsqz_spatial(x: Value, ndim: int) -> Value:
-    if torch.is_tensor(x):
-        x = x[(Ellipsis,) + (None,) * ndim]
-    return x
 
 
 def binop_value(
@@ -243,7 +233,7 @@ def binop_field(
     """
     Apply a binary operation between the input and a field.
 
-    The field gets resized to the input's shape if needed.
+    The field gets resized to the input"s shape if needed.
 
     Parameters
     ----------
@@ -703,11 +693,11 @@ def gamma_transform(
     vmin : float | ([C],) tensor | None
         Minimum value.
         It can have multiple channels but no spatial dimensions.
-        If `None`, compute the input's minimum.
+        If `None`, compute the input"s minimum.
     vmax : float | ([C],) tensor | None
         Maximum value.
         It can have multiple channels but no spatial dimensions.
-        If `None`, compute the input's maximum.
+        If `None`, compute the input"s maximum.
     per_channel : bool
         This parameter is only used when `vmin=None` or `vmax=None`.
         If `True`, the min/max of each input channel is used.
@@ -743,7 +733,7 @@ def gamma_transform(
 
     output = div_((input - vmin_), (vmax_ - vmin_).clamp_min_(1e-8))
     output = pow_(output, gamma_)
-    if getattr(gamma_, 'requires_grad', False):
+    if getattr(gamma_, "requires_grad", False):
         # When gamma requires grad,  mul_(y, vmax-vmin) is happy
         # to overwrite y, but we cant because we need y to
         # backprop through pow. So we need an explicit branch.
@@ -888,7 +878,7 @@ def quantile_transform(
     # Select a subset of values to compute the quantiles
     # (discard inf/nan/zeros + take random sample for speed)
     input_ = input.reshape([len(input), -1])
-    input_ = input_[:, (input_ != 0) & input_.isfinite()]
+    input_ = input_[:, (input_ != 0).all(0) & input_.isfinite().all(0)]
     if (max_samples is not None) and (max_samples < input_.shape[1]):
         index_ = torch.randperm(input_.shape[1], device=input_.device)
         index_ = index_[:max_samples]
@@ -935,6 +925,84 @@ def quantile_transform(
         "pmax": pmax,
         "qmin": qmin,
         "qmax": qmax,
+    }, kwargs["returns"])
+
+
+def minmax_transform(
+    input: Tensor,
+    vmin: Value = 0,
+    vmax: Value = 1,
+    per_channel: bool = False,
+    **kwargs
+) -> Output:
+    """
+    Apply a min-max transformation:
+
+    ```python
+    rscled = (input - input.mean()) / (input.max() - input.min())
+    output = rscled * (vmax - vmin) + vmin
+    ```
+
+    Parameters
+    ----------
+    input : tensor
+        Input tensor.
+    vmin : float | ([C],) tensor
+        Minimum output value.
+        It can have multiple channels but no spatial dimensions.
+    vmax : float | ([C],) tensor
+        Maximum output value.
+        It can have multiple channels but no spatial dimensions.
+    per_channel : bool
+        This parameter is only used when `vmin=None` or `vmax=None`.
+        If `True`, the qmin/qmax of each input channel is used.
+        If `False, the global qmin/qmax of the input tensor is used.
+
+    Other Parameters
+    ----------------
+    returns : [list or dict of] {"output", "input", "imin", "imax", "vmin", "vmax"}
+        Structure of variables to return. Default: "output".
+
+    Returns
+    -------
+    output : (C, *shape) tensor
+        Output tensor.
+
+    """  # noqa: E501
+    ndim = input.ndim - 1
+    C = len(input)
+
+    # Compute min/max
+    if per_channel:
+        imin, imax = [], []
+        for c in range(C):
+            input_ = input[c]
+            input_ = input_[input_.isfinite()]
+            imin.append(input_.min())
+            imax.append(input_.max())
+        imin = torch.stack(imin)
+        imax = torch.stack(imax)
+    else:
+        imin = input_.min()
+        imax = input_.max()
+
+    imin_ = _unsqz_spatial(imin, ndim)
+    imax_ = _unsqz_spatial(imax, ndim)
+    vmin_ = _unsqz_spatial(vmin, ndim)
+    vmax_ = _unsqz_spatial(vmax, ndim)
+
+    # Transform
+    output = div_((input - imin_), (imax_ - imin_).clamp_min_(1e-8))
+    output = add_(mul_(output, vmax_ - vmin_), vmin_)
+
+    kwargs.setdefault("returns", "output")
+    return prepare_output({
+        "input": input,
+        "output": output,
+        "vmin": vmin,
+        "vmax": vmax,
+        "imin": imin,
+        "imax": imax,
     }, kwargs["returns"])
 
 
@@ -1008,303 +1076,3 @@ def affine_intensity_transform(
         "omin": omin,
         "omax": omax,
     }, kwargs["returns"])
-
-
-def random_field_uniform(
-    shape: Sequence[int],
-    vmin: Value = 0,
-    vmax: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a uniform distribution
-
-    Parameters
-    ----------
-    shape : list[int]
-        Output shape, including the channel dimension (!!): (C, *spatial).
-    vmin : float | ([C],) tensor
-        Minimum value.
-    vmax : float | ([C],) tensor
-        Maximum value.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "vmin", "vmax"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    dtype = kwargs.get("dtype", vmin.get("dtype", vmax.get("dtype", None)))
-    device = kwargs.get("device", vmin.get("device", vmax.get("device", None)))
-    if not dtype or not dtype.is_floating_point:
-        dtype = torch.get_default_dtype()
-
-    ndim = len(shape) - 1
-    vmin_ = _unsqz_spatial(vmin, ndim)
-    vmax_ = _unsqz_spatial(vmax, ndim)
-
-    output = torch.rand(shape, dtype=dtype, device=device)
-    output = add_(mul_(output, (vmax_ - vmin_)), vmin_)
-
-    kwargs.setdefault("returns", "output")
-    return prepare_output({
-        "output": output,
-        "vmin": vmin,
-        "vmax": vmax,
-    }, kwargs["returns"])
-
-
-def random_field_gaussian(
-    shape: Sequence[int],
-    mu: Value = 0,
-    sigma: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a Gaussian distribution
-
-    Parameters
-    ----------
-    shape : list[int]
-        Output shape, including the channel dimension (!!): (C, *spatial).
-    mu : float | ([C],) tensor
-        Mean.
-    sigma : float | ([C],) tensor
-        Standard deviation.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "mu", "sigma"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    dtype = kwargs.get("dtype", mu.get("dtype", sigma.get("dtype", None)))
-    device = kwargs.get("device", mu.get("device", sigma.get("device", None)))
-    if not dtype or not dtype.is_floating_point:
-        dtype = torch.get_default_dtype()
-
-    ndim = len(shape) - 1
-    mu_ = _unsqz_spatial(mu, ndim)
-    sigma_ = _unsqz_spatial(sigma, ndim)
-
-    output = torch.randn(shape, dtype=dtype, device=device)
-    output = add_(mul_(output, sigma_), mu_)
-
-    kwargs.setdefault("returns", "output")
-    return prepare_output({
-        "output": output,
-        "mu": mu,
-        "sigma": sigma,
-    }, kwargs["returns"])
-
-
-def random_field_lognormal(
-    shape: Sequence[int],
-    mu: Value = 0,
-    sigma: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a Gaussian distribution
-
-    Parameters
-    ----------
-    shape : list[int]
-        Output shape, including the channel dimension (!!): (C, *spatial).
-    mu : float | ([C],) tensor
-        Mean of log.
-    sigma : float | ([C],) tensor
-        Standard deviation of log.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "mu", "sigma"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    dtype = kwargs.get("dtype", mu.get("dtype", sigma.get("dtype", None)))
-    device = kwargs.get("device", mu.get("device", sigma.get("device", None)))
-    if not dtype or not dtype.is_floating_point:
-        dtype = torch.get_default_dtype()
-
-    ndim = len(shape) - 1
-    mu_ = _unsqz_spatial(mu, ndim)
-    sigma_ = _unsqz_spatial(sigma, ndim)
-
-    output = torch.randn(shape, dtype=dtype, device=device)
-    output = exp_(add_(mul_(output, sigma_), mu_))
-
-    kwargs.setdefault("returns", "output")
-    return prepare_output({
-        "output": output,
-        "mu": mu,
-        "sigma": sigma,
-    }, kwargs["returns"])
-
-
-def _random_field_like(
-    func: Callable,
-    input: Tensor,
-    shape: Optional[Sequence[int]] = None,
-    *args,
-    **kwargs
-) -> Output:
-    """
-    Helper to sample a random field from a distribution
-
-    Parameters
-    ----------
-    func : callable
-        Sampling function
-    input : tensor
-        Tensor from which to copy the data type, device and shape
-    shape : list[int] | None
-        Output shape. Same as input by default.
-    *args
-        `func`'s other parameters.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"input", "output", ...}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    kwargs.setdefault("returns", "output")
-
-    # copy shape
-    if shape is None:
-        shape = input.shape
-    shape = torch.Size(shape)
-    # if pure spatial shape, copy channels
-    if len(shape) == input.ndim - 1:
-        shape = input.shape[:1] + shape
-
-    # copy dtype/device
-    dtype = kwargs.get("dtype", None) or input.dtype
-    device = kwargs.get("device", None) or input.device
-    if not dtype.is_floating_point:
-        dtype = torch.get_default_dtype()
-    kwargs["dtype"] = dtype
-    kwargs["device"] = device
-
-    # sample field
-    output = func(shape, *args, **kwargs)
-
-    return returns_update(input, "input", output, kwargs["returns"])
-
-
-def random_field_uniform_like(
-    input: Tensor,
-    shape: Optional[Sequence[int]] = None,
-    vmin: Value = 0,
-    vmax: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a uniform distribution
-
-    Parameters
-    ----------
-    input : tensor
-        Tensor from which to copy the data type, device and shape
-    shape : list[int] | None
-        Output shape. Same as input by default.
-    vmin : float | ([C],) tensor
-        Minimum value.
-    vmax : float | ([C],) tensor
-        Maximum value.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "input", "vmin", "vmax"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    return _random_field_like(
-        random_field_uniform, input, shape, vmin, vmax, **kwargs
-    )
-
-
-def random_field_gaussian_like(
-    input: Tensor,
-    shape: Optional[Sequence[int]] = None,
-    mu: Value = 0,
-    sigma: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a gaussian distribution
-
-    Parameters
-    ----------
-    input : tensor
-        Tensor from which to copy the data type, device and shape
-    shape : list[int] | None
-        Output shape. Same as input by default.
-    mu : float | ([C],) tensor
-        Mean.
-    sigma : float | ([C],) tensor
-        Standard deviation.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "input", "mu", "sigma"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    return _random_field_like(
-        random_field_gaussian, input, shape, mu, sigma, **kwargs
-    )
-
-
-def random_field_lognormal_like(
-    input: Tensor,
-    shape: Optional[Sequence[int]] = None,
-    mu: Value = 0,
-    sigma: Value = 1,
-    **kwargs
-) -> Output:
-    """
-    Sample a random field from a log-normal distribution
-
-    Parameters
-    ----------
-    input : tensor
-        Tensor from which to copy the data type, device and shape
-    shape : list[int] | None
-        Output shape. Same as input by default.
-    mu : float | ([C],) tensor
-        Mean of log.
-    sigma : float | ([C],) tensor
-        Standard deviation of log.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "input", "mu", "sigma"}
-
-    Returns
-    -------
-    output : (*shape) tensor
-        Output tensor.
-    """
-    return _random_field_like(
-        random_field_lognormal, input, shape, mu, sigma, **kwargs
-    )
