@@ -29,7 +29,7 @@ from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
-from .utils.smart_inplace import add_, mul_, div_, pow_
+from .utils.smart_math import add_, mul_, div_, pow_
 
 
 class OpConstTransform(FinalTransform):

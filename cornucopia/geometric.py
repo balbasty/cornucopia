@@ -21,7 +21,7 @@ from .baseutils import prepare_output, return_requires
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils import warps
 from .utils.py import ensure_list, cast_like, make_vector
-from .utils.smart_inplace import add_
+from .utils.smart_math import add_
 
 
 class ElasticTransform(NonFinalTransform):
