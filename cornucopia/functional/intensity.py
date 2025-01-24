@@ -1122,20 +1122,20 @@ def add_smooth_random_field(
     """  # noqa: E501
     if (
         (mean is None) and
-        (kwargs.get("mu", None) is not None) and
-        (kwargs.get("peak", None) is not None) and
-        (kwargs.get("vmin", None) is not None) and
-        (kwargs.get("vmax", None) is not None)
+        (kwargs.get("mu", None) is None) and
+        (kwargs.get("peak", None) is None) and
+        (kwargs.get("vmin", None) is None) and
+        (kwargs.get("vmax", None) is None)
     ):
         mean = 0
 
     if (
         (fwhm is None) and
-        (kwargs.get("sigma", None) is not None) and
-        (kwargs.get("std", None) is not None) and
-        (kwargs.get("vmin", None) is not None) and
-        (kwargs.get("vmax", None) is not None) and
-        (kwargs.get("alpha", None) is not None)
+        (kwargs.get("sigma", None) is None) and
+        (kwargs.get("std", None) is None) and
+        (kwargs.get("vmin", None) is None) and
+        (kwargs.get("vmax", None) is None) and
+        (kwargs.get("alpha", None) is None)
     ):
         fwhm = 1
 
@@ -1201,20 +1201,20 @@ def mul_smooth_random_field(
     """  # noqa: E501
     if (
         (mean is None) and
-        (kwargs.get("mu", None) is not None) and
-        (kwargs.get("peak", None) is not None) and
-        (kwargs.get("vmin", None) is not None) and
-        (kwargs.get("vmax", None) is not None)
+        (kwargs.get("mu", None) is None) and
+        (kwargs.get("peak", None) is None) and
+        (kwargs.get("vmin", None) is None) and
+        (kwargs.get("vmax", None) is None)
     ):
         mean = 1
 
     if (
         (fwhm is None) and
-        (kwargs.get("sigma", None) is not None) and
-        (kwargs.get("std", None) is not None) and
-        (kwargs.get("vmin", None) is not None) and
-        (kwargs.get("vmax", None) is not None) and
-        (kwargs.get("alpha", None) is not None)
+        (kwargs.get("sigma", None) is None) and
+        (kwargs.get("std", None) is None) and
+        (kwargs.get("vmin", None) is None) and
+        (kwargs.get("vmax", None) is None) and
+        (kwargs.get("alpha", None) is None)
     ):
         fwhm = 1
 
