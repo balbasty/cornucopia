@@ -32,7 +32,7 @@ from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list, make_vector
 from .utils.morpho import bounded_distance
-from .utils.smart_inplace import mul_, div_, add_, sub_
+from .utils.smart_math import mul_, div_, add_, sub_
 from . import ctx
 
 

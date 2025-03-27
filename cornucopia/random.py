@@ -13,7 +13,7 @@ import copy
 import torch
 from numbers import Number
 from .utils.py import ensure_list
-from .utils.smart_inplace import add_, mul_, exp_
+from .utils.smart_math import add_, mul_, exp_
 
 
 class Sampler:

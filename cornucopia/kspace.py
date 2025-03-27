@@ -14,7 +14,7 @@ from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
 from .random import Fixed
 from .utils.warps import identity
-from .utils.smart_inplace import sqrt_, square_, abs_, mul_, exp_, sub_, add_
+from .utils.smart_math import sqrt_, square_, abs_, mul_, exp_, sub_, add_
 from . import ctx
 
 

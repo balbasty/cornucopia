@@ -31,6 +31,7 @@ image pairs with a random affine deformation between them::
 
 """
 
+from . import functional                    # noqa: F401
 from . import random                        # noqa: F401
 from . import ctx                           # noqa: F401
 from . import base                          # noqa: F401
