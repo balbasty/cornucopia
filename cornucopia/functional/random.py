@@ -29,7 +29,7 @@ from ._utils import _unsqz_spatial, _backend_float
 
 Tensor = torch.Tensor
 Value = Union[float, Tensor]
-Output = Union[Tensor, Mapping[Tensor], Sequence[Tensor]]
+Output = Union[Tensor, Mapping[str, Tensor], Sequence[Tensor]]
 
 LOG2 = math.log(2)
 FWHM_FACTOR = (8 * LOG2) ** 0.5  # gaussian: fwhm = FWHM_FACTOR * sigma
@@ -137,7 +137,7 @@ def random_field_uniform(
     output = math.add_(math.mul_(output, (vmax_ - vmin_)), vmin_)
 
     kwargs.setdefault("returns", "output")
-    return prepare_output({"output": output, **prm}, kwargs["returns"])
+    return prepare_output({"output": output, **prm}, kwargs["returns"])()
 
 
 def random_field_gaussian(
@@ -181,7 +181,7 @@ def random_field_gaussian(
     output = math.add_(math.mul_(output, std_), mean_)
 
     kwargs.setdefault("returns", "output")
-    return prepare_output({"output": output, **prm}, kwargs["returns"])
+    return prepare_output({"output": output, **prm}, kwargs["returns"])()
 
 
 def random_field_lognormal(
@@ -251,7 +251,7 @@ def random_field_lognormal(
     output = math.exp_(math.add_(math.mul_(output, sigma_), mu_))
 
     kwargs.setdefault("returns", "output")
-    return prepare_output({"output": output, **prm}, kwargs["returns"])
+    return prepare_output({"output": output, **prm}, kwargs["returns"])()
 
 
 def random_field_gamma(
@@ -309,6 +309,7 @@ def random_field_gamma(
     output : (*shape) tensor
         Output tensor.
     """
+    ndim = len(shape) - 1
     prm = gamma_parameters(mean=mean, std=std, **kwargs)
     alpha, beta = prm["alpha"], prm["beta"]
 
@@ -319,9 +320,11 @@ def random_field_gamma(
     beta_ = beta_.expand(shape[:1])
 
     output = torch.distributions.Gamma(alpha_, beta_).rsample(shape[1:])
+    for _ in range(ndim):
+        output = output.movedim(0, -1)
 
     kwargs.setdefault("returns", "output")
-    return prepare_output({"output": output, **prm}, kwargs["returns"])
+    return prepare_output({"output": output, **prm}, kwargs["returns"])()
 
 
 def random_field_generalized(
@@ -411,7 +414,7 @@ def random_field_generalized(
     output = math.add_(math.mul_(output, std_), mean_)
 
     kwargs.setdefault("returns", "output")
-    return prepare_output({"output": output, **prm}, kwargs["returns"])
+    return prepare_output({"output": output, **prm}, kwargs["returns"])()
 
 
 def random_field_like(
@@ -515,7 +518,7 @@ def _random_field_like(
     # sample field
     output = func(shape, *args, **kwargs)
 
-    return returns_update(input, "input", output, kwargs["returns"])
+    return returns_update(input, "input", output, kwargs["returns"])()
 
 
 def random_field_uniform_like(

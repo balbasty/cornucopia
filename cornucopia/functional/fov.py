@@ -85,7 +85,7 @@ def flip(
     return prepare_output(
         {"output": output, "input": input, "axes": axes},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def random_flip(
@@ -188,7 +188,7 @@ def perm(
     return prepare_output(
         {"output": output, "input": input, "perm": perm},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def random_perm(
@@ -334,7 +334,7 @@ def rot90(
         {"output": output, "input": input,
          "plane": plane, "negative": negative, "double": double},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def rot180(
@@ -426,7 +426,7 @@ def random_orient(
     return prepare_output(
         {"output": output, "input": input, "perm": perm_, "flip": flip_},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def ensure_pow2(
@@ -525,7 +525,7 @@ def pad(
     return prepare_output(
         {"output": output, "input": input, "size": size},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def crop(
@@ -615,7 +615,7 @@ def crop(
     return prepare_output(
         {"output": output, "input": input, "size": size},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def patch(
@@ -673,7 +673,7 @@ def patch(
     return prepare_output(
         {"output": output, "input": input, "center": center},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def random_patch(

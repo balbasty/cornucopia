@@ -46,7 +46,7 @@ def noisify_gaussian(
     return prepare_output(
         {"input": input, "output": output, "noise": noise, "gfactor": gfactor},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def noisify_gamma(
@@ -84,7 +84,7 @@ def noisify_gamma(
     return prepare_output(
         {"input": input, "output": output, "noise": noise},
         kwargs.pop("returns", "output")
-    )
+    )()
 
 
 def noisify_chi(
@@ -141,4 +141,4 @@ def noisify_chi(
     return prepare_output(
         {"input": input, "output": output, "noise": noise},
         kwargs.pop("returns", "output")
-    )
+    )()

@@ -70,7 +70,7 @@ def binop_value(
     return prepare_output(
         {"input": input, "output": output, kwargs["value"]: value},
         kwargs["returns"]
-    )
+    )()
 
 
 def add_value(input: Tensor, value: Value, **kwargs) -> Output:
@@ -218,7 +218,7 @@ def addmul_value(
         "output": output,
         kwargs["scale_name"]: scale,
         kwargs["offset_name"]: offset,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def binop_field(
@@ -274,7 +274,7 @@ def binop_field(
         "output": output,
         kwargs["field_name"]: field,
         "input_" + kwargs["field_name"]: input_field
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def add_field(
@@ -493,7 +493,7 @@ def fill_value(input: Tensor, mask: Tensor, value: Value, **kwargs) -> Output:
         "output": output,
         kwargs["value_name"]: value,
         kwargs["mask_name"]: mask,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def clip_value(
@@ -533,7 +533,7 @@ def clip_value(
     return prepare_output(
         {"input": input, "output": output, "vmin": vmin, "vmax": vmax},
         kwargs["returns"]
-    )
+    )()
 
 
 def spline_upsample(
@@ -612,7 +612,7 @@ def spline_upsample(
     return prepare_output(
         {"input": input, "output": output, "coeff": coeff},
         returns
-    )
+    )()
 
 
 def spline_upsample_like(
@@ -663,6 +663,7 @@ def spline_upsample_like(
     kwargs.setdefault("copy", copy)
     output = spline_upsample(input, like.shape[1:], **kwargs)
     output = returns_update(like, "like", output, kwargs["returns"])
+    return output()
 
 
 def gamma_transform(
@@ -747,7 +748,7 @@ def gamma_transform(
         "vmin": vmin,
         "vmax": vmax,
         "gamma": gamma,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def z_transform(
@@ -814,7 +815,7 @@ def z_transform(
         "output": output,
         "mu": mu,
         "sigma": sigma,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def quantile_transform(
@@ -924,7 +925,7 @@ def quantile_transform(
         "pmax": pmax,
         "qmin": qmin,
         "qmax": qmax,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def minmax_transform(
@@ -1002,7 +1003,7 @@ def minmax_transform(
         "vmax": vmax,
         "imin": imin,
         "imax": imax,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def affine_intensity_transform(
@@ -1074,7 +1075,7 @@ def affine_intensity_transform(
         "imax": imax,
         "omin": omin,
         "omax": omax,
-    }, kwargs["returns"])
+    }, kwargs["returns"])()
 
 
 def add_smooth_random_field(
@@ -1153,7 +1154,7 @@ def add_smooth_random_field(
     output = add_field(input, coeff, order, prefilter=False, returns=returns)
 
     output = returns_update(coeff, "coeff", output, returns)
-    return output
+    return output()
 
 
 def mul_smooth_random_field(
@@ -1232,4 +1233,4 @@ def mul_smooth_random_field(
     output = add_field(input, coeff, order, prefilter=False, returns=returns)
 
     output = returns_update(coeff, "coeff", output, returns)
-    return output
+    return output()

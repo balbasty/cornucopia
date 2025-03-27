@@ -220,6 +220,9 @@ class Returned:
     def __init__(self, obj):
         self.obj = obj
 
+    def __call__(self):
+        return self.obj
+
 
 class VirtualTensor:
     """Virtual tensor used to recursively compute final transforms"""

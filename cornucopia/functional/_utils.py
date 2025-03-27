@@ -9,7 +9,7 @@ import torch
 T = TypeVar('T')
 Tensor = torch.Tensor
 Value = Union[float, Tensor]
-Output = Union[Tensor, Mapping[Tensor], Sequence[Tensor]]
+Output = Union[Tensor, Mapping[str, Tensor], Sequence[Tensor]]
 OneOrMore = Union[T, Sequence[T]]
 
 

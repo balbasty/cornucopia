@@ -1,5 +1,5 @@
 
-import smart_math as math
+from ..utils import smart_math as math
 
 LOG2 = math.log(2)
 FWHM_FACTOR = (8 * LOG2) ** 0.5  # gaussian: fwhm = FWHM_FACTOR * sigma

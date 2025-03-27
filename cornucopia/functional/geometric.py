@@ -6,9 +6,18 @@ __all__ = [
     "make_affine_flow",
     "apply_affine_matrix",
     "apply_affine",
+    "apply_random_affine",
+    "apply_random_affine_elastic",
 ]
+# std
+import random
 from typing import Optional, Sequence
+
+# external
 import torch
+import interpol
+
+# internal
 from ..baseutils import prepare_output, returns_update
 from ..utils import warps, smart_math as math
 from ..utils.py import ensure_list, make_vector
@@ -53,7 +62,7 @@ def exp_velocity(
     return prepare_output(
         {"output": output, "input": input},
         kwargs.get("returns", "output")
-    )
+    )()
 
 
 def apply_flow(input: Tensor, flow: Tensor, **kwargs) -> Output:
@@ -83,7 +92,7 @@ def apply_flow(input: Tensor, flow: Tensor, **kwargs) -> Output:
     return prepare_output(
         {"output": output, "input": input, "flow": flow},
         kwargs.get("returns", "output")
-    )
+    )()
 
 
 def apply_random_flow(
@@ -194,7 +203,7 @@ def apply_random_flow(
         "flow": flow,
         "svf": svf,
         "coeff": coeff,
-    }, returns)
+    }, returns)()
 
 
 def make_affine_matrix(
@@ -311,7 +320,7 @@ def make_affine_matrix(
         "rotations": rotations,
         "shears": shears,
         "zooms": zooms,
-    }, kwargs.get("returns", "output"))
+    }, kwargs.get("returns", "output"))()
 
 
 def make_affine_flow(
@@ -362,7 +371,7 @@ def make_affine_flow(
     return prepare_output(
         {"flow": flow, "output": flow, "matrix": matrix, "input": matrix},
         kwargs.get("returns", "output")
-    )
+    )()
 
 
 def apply_affine_matrix(
@@ -409,7 +418,7 @@ def apply_affine_matrix(
         "input": input,
         "matrix": matrix,
         "flow": flow,
-    }, kwargs.get("returns", "output"))
+    }, kwargs.get("returns", "output"))()
 
 
 def apply_affine(
@@ -471,7 +480,7 @@ def apply_affine(
     output = returns_update(rotations, "rotations", output, returns)
     output = returns_update(zooms, "zooms", output, returns)
     output = returns_update(shears, "shears", output, returns)
-    return output
+    return output()
 
 
 def apply_random_affine(
@@ -535,3 +544,173 @@ def apply_random_affine(
     S = random_field_like(distrib, input, [C, D2], **{statistic: shears})
 
     return apply_affine(input, T, R, Z, S, unit, **kwargs)
+
+
+def apply_random_affine_elastic(
+    input: Tensor,
+    elastic: 0.06,
+    translations: 0.06,
+    rotations: 9,
+    zooms: 0.08,
+    shears: 0.07,
+    shape: OneOrMore[int] = 5,
+    patch: Optional[OneOrMore[int]] = None,
+    distrib: str = "uniform",
+    distribz: str = "uniform",
+    statistic: str = "std",
+    steps: int = 0,
+    order: int = 3,
+    unit: str = "pct",
+    iso: bool = False,
+    shared: bool = True,
+    **kwargs,
+) -> Output:
+    """
+    Apply a random affine + elastic transformation.
+
+    Parameters
+    ----------
+    input : (C, *spatial) tensor
+        Input tensor.
+    elastic : ([C],) (float | tensor)
+        Scale of random elastic flow.
+    translations : ([C],) (float | tensor)
+        Scale of random translations.
+    rotations : ([C],) (float | tensor)
+        Scale of random rotations.
+    zooms : ([C],) (float | tensor)
+        Scale of random zooms.
+    shears : ([C],) (float | tensor)
+        Scale of random shears.
+    patch : [list of] int
+        Size of random patch to extract
+    distrib : [dict of] {"uniform", "gaussian"}
+        Probability distribution over T/R/S (with mean 0).
+    distribz : [dict of] {"uniform", "lognormal", "gamma"}
+        Probability distribution over zooms (with mean 1).
+    statistic : {"std", "fwhm"}
+        Which statistics to use as "scale parameter".
+    steps : int
+        Number of integration steps.
+    order : int
+        Spline order.
+    unit : {"vox", "pct"}
+        Translation and deformation unit.
+    shared : bool
+        Apply the same transform to all channels.
+
+    Other Parameters
+    ----------------
+    returns : [list or dict of] {"output", "input", "flow", "matrix", ...}
+        Values to return.
+
+    Returns
+    -------
+    output : (C, *spatial) tensor
+        Output tensor
+    """  # noqa: E501
+
+    # backend
+    dtype = input.dtype
+    if not dtype.is_floating_point:
+        dtype = torch.get_default_dtype()
+    backend = dict(dtype=dtype, device=input.device)
+
+    # size
+    ishape = input.shape[1:]
+    D = input.ndim - 1
+    D2 = (D*(D-1))//2
+    DZ = 1 if iso else D
+    C = 1 if shared else len(input)
+
+    # sample affine parameters
+    T = random_field_like(distrib, input, [C, D], **{statistic: translations})
+    R = random_field_like(distrib, input, [C, D2], **{statistic: rotations})
+    Z = random_field_like(distribz, input, [C, DZ], **{statistic: zooms})
+    S = random_field_like(distrib, input, [C, D2], **{statistic: shears})
+
+    # build matrix
+    matrix = torch.stack([
+        make_affine_matrix(T1, R1, Z1, S1)
+        for T1, R1, Z1, S1 in zip(T, R, Z, S)
+    ])
+
+    # apply transform at the center of the field of view
+    A = matrix
+    offset = torch.as_tensor([(n-1)/2 for n in ishape]).to(A)
+    F = torch.eye(D+1).to(A)
+    F[:-1, -1] = offset
+    A = F.matmul(A).matmul(F.inverse())
+
+    # sample spline coefficients
+    coeff = random_field_like(distrib, shape, **kwargs)
+
+    # rescale values
+    if unit[0].lower() != "v":
+        scale = make_vector(input.shape[1:]).to(coeff)
+        coeff = math.mul_(coeff, scale)
+
+    if steps:
+        # upsample to image size
+        svf = coeff.movedim(-1, 0).reshape((-1,) + coeff.shape[1:-1])
+        svf = spline_upsample_like(svf, input, order, prefilter=False)
+        svf = svf.reshape((D, C) + input.shape[1:]).movedim(0, -1)
+
+        # exponentiate
+        elastic = exp_velocity(svf, steps)
+
+    # patch size
+    patch_ = patch
+    if patch_ is None:
+        patch_ = ishape
+    patch_ = ensure_list(patch_, D)
+
+    # 1) start from identity
+    flow = warps.identity(patch_, **backend)
+
+    if patch:
+        # 1.b) randomly sample patch location and add offset
+        patch_origin = [random.randint(0, s-p) for s, p in zip(ishape, patch)]
+        flow += torch.as_tensor(patch_origin, **backend)
+
+    # 2) apply affine transform
+    flow = A[:D, :D].matmul(flow.unsqueeze(-1)).squeeze(-1)
+    flow = math.add_(flow, A[:D, -1])
+
+    # 3) compose with elastic transform
+    if steps:
+        # we sample into the blown up elastic flow,
+        # which has the size of the full image
+        tmp = elastic.movedim(-1, -D-1)
+        tmp = warps.apply_flow(tmp, flow, has_identity=True)
+        tmp = tmp.movedim(-D-1, -1)
+        flow = math.add_(tmp, flow)
+    else:
+        # we sample into the spline control points
+        # and must rescale the sampling coordinates accordingly
+        scale = [(s0-1)/(s1-1) for s0, s1 in zip(shape, ishape)]
+        scale = torch.as_tensor(scale, **backend)
+        if order == 1:
+            # we can use pytorch
+            tmp = coeff.movedim(-1, -D-1)
+            tmp = warps.apply_flow(coeff, flow * scale, has_identity=True)
+            tmp = tmp.movedim(-D-1, -1)
+            flow = math.add_(tmp, flow)
+        else:
+            # we must use torch-interpol
+            # (for some reason we cannot add inplace here)
+            tmp = coeff.movedim(-1, -D-1)
+            interpol.grid_pull(coeff, flow * scale, interpolation=order)
+            tmp = tmp.movedim(-D-1, -1)
+            flow = tmp + flow
+
+    # apply
+    output = apply_flow(input, flow)
+
+    return prepare_output({
+        "output": output,
+        "input": input,
+        "matrix": matrix,
+        "coeff": coeff,
+        "flow": flow,
+    }, kwargs.get("returns", "output"))()
