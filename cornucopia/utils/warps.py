@@ -217,7 +217,8 @@ def apply_flow(image, flow, has_identity=False, **kwargs):
         flow = flow.expand([B, *flow.shape[1:]])
     if len(image) != B:
         image = image.expand([B, *image.shape[1:]])
-    if not image.dtype.is_floating_point:
+    nn = kwargs.get('mode', 'bilinear') == 'nearest'
+    if not image.dtype.is_floating_point and not nn:
         vmax = flow.new_full([B, C, *shape_out], -float('inf'))
         warped = image.new_zeros([B, C, *shape_out])
         for label in image.unique():
@@ -226,7 +227,10 @@ def apply_flow(image, flow, has_identity=False, **kwargs):
             vmax = torch.maximum(vmax, w)
         return warped
     else:
-        return F.grid_sample(image, flow, **kwargs)
+        dtype = image.dtype
+        if not dtype.is_floating_point:
+            image = image.float()
+        return F.grid_sample(image, flow, **kwargs).to(dtype)
 
 
 def downsample(image, factor=None, shape=None, anchor='center'):
@@ -596,4 +600,3 @@ def compose_velocities(vel_left, vel_right, order=2):
                 if order > 4:
                     raise ValueError('BCH only implemented up to order 4')
     return vel
-

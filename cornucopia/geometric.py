@@ -40,6 +40,7 @@ class ElasticTransform(NonFinalTransform):
             steps: int = 0,
             order: int = 3,
             zero_center: bool = False,
+            nearest_if_label: bool = True,
             *,
             shared: Union[bool, str] = True,
             **kwargs
@@ -55,14 +56,22 @@ class ElasticTransform(NonFinalTransform):
         shape : [list of] int
             Number of spline control points
         bound : {'zeros', 'border', 'reflection'}
-            Padding mode
+            Padding mode used for the deformed image.
         steps : int
             Number of scaling-and-squaring integration steps
-        order : int
-            Spline order
+        order : 1..7
+            Order of the splines that encode the smooth deformation.
         zero_center : bool
             Subtract its mean displacement to the flow field so that
             it has an empirical mean of zero.
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
+
 
         Other Parameters
         ------------------
@@ -92,6 +101,7 @@ class ElasticTransform(NonFinalTransform):
         self.steps = steps
         self.order = order
         self.zero_center = zero_center
+        self.nearest_if_label = nearest_if_label
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         """
@@ -162,6 +172,7 @@ class ElasticTransform(NonFinalTransform):
         return self.Final(
             flow, controls,
             self.steps, self.order, self.bound, self.zero_center,
+            self.nearest_if_label,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -176,6 +187,7 @@ class ElasticTransform(NonFinalTransform):
                 order: int = 3,
                 bound: str = 'border',
                 zero_center: bool = False,
+                nearest_if_label: bool = True,
                 **kwargs
         ):
             """
@@ -189,13 +201,14 @@ class ElasticTransform(NonFinalTransform):
                 (if not provided, `flow` must be provided)
             steps : int
                 Number of scaling and squaring steps
-            order : int
-                Spline order
-            bound : str
-                Boundary condition
+            order : 1..7
+                Order of the splines that encode the smooth deformation.
+            bound : {'zeros', 'border', 'reflection'}
+                Padding mode used for the deformed image.
             zero_center : bool
                 Subtract its mean displacement to the flow field so that
                 it has an empirical mean of zero.
+            nearest_if_label : bool
             """
             super().__init__(**kwargs)
             self.flow = flow
@@ -204,6 +217,7 @@ class ElasticTransform(NonFinalTransform):
             self.order = order
             self.bound = bound
             self.zero_center = zero_center
+            self.nearest_if_label = nearest_if_label
 
         def make_flow(self, control, fullshape):
             """Upsample the control points to the final full size
@@ -266,8 +280,12 @@ class ElasticTransform(NonFinalTransform):
                 flow = self.make_flow(controls, x.shape[1:])
             y = None
             if 'output' in required:
+                mode = 'bilinear'
+                if not x.dtype.is_floating_point and self.nearest_if_label:
+                    mode = 'nearest'
                 y = warps.apply_flow(
-                    x[:, None], flow.movedim(1, -1), padding_mode=self.bound
+                    x[:, None], flow.movedim(1, -1),
+                    padding_mode=self.bound, mode=mode,
                 )[:, 0]
             return prepare_output(
                 dict(input=x, output=y, flow=flow, controls=controls),
@@ -289,6 +307,7 @@ class RandomElasticTransform(NonFinalTransform):
             steps: int = 0,
             order: int = 3,
             zero_center: bool = False,
+            nearest_if_label: bool = False,
             *,
             shared: Union[bool, str] = True,
             shared_flow: Optional[Union[bool, str]] = None,
@@ -313,6 +332,13 @@ class RandomElasticTransform(NonFinalTransform):
         zero_center : bool
             Subtract its mean displacement to the flow field so that
             it has an empirical mean of zero.
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
         ------------------
@@ -337,6 +363,7 @@ class RandomElasticTransform(NonFinalTransform):
         self.order = order
         self.zero_center = zero_center
         self.shared_flow = shared_flow
+        self.nearest_if_label = nearest_if_label
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -358,6 +385,7 @@ class RandomElasticTransform(NonFinalTransform):
             dmax=dmax, shape=shape, order=order,
             unit=self.unit, bound=self.bound, steps=self.steps,
             zero_center=self.zero_center, shared=shared_flow,
+            nearest_if_label=self.nearest_if_label,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
 
@@ -381,6 +409,7 @@ class AffineTransform(NonFinalTransform):
             zooms: Union[float, List[float]] = 0,
             unit: str = 'fov',
             bound: str = 'border',
+            nearest_if_label: bool = False,
             *,
             shared: Union[bool, str] = True,
             **kwargs
@@ -401,6 +430,13 @@ class AffineTransform(NonFinalTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
         ------------------
@@ -429,6 +465,7 @@ class AffineTransform(NonFinalTransform):
         self.shears = shears
         self.unit = unit
         self.bound = bound
+        self.nearest_if_label = nearest_if_label
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         batch, *fullshape = x.shape
@@ -511,6 +548,7 @@ class AffineTransform(NonFinalTransform):
                 flow: Optional[torch.Tensor] = None,
                 matrix: Optional[torch.Tensor] = None,
                 bound: str = 'border',
+                nearest_if_label: bool = False,
                 **kwargs
         ):
             """
@@ -522,11 +560,13 @@ class AffineTransform(NonFinalTransform):
                 Matrix
             bound : {'zeros', 'border', 'reflection'}
                 Padding mode
+            nearest_if_label : bool
             """
             super().__init__(**kwargs)
             self.flow = flow
             self.matrix = matrix
             self.bound = bound
+            self.nearest_if_label = nearest_if_label
 
         def make_flow(self, matrix, shape):
             return warps.affine_flow(matrix, shape).movedim(-1, 0)
@@ -539,8 +579,11 @@ class AffineTransform(NonFinalTransform):
                 flow = self.make_flow(matrix, x.shape[1:])
             y = None
             if 'output' in required:
+                mode = 'bilinear'
+                if not x.dtype.is_floating_point and self.nearest_if_label:
+                    mode = 'nearest'
                 y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
-                                     padding_mode=self.bound)[:, 0]
+                                     padding_mode=self.bound, mode=mode)[:, 0]
             return prepare_output(
                 dict(input=x, output=y, flow=flow, matrix=matrix),
                 self.returns
@@ -561,6 +604,7 @@ class RandomAffineTransform(NonFinalTransform):
             iso: bool = False,
             unit: str = 'fov',
             bound: str = 'border',
+            nearest_if_label: bool = False,
             *,
             shared: Union[bool, str] = True,
             shared_matrix: Optional[Union[bool, str]] = None,
@@ -584,6 +628,13 @@ class RandomAffineTransform(NonFinalTransform):
             Unit of `translations`.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
         ------------------
@@ -607,6 +658,7 @@ class RandomAffineTransform(NonFinalTransform):
         self.iso = iso
         self.unit = unit
         self.bound = bound
+        self.nearest_if_label = nearest_if_label
         self.shared_matrix = shared_matrix
 
     def make_final(self, x, max_depth=float('inf')):
@@ -635,6 +687,7 @@ class RandomAffineTransform(NonFinalTransform):
         return AffineTransform(
             translations, rotations, shears, zooms,
             unit=unit, bound=bound, shared=shared_matrix,
+            nearest_if_label=self.nearest_if_label,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -658,6 +711,7 @@ class AffineElasticTransform(NonFinalTransform):
         patch: Optional[Union[int, List[int]]] = None,
         order: int = 3,
         zero_center: bool = False,
+        nearest_if_label: bool = False,
         *,
         shared: bool = True,
         **kwargs
@@ -692,6 +746,13 @@ class AffineElasticTransform(NonFinalTransform):
             Subtract its mean displacement to the elastic flow field so
             that it has an empirical mean of zero. This has no effect on
             the affine component.
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
         ------------------
@@ -708,13 +769,14 @@ class AffineElasticTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.patch = patch
         self.steps = steps
+        self.nearest_if_label = nearest_if_label
         self.affine = AffineTransform(
             translations, rotations, shears, zooms,
-            unit, bound, shared=shared
+            unit, bound, nearest_if_label, shared=shared,
         )
         self.elastic = ElasticTransform(
             dmax,  unit, shape, bound, steps, order, zero_center,
-            shared=shared
+            nearest_if_label, shared=shared,
         )
 
     def make_final(self, x, max_depth=float('inf')):
@@ -805,13 +867,22 @@ class AffineElasticTransform(NonFinalTransform):
                 )
 
         return self.Final(
-            flow, controls, A, self.elastic.bound, **self.get_prm()
+            flow, controls, A, self.elastic.bound, self.nearest_if_label,
+            **self.get_prm()
         ).make_final(x, max_depth-1)
 
     class Final(FinalTransform):
         """Determinstic affine+elastic transform"""
 
-        def __init__(self, flow, controls, affine, bound='border', **kwargs):
+        def __init__(
+            self,
+            flow: torch.tensor,
+            controls: torch.tensor,
+            affine: torch.tensor,
+            bound: str = 'border',
+            nearest_if_label: bool = False,
+            **kwargs
+        ):
             """
             Parameters
             ----------
@@ -825,13 +896,17 @@ class AffineElasticTransform(NonFinalTransform):
             self.controls = controls
             self.affine = affine
             self.bound = bound
+            self.nearest_if_label = nearest_if_label
 
         def xform(self, x):
             flow = cast_like(self.flow, x)
             controls = cast_like(self.controls, x)
             affine = cast_like(self.affine, x)
+            mode = "bilinear"
+            if not x.dtype.is_floating_point and self.nearest_if_label:
+                mode = "nearest"
             y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
-                                 padding_mode=self.bound,
+                                 padding_mode=self.bound, mode=mode,
                                  has_identity=True)[:, 0]
             return prepare_output(
                 dict(input=x, output=y, flow=flow,
@@ -859,6 +934,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         patch: Optional[Union[int, List[int]]] = None,
         order: int = 3,
         zero_center: bool = False,
+        nearest_if_label: bool = False,
         *,
         shared: bool = True,
         shared_flow: bool = None,
@@ -896,6 +972,13 @@ class RandomAffineElasticTransform(NonFinalTransform):
             Subtract its mean displacement to the elastic flow field so
             that it has an empirical mean of zero. This has no effect on
             the affine component.
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
         ------------------
@@ -920,6 +1003,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.order = order
         self.zero_center = zero_center
         self.shared_flow = shared_flow
+        self.nearest_if_label = nearest_if_label
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -938,6 +1022,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         patch = self.patch
         order = self.order
         zero_center = self.zero_center
+        nearest_if_label = self.nearest_if_label
         shared_flow = self.shared_flow
 
         if isinstance(dmax, Sampler):
@@ -970,6 +1055,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
             patch=patch,
             order=order,
             zero_center=zero_center,
+            nearest_if_label=nearest_if_label,
             shared=shared_flow,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
