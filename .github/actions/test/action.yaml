@@ -23,11 +23,11 @@ runs:
       with:
         mamba-version: "*"
         python-version: ${{ inputs.python-version }}
-        channels: balbasty,pytorch,conda-forge,defaults
+        channels: balbasty,pytorch,conda-forge
         activate-environment: test-env
     - name: Install dependencies
       shell: bash -el {0}
-      env: 
+      env:
         PYTORCH_VERSION: ${{ inputs.pytorch-version }}
       run: |
         mamba install pytorch=${PYTORCH_VERSION} pytest
