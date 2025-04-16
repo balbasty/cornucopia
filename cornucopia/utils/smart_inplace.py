@@ -139,6 +139,9 @@ def reciprocal_(x, **kwargs):
 def abs_(x, **kwargs):
     if not torch.is_tensor(x):
         return abs(x)
+    if torch.is_complex(x):
+        # abs_ not supported for complex tensors
+        return x.abs(**kwargs)
     return x.abs(**kwargs) if x.requires_grad else x.abs_(**kwargs)
 
 
