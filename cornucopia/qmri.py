@@ -591,8 +591,11 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         logmt = logit(mt)
         logsigma = sigma.log()
 
+        nb1 = len(b1) if (torch.is_tensor(b1) and b1.ndim > 0) else 1
+
         dtype = x.dtype if x.is_floating_point() else torch.get_default_dtype()
-        y = x.new_zeros([5, *x.shape[1:]], dtype=dtype)
+        y = x.new_zeros([4 + nb1, *x.shape[1:]], dtype=dtype)
+        print(y.shape)
         # PD
         y[0] = exp_(GaussianMixtureTransform(
             mu=logpd, sigma=logsigma[:n], fwhm=fwhm[:n],
@@ -614,7 +617,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             background=0, dtype=dtype
         )(x)).squeeze(0)
         # B1
-        y[4:] = b1
+        y[4:].copy_(b1)  # NOTE: y[4:] = b1 breaks the graph in torch 1.11
 
         # GRE forward mode
         mask = (1 - x[0]) if x.dtype.is_floating_point else (x != 0)
