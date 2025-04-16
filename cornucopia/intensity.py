@@ -869,7 +869,7 @@ class QuantileTransform(NonFinalTransform):
         x_ = x_[:, (x_ != 0).all(0) & x_.isfinite().all(0)]
         if self.max_samples and self.max_samples < x_.shape[1]:
             idx_ = torch.randperm(x_.shape[-1], device=x_.device)
-            idx_ = idx_[self.max_samples]
+            idx_ = idx_[:self.max_samples]
             x_ = x_[:, idx_]
 
         qdim = (-1 if 'channels' not in self.shared else None)
