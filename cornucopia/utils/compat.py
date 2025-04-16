@@ -10,7 +10,7 @@ torch_version = torch_version.split(".")[:2]    # major + minor
 torch_version = tuple(map(int, torch_version))  # integer
 
 
-if torch_version < (1, 8):
+if torch_version < (1, 9):
     def clamp(
         x: Tensor,
         min: Optional[Tensor] = None,
