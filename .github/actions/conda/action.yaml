@@ -21,7 +21,7 @@ inputs:
     description: 'Override'
     required: false
     default: true
-  password: 
+  password:
     required: true
 runs:
   using: "composite"
@@ -40,7 +40,8 @@ runs:
   - uses: conda-incubator/setup-miniconda@v2
     with:
       mamba-version: "*"
-      channels: balbasty,pytorch,conda-forge,defaults
+      miniforge-version: latest
+      channels: balbasty,pytorch,conda-forge
       channel-priority: true
       activate-environment: build
   - name: Install boa / anaconda
@@ -73,7 +74,7 @@ runs:
   - name: "Publish (dry run: ${{ inputs.dry-run }})"
     if: inputs.dry-run == 'false'
     shell: bash -el {0}
-    env: 
+    env:
       OVERRIDE: ${{ inputs.override }}
       PLATFORMS: ${{ inputs.platforms }}
       ANACONDA_API_TOKEN: ${{ inputs.password }}
