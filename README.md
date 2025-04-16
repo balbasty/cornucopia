@@ -10,7 +10,7 @@ mostly targeted at (medical) imaging. `cornucopia` is written using a PyTorch
 backend, and therefore runs **on the CPU or GPU**.
 
 Cornucopia is *intended* to be used on the GPU for on-line augmentation.
-A quick [benchmark](examples/benchmark.ipynb) of affine and elastic augmentation
+A quick [benchmark](docs/examples/benchmark.ipynb) of affine and elastic augmentation
 shows that while cornucopia is slower than [TorchIO](https://github.com/fepegar/torchio)
 on the CPU (~ 3s vs 1s), it is greatly accelerated on the GPU (~ 50ms).
 

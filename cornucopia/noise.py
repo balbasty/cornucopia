@@ -242,7 +242,6 @@ class GFactorTransform(NonFinalTransform):
 
         def xform(self, x):
             noisetrf = self.noisetrf.make_final(x)
-            print(noisetrf)
             with ctx.returns(noisetrf, 'noise'):
                 noise = noisetrf(x)
             with ctx.returns(self.gfactor, ['output', 'field']):
