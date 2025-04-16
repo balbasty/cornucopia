@@ -30,6 +30,7 @@ from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
 from .utils.smart_inplace import add_, mul_, div_, pow_
+from .utils.compat import clamp
 
 
 class OpConstTransform(FinalTransform):
@@ -175,7 +176,7 @@ class ClipTransform(FinalTransform):
             vmin = vmin.to(x)
         if torch.is_tensor(vmax):
             vmax = vmax.to(x)
-        y = x.clamp(vmin, vmax)
+        y = clamp(x, vmin, vmax)
         return prepare_output(
             {'input': x, 'output': y, 'vmin': vmin, 'vmax': vmax},
             self.returns
