@@ -23,7 +23,7 @@ from ..utils import warps, smart_math as math
 from ..utils.py import ensure_list, make_vector
 from ._utils import Tensor, Output, OneOrMore, Value, _backend_float
 from .random import random_field_like
-from .intensity import spline_upsample_like
+from .spline import spline_upsample_like
 
 
 def exp_velocity(

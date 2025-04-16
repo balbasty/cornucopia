@@ -10,7 +10,6 @@ __all__ = [
     "sub_field",
     "mul_field",
     "div_field",
-    "spline_upsample",
     "spline_upsample_like",
     "gamma_transform",
     "z_transform",
@@ -21,15 +20,15 @@ __all__ = [
     "mul_smooth_random_field",
 ]
 # stdlib
-from typing import Sequence, Optional, Callable
+from typing import Optional, Callable
 
 # external
 import torch
-import interpol
-import torch.nn.functional as F
+
+from cornucopia.functional.spline import spline_upsample_like
 
 # internal
-from ..baseutils import prepare_output, returns_update, return_requires
+from ..baseutils import prepare_output, returns_update
 from ..utils.smart_math import add_, mul_, pow_, div_
 from ..utils.py import ensure_list
 from ._utils import _unsqz_spatial, Tensor, Value, Output, OneOrMore
@@ -534,136 +533,6 @@ def clip_value(
         {"input": input, "output": output, "vmin": vmin, "vmax": vmax},
         kwargs["returns"]
     )()
-
-
-def spline_upsample(
-    input: Tensor,
-    shape: Sequence[int],
-    order: int = 3,
-    prefilter: bool = True,
-    copy: bool = True,
-    **kwargs
-) -> Output:
-    """
-    Upsample a field of spline coefficients.
-
-    Parameters
-    ----------
-    input : (C, *spatial) tensor
-        Input spline coefficients (or values if `prefilter=True`)
-    shape : list[int]
-        Target spatial shape
-    order : int
-        Spline order
-    prefilter : bool
-        If `False`, assume that the input contains spline coefficients,
-        and returns the interpolated field.
-        If `True`, assume that the input contains low-resolution values
-        and convert them first to spline coefficients (= "prefilter"),
-        before computing the interpolated field.
-    copy : bool
-        In cases where the output matches the input (the input and target
-        shapes are identical, and no prefilter is required), the input
-        tensor is returned when `copy=False`, and a copy is made when
-        `copy=True`.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "input", "coeff"}
-        Structure of variables to return. Default: "output".
-
-    Returns
-    -------
-    output : (C, *shape) tensor
-        Output tensor.
-    """
-    returns = kwargs.pop("returns", "output")
-
-    ndim = input.ndim - 1
-    coeff = input
-
-    same_shape = (tuple(shape) == input.shape[1:])
-    nothing_to_do = same_shape and (prefilter or order <= 1)
-    need_prefilter = prefilter and (order > 1)
-
-    # 1) Nothing to do
-    if nothing_to_do:
-        output = input.clone() if copy else input
-        if need_prefilter and ("coeff" in return_requires(returns)):
-            coeff = interpol.spline_coeff_nd(input, order, dim=ndim)
-
-    # 2) Use torch.inteprolate (faster)
-    elif order == 1:
-        mode = ("trilinear" if len(shape) == 3 else
-                "bilinear" if len(shape) == 2 else
-                "linear")
-        output = F.interpolate(
-            input[None], shape, mode=mode, align_corners=True
-        )[0]
-
-    # 3) Use interpol
-    else:
-        if prefilter:
-            coeff = interpol.spline_coeff_nd(input, order, dim=ndim)
-        output = interpol.resize(
-            coeff, shape=shape, interpolation=order, prefilter=False
-        )
-
-    return prepare_output(
-        {"input": input, "output": output, "coeff": coeff},
-        returns
-    )()
-
-
-def spline_upsample_like(
-    input: Tensor,
-    like: Tensor,
-    order: int = 3,
-    prefilter: bool = True,
-    copy: bool = True,
-    **kwargs
-) -> Output:
-    """
-    Upsample a field of spline coefficients.
-
-    Parameters
-    ----------
-    input : (C, *spatial) tensor
-        Input spline coefficients (or values if `prefilter=True`)
-    like : (C, *shape) tensor
-        Target tensor.
-    order : int
-        Spline order
-    prefilter : bool
-        If `False`, assume that the input contains spline coefficients,
-        and returns the interpolated field.
-        If `True`, assume that the input contains low-resolution values
-        and convert them first to spline coefficients (= "prefilter"),
-        before computing the interpolated field.
-    copy : bool
-        In cases where the output matches the input (the input and target
-        shapes are identical, and no prefilter is required), the input
-        tensor is returned when `copy=False`, and a copy is made when
-        `copy=True`.
-
-    Other Parameters
-    ----------------
-    returns : [list or dict of] {"output", "input", "coeff", "like"}
-        Structure of variables to return. Default: "output".
-
-    Returns
-    -------
-    output : (C, *shape) tensor
-        Output tensor.
-
-    """
-    kwargs.setdefault("returns", "output")
-    kwargs.setdefault("order", order)
-    kwargs.setdefault("prefilter", prefilter)
-    kwargs.setdefault("copy", copy)
-    output = spline_upsample(input, like.shape[1:], **kwargs)
-    output = returns_update(like, "like", output, kwargs["returns"])
-    return output()
 
 
 def gamma_transform(

@@ -11,10 +11,11 @@ import torch
 from ..baseutils import prepare_output
 from ..utils.warps import identity
 from ..utils.conv import smoothnd, convnd
-from ..utils.py import ensure_list
+from ..utils.py import ensure_list, make_vector, ensure_list
 from ..utils import smart_math as math
 from ._utils import Tensor, Value, Output, OneOrMore,  _axis_name2index
 from .random import random_field
+from .spline import spline_upsample, spline_upsample_like
 
 
 def smooth(
@@ -354,3 +355,35 @@ def random_kernel(
         output = math.div_(output, norm)
 
     return prepare_output({"output": output}, returns)()
+
+
+
+def lowres(
+    input: Tensor,
+    resolution: OneOrMore[float] = 1,
+    function: Optional[callable] = None,
+    **kwargs
+) -> Output:
+    """
+    Downsample, then upsample, an image.
+
+    Parameters
+    ----------
+    input : (C, *spatial) tensor
+        Input image
+    resolution : [list of] float
+        Lower resolution, in terms of input voxels.
+    function : callable, optional
+        A function to apply in the low-resolution domain.
+        For example, a function that adds noise.
+
+    Other Parameters
+    ----------------
+    returns : [list or dict of] {"output", "input", "lowres"}
+        Tensors to return.
+
+    Returns
+    -------
+    output : (C, *spatial) tensor
+        Output image
+    """
