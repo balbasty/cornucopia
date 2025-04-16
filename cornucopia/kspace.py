@@ -192,7 +192,12 @@ class IntraScanMotionTransform(NonFinalTransform):
                     moved = torch.fft.ifftshift(moved)
                     moved = torch.fft.fft(moved, dim=1)
                     moved = torch.fft.fftshift(moved)
-                y[:, pattern] = moved[:, pattern]
+                # NOTE: In torch < 1.*:
+                #   >> y[:, pattern] = moved[:, pattern]
+                #   RuntimeError: index does not support automatic
+                #   differentiation for outputs with complex dtype.
+                # Use torch.where instead.
+                y = torch.where(pattern[None], y, moved)
 
             if self.freq:
                 y = torch.fft.ifftshift(y)
@@ -201,7 +206,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             y = y.movedim(1, self.axis)
             x = x.movedim(1, self.axis)
 
-            sos = y.abs().square_().sum(0, keepdim=True).sqrt_()
+            sos = sqrt_(square_(y.abs()).sum(0, keepdim=True))
 
             if 'matrix' in returned:
                 matrix = torch.stack(matrix)
