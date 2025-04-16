@@ -24,7 +24,7 @@ from .intensity import (
 )
 from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import ensure_list, make_vector
-from .utils.smart_inplace import exp_, div_
+from .utils.smart_math import exp_, div_
 from .utils import b0
 
 

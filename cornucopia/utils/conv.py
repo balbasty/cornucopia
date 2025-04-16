@@ -14,7 +14,7 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
         Number of spatial dimensions
     tensor : (*batch, [channel_in,] *spatial_in) tensor
         Input tensor
-    kernel : ([channel_in, channel_out,] *kernel_size) tensor
+    kernel : ([[channel_out,] channel_in,] *kernel_size) tensor
         Convolution kernel
     bias : ([channel_out,]) tensor, optional
         Bias tensor
@@ -40,39 +40,48 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
     if bias is not None:
         bias = bias.to(tensor)
 
-    # sanity checks + reshape for torch's conv
-    if kernel.dim() not in (ndim, ndim + 2):
-        raise ValueError('Kernel shape should be (*kernel_size) or '
-                         '(channel_in, channel_out, *kernel_size) but '
-                         'got {}'.format(kernel.shape))
-    has_channels = kernel.dim() == ndim + 2
-    channels_in = kernel.shape[0] if has_channels else 1
-    channels_out = kernel.shape[1] if has_channels else 1
-    kernel_size = kernel.shape[(2*has_channels):]
-    kernel = kernel.reshape([channels_in, channels_out, *kernel_size])
-    batch = tensor.shape[:-(ndim+has_channels)]
-    spatial_in = tensor.shape[(-ndim):]
-    if has_channels and tensor.shape[-(ndim+has_channels)] != channels_in:
+    # check kernel dimensions
+    if kernel.dim() not in (ndim, ndim + 1, ndim + 2):
         raise ValueError(
-            'Number of input channels not consistent: '
-            'Got {} (kernel) and {} (tensor).'.format(
-                channels_in, tensor.shape[-(ndim+has_channels)]
-            )
+            f'Kernel shape should be (*kernel_size) or '
+            f'(channel_in, *kernel_size) or '
+            f'(channel_out, channel_in, *kernel_size) but got '
+            f'{kernel.shape}'
+        )
+
+    # guess kernel shape
+    is_diag = kernel.dim() == ndim + 1
+    is_full = kernel.dim() == ndim + 2
+    channels_out = kernel.shape[0] if is_full else 1
+    groups = channels_out if is_diag else 1
+    channels_in = kernel.shape[1] if is_full else channels_out
+    kernel_size = kernel.shape[-ndim:]
+    kernel = kernel.reshape([channels_out, channels_in//groups, *kernel_size])
+
+    # guess input shape
+    batch = tensor.shape[:-(ndim+(is_diag or is_full))]
+    spatial_in = tensor.shape[-ndim:]
+
+    # check channels match
+    if (is_diag or is_full) and tensor.shape[-ndim-1] != channels_in:
+        raise ValueError(
+            f'Number of input channels not consistent: Got {channels_in} '
+            f'(kernel) and {tensor.shape[-ndim-1]} (tensor).'
         )
     tensor = tensor.reshape([-1, channels_in, *spatial_in])
-    if bias:
+
+    # reshape bias
+    if bias is not None:
         bias = bias.flatten()
-        if bias.numel() == 1:
-            bias = bias.expand(channels_out)
-        elif bias.numel() != channels_out:
+        if len(bias) == 1:
+            bias = bias.expand([channels_out])
+        elif len(bias) != channels_out:
             raise ValueError(
-                'Number of output channels not consistent: '
-                'Got {} (kernel) and {} (bias).' .format(
-                    channels_out, bias.numel()
-                )
+                f'Number of output channels not consistent: '
+                f'Got {channels_out} (kernel) and {bias.numel()} (bias).'
             )
 
-    # Perform padding
+    # preprocess padding size
     dilation = ensure_list(dilation, ndim)
     padding = ensure_list(padding, ndim)
     padding = [0 if p == 'valid' else 'same' if p == 'auto' else p
@@ -84,20 +93,27 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
                 raise ValueError('Cannot compute "same" padding '
                                  'for even-sized kernels.')
             padding[i] = dilation[i] * (kernel_size[i] // 2)
+
+    # perform padding ourselves
     if bound != 'zero' and sum(padding) > 0:
         tensor = pad(tensor, padding, bound, side='both')
         padding = 0
 
+    # Select convolution function
     conv_fn = (F.conv1d if ndim == 1 else
                F.conv2d if ndim == 2 else
                F.conv3d if ndim == 3 else None)
     if not conv_fn:
         raise NotImplementedError('Convolution is only implemented in '
                                   'dimension 1, 2 or 3.')
+
+    # perform convolution
     tensor = conv_fn(tensor, kernel, bias, stride=stride, padding=padding,
                      dilation=dilation, groups=groups)
-    spatial_out = tensor.shape[(-ndim):]
-    channels_out = [channels_out] if has_channels else []
+
+    # reshape tensor
+    spatial_out = tensor.shape[-ndim:]
+    channels_out = [channels_out] if (is_diag or is_full) else []
     tensor = tensor.reshape([*batch, *channels_out, *spatial_out])
     return tensor
 

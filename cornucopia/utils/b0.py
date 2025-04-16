@@ -13,7 +13,7 @@ import math
 import itertools
 from .warps import identity as identity_grid, cartesian_grid
 from .py import prod, make_vector
-from .smart_inplace import mul_, div_
+from .smart_math import mul_, div_
 
 
 r"""
