@@ -425,34 +425,28 @@ class GradientEchoTransform(FinalTransform):
         self.mt = mt
 
     def get_parameters(self, x):
-        x = x.unbind(0)
         if self.pd is None:
-            pd, *x = x
-            pd = pd[None]
+            pd, x = x[:1], x[1:]
         else:
             pd = self.pd
         if self.t1 is None:
-            t1, *x = x
-            t1 = t1[None]
+            t1, x = x[:1], x[1:]
         else:
             t1 = self.t1
         if self.t2 is None:
-            t2, *x = x
-            t2 = t2[None]
+            t2, x = x[:1], x[1:]
         else:
             t2 = self.t2
-        if self.b1 is None:
-            b1, *x = x
-            b1 = b1[None]
-        else:
-            b1 = self.b1
         if self.mt is None:
-            mt, *x = x
-            mt = mt[None]
+            mt, x = x[:1], x[1:]
         else:
             mt = self.mt
+        if self.b1 is None:
+            b1 = x
+        else:
+            b1 = self.b1
 
-        return pd, t1, t2, b1, mt
+        return pd, t1, t2, mt, b1
 
     def xform(self, x):
         """
@@ -468,7 +462,7 @@ class GradientEchoTransform(FinalTransform):
                 - b1: Transmit efficiency (B1+). `1` means 100% efficiency.
                 - mt: Magnetization transfer saturation (MTsat).
         """
-        pd, t1, t2, b1, mt = self.get_parameters(x)
+        pd, t1, t2, mt, b1 = self.get_parameters(x)
         alpha = (math.pi * self.alpha / 180) * b1
         if torch.is_tensor(alpha):
             sinalpha, cosalpha = alpha.sin(), alpha.cos()
@@ -614,13 +608,13 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             mu=logt2, sigma=logsigma[2*n:3*n], fwhm=fwhm[2*n:3*n],
             background=0, dtype=dtype
         )(x)).squeeze(0)
-        # B1
-        y[4:] = b1
         # MT
         y[3] = sigmoid_(GaussianMixtureTransform(
             mu=logmt, sigma=logsigma[3*n:4*n], fwhm=fwhm[3*n:4*n],
             background=0, dtype=dtype
         )(x)).squeeze(0)
+        # B1
+        y[4:] = b1
 
         # GRE forward mode
         mask = (1 - x[0]) if x.dtype.is_floating_point else (x != 0)
