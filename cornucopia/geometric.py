@@ -713,6 +713,8 @@ class AffineElasticTransform(NonFinalTransform):
         zero_center: bool = False,
         nearest_if_label: bool = False,
         *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
         shared: bool = True,
         **kwargs
     ):
@@ -778,6 +780,11 @@ class AffineElasticTransform(NonFinalTransform):
             dmax,  unit, shape, bound, steps, order, zero_center,
             nearest_if_label, shared=shared,
         )
+        self.backend = dict()
+        if dtype:
+            self.backend['dtype'] = dtype
+        if device:
+            self.backend['device'] = device
 
     def make_final(self, x, max_depth=float('inf')):
         """
@@ -797,6 +804,10 @@ class AffineElasticTransform(NonFinalTransform):
         ndim = x.ndim - 1
         fullshape = x.shape[1:]
         backend = dict(dtype=x.dtype, device=x.device)
+        if self.backend.get('device', None):
+            backend['device'] = self.backend['device']
+        if self.backend.get('dtype', None):
+            backend['dtype'] = self.backend['dtype']
         if not x.is_floating_point():
             backend['dtype'] = torch.get_default_dtype()
 
@@ -868,7 +879,7 @@ class AffineElasticTransform(NonFinalTransform):
 
         return self.Final(
             flow, controls, A, self.elastic.bound, self.nearest_if_label,
-            **self.get_prm()
+            self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
     class Final(FinalTransform):
@@ -881,6 +892,7 @@ class AffineElasticTransform(NonFinalTransform):
             affine: torch.tensor,
             bound: str = 'border',
             nearest_if_label: bool = False,
+            backend: Optional[dict] = None,
             **kwargs
         ):
             """
@@ -897,15 +909,48 @@ class AffineElasticTransform(NonFinalTransform):
             self.affine = affine
             self.bound = bound
             self.nearest_if_label = nearest_if_label
+            self.backend = backend
 
         def xform(self, x):
-            flow = cast_like(self.flow, x)
-            controls = cast_like(self.controls, x)
-            affine = cast_like(self.affine, x)
+            flow = self.flow.movedim(1, -1)
+            if self.backend:
+                # The transform also requests a change in device or data
+                # type. In case the input file is too large to hold in
+                # device memory, we first crop it to the smallest possible
+                # field-of-view that still allows the transformed image to
+                # be computed. Only then do we move the input tensor to
+                # device. This is generally useful in conjunction with
+                # the `patch` option.
+                ndim = self.flow.ndim - 2
+                _flow = flow.clone()
+                _flowvec = _flow.reshape([-1, ndim])
+                coord_min = _flowvec.min(dim=0).values
+                coord_max = _flowvec.max(dim=0).values
+                slicer = []
+                for d in range(ndim):
+                    coord_min[d].sub_(1).floor_().clamp_(0, x.shape[1+d]-1)
+                    coord_max[d].add_(1).ceil_().clamp_(0, x.shape[1+d]-1)
+                    slicer += [slice(
+                        coord_min[d].long().cpu().item(),
+                        coord_max[d].long().cpu().item() + 1
+                    )]
+                _flow -= coord_min
+                _x = x[(..., *slicer)]
+
+                # now ensure tensor and proper backend
+                _x = torch.as_tensor(_x, **self.backend)
+                _flow = cast_like(_flow, _x)
+                flow = cast_like(flow, _x)
+            else:
+                _x = x
+                flow = _flow = cast_like(flow, _x)
+
+            controls = cast_like(self.controls, _x)
+            affine = cast_like(self.affine, _x)
             mode = "bilinear"
             if not x.dtype.is_floating_point and self.nearest_if_label:
                 mode = "nearest"
-            y = warps.apply_flow(x[:, None], flow.movedim(1, -1),
+            y = warps.apply_flow(_x[:, None], _flow,
                                  padding_mode=self.bound, mode=mode,
                                  has_identity=True)[:, 0]
             return prepare_output(
@@ -936,6 +981,8 @@ class RandomAffineElasticTransform(NonFinalTransform):
         zero_center: bool = False,
         nearest_if_label: bool = False,
         *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
         shared: bool = True,
         shared_flow: bool = None,
         **kwargs
@@ -1004,6 +1051,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.zero_center = zero_center
         self.shared_flow = shared_flow
         self.nearest_if_label = nearest_if_label
+        self.backend = dict(dtype=dtype, device=device)
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -1057,6 +1105,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
             zero_center=zero_center,
             nearest_if_label=nearest_if_label,
             shared=shared_flow,
+            **self.backend,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
 

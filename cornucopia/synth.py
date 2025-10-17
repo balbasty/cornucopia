@@ -107,7 +107,9 @@ from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, LogNormal
 from .io import LoadTransform
 from numbers import Number
+from typing import Optional, Union, List, Tuple, Mapping
 import random as pyrandom
+import torch
 
 
 class IntensityTransform(SequentialTransform):
@@ -142,16 +144,18 @@ class IntensityTransform(SequentialTransform):
             }
     """  # noqa: E501
 
-    def __init__(self,
-                 bias=7,
-                 bias_strength=0.5,
-                 gamma=0.6,
-                 motion_fwhm=3,
-                 resolution=8,
-                 snr=10,
-                 gfactor=5,
-                 order=3,
-                 **kwargs):
+    def __init__(
+        self,
+        bias: Union[Sampler, int, bool] = 7,
+        bias_strength: Union[Sampler, float, bool] = 0.5,
+        gamma: Union[Sampler, float, bool] = 0.6,
+        motion_fwhm: Union[Sampler, float, bool] = 3,
+        resolution: Union[Sampler, float, bool] = 8,
+        snr: Union[Sampler, float, bool] = 10,
+        gfactor: Union[Sampler, int, bool] = 5,
+        order: Union[Sampler, int, bool] = 3,
+        **kwargs
+    ):
         """
         Parameters
         ----------
@@ -256,6 +260,9 @@ class IntensityTransform(SequentialTransform):
         super().__init__(steps, **kwargs)
 
 
+_LabelGrouping = Union[Tuple[int, ...], Tuple[Tuple[int, ...], ...]]
+
+
 class SynthFromLabelTransform(NonFinalTransform):
     """
     Synthesize an MRI from an existing label map
@@ -342,32 +349,36 @@ class SynthFromLabelTransform(NonFinalTransform):
                 self.returns,
             )
 
-    def __init__(self,
-                 patch=None,
-                 from_disk=False,
-                 one_hot=False,
-                 synth_labels=None,
-                 synth_labels_maybe=None,
-                 target_labels=None,
-                 translations=0.1,
-                 rotation=15,
-                 shears=0.012,
-                 zooms=0.15,
-                 elastic=0.05,
-                 elastic_nodes=10,
-                 elastic_steps=0,
-                 bound='border',
-                 gmm_fwhm=10,
-                 bias=7,
-                 bias_strength=0.5,
-                 gamma=0.6,
-                 motion_fwhm=3,
-                 resolution=8,
-                 snr=10,
-                 gfactor=5,
-                 order=3,
-                 sample_in_background=False,
-                 returns=Kwargs(image='image', label='label')):
+    def __init__(
+        self,
+        patch: Optional[Union[int, List[int]]] = None,
+        from_disk: bool = False,
+        one_hot: bool = False,
+        synth_labels: Optional[_LabelGrouping] = None,
+        synth_labels_maybe: Mapping[_LabelGrouping, float] = None,
+        target_labels: Optional[_LabelGrouping] = None,
+        translations: Union[Sampler, float, bool] = 0.1,
+        rotation: Union[Sampler, float, bool] = 15,
+        shears: Union[Sampler, float, bool] = 0.012,
+        zooms: Union[Sampler, float, bool] = 0.15,
+        elastic: Union[Sampler, float, bool] = 0.05,
+        elastic_nodes: Union[Sampler, int] = 10,
+        elastic_steps: Union[Sampler, int] = 0,
+        bound: str = 'border',
+        gmm_fwhm: Union[Sampler, float, bool] = 10,
+        bias: Union[Sampler, int, bool] = 7,
+        bias_strength: Union[Sampler, float] = 0.5,
+        gamma: Union[Sampler, float, bool] = 0.6,
+        motion_fwhm: Union[Sampler, float, bool] = 3,
+        resolution: Union[Sampler, float, bool] = 8,
+        snr: Union[Sampler, float, bool] = 10,
+        gfactor: Union[Sampler, int, bool] = 5,
+        order: Union[Sampler, int, bool] = 3,
+        sample_in_background: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        returns=Kwargs(image='image', label='label')
+    ):
         """
 
         Parameters
@@ -514,6 +525,8 @@ class SynthFromLabelTransform(NonFinalTransform):
             patch=patch,
             steps=elastic_steps,
             bound=bound,
+            dtype=dtype,
+            device=device,
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
