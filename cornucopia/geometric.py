@@ -42,6 +42,8 @@ class ElasticTransform(NonFinalTransform):
             zero_center: bool = False,
             nearest_if_label: bool = True,
             *,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[torch.device, str]] = None,
             shared: Union[bool, str] = True,
             **kwargs
     ):
@@ -102,6 +104,11 @@ class ElasticTransform(NonFinalTransform):
         self.order = order
         self.zero_center = zero_center
         self.nearest_if_label = nearest_if_label
+        self.backend = dict()
+        if dtype:
+            self.backend["dtype"] = dtype
+        if device:
+            self.backend["device"] = device
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         """
@@ -134,6 +141,10 @@ class ElasticTransform(NonFinalTransform):
         smallshape = ensure_list(self.shape, ndim)
         dmax = ensure_list(self.dmax, ndim)
         backend = dict(dtype=x.dtype, device=x.device)
+        if self.backend.get("device", None):
+            backend["device"] = self.backend["device"]
+        if self.backend.get("dtype", None):
+            backend["dtype"] = self.backend["dtype"]
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
         if self.unit == 'fov':
@@ -173,6 +184,7 @@ class ElasticTransform(NonFinalTransform):
             flow, controls,
             self.steps, self.order, self.bound, self.zero_center,
             self.nearest_if_label,
+            **self.backend,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -188,6 +200,8 @@ class ElasticTransform(NonFinalTransform):
                 bound: str = 'border',
                 zero_center: bool = False,
                 nearest_if_label: bool = True,
+                dtype: Optional[torch.dtype] = None,
+                device: Optional[Union[torch.device, str]] = None,
                 **kwargs
         ):
             """
@@ -218,6 +232,7 @@ class ElasticTransform(NonFinalTransform):
             self.bound = bound
             self.zero_center = zero_center
             self.nearest_if_label = nearest_if_label
+            self.backend = dict(dtype=dtype, device=device)
 
         def make_flow(self, control, fullshape):
             """Upsample the control points to the final full size
@@ -258,7 +273,7 @@ class ElasticTransform(NonFinalTransform):
                 flow -= mean_flow
             return flow
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor):
             """Deform the input tensor
 
             Parameters
@@ -273,6 +288,7 @@ class ElasticTransform(NonFinalTransform):
                 value of `self.returns`. See `ElasticTransform`.
 
             """
+            x = x.to(**self.backend)
             flow = cast_like(self.flow, x)
             controls = cast_like(self.controls, x)
             required = return_requires(self.returns)
@@ -309,6 +325,8 @@ class RandomElasticTransform(NonFinalTransform):
             zero_center: bool = False,
             nearest_if_label: bool = False,
             *,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[torch.device, str]] = None,
             shared: Union[bool, str] = True,
             shared_flow: Optional[Union[bool, str]] = None,
             **kwargs
@@ -364,6 +382,11 @@ class RandomElasticTransform(NonFinalTransform):
         self.zero_center = zero_center
         self.shared_flow = shared_flow
         self.nearest_if_label = nearest_if_label
+        self.backend = dict()
+        if dtype:
+            self.backend["dtype"] = dtype
+        if device:
+            self.backend["device"] = device
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -386,6 +409,7 @@ class RandomElasticTransform(NonFinalTransform):
             unit=self.unit, bound=self.bound, steps=self.steps,
             zero_center=self.zero_center, shared=shared_flow,
             nearest_if_label=self.nearest_if_label,
+            **self.backend,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
 
@@ -411,6 +435,8 @@ class AffineTransform(NonFinalTransform):
             bound: str = 'border',
             nearest_if_label: bool = False,
             *,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[torch.device, str]] = None,
             shared: Union[bool, str] = True,
             **kwargs
     ):
@@ -466,11 +492,20 @@ class AffineTransform(NonFinalTransform):
         self.unit = unit
         self.bound = bound
         self.nearest_if_label = nearest_if_label
+        self.backend = dict()
+        if dtype:
+            self.backend["dtype"] = dtype
+        if device:
+            self.backend["device"] = device
 
     def make_final(self, x, max_depth=float('inf'), flow=True):
         batch, *fullshape = x.shape
         ndim = len(fullshape)
         backend = dict(dtype=x.dtype, device=x.device)
+        if self.backend.get("device", None):
+            backend["device"] = self.backend["device"]
+        if self.backend.get("dtype", None):
+            backend["dtype"] = self.backend["dtype"]
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
 
@@ -537,7 +572,7 @@ class AffineTransform(NonFinalTransform):
         else:
             flow = None
         return self.Final(
-            flow, A, self.bound, **self.get_prm()
+            flow, A, self.bound, **self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
     class Final(FinalTransform):
@@ -549,6 +584,8 @@ class AffineTransform(NonFinalTransform):
                 matrix: Optional[torch.Tensor] = None,
                 bound: str = 'border',
                 nearest_if_label: bool = False,
+                dtype: Optional[torch.dtype] = None,
+                device: Optional[Union[torch.device, str]] = None,
                 **kwargs
         ):
             """
@@ -567,11 +604,13 @@ class AffineTransform(NonFinalTransform):
             self.matrix = matrix
             self.bound = bound
             self.nearest_if_label = nearest_if_label
+            self.backend = dict(dtype=dtype, device=device)
 
         def make_flow(self, matrix, shape):
             return warps.affine_flow(matrix, shape).movedim(-1, 0)
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor):
+            x = x.to(**self.backend)
             flow = cast_like(self.flow, x)
             matrix = cast_like(self.matrix, x)
             required = return_requires(self.returns)
@@ -606,6 +645,8 @@ class RandomAffineTransform(NonFinalTransform):
             bound: str = 'border',
             nearest_if_label: bool = False,
             *,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[torch.device, str]] = None,
             shared: Union[bool, str] = True,
             shared_matrix: Optional[Union[bool, str]] = None,
             **kwargs
@@ -660,6 +701,7 @@ class RandomAffineTransform(NonFinalTransform):
         self.bound = bound
         self.nearest_if_label = nearest_if_label
         self.shared_matrix = shared_matrix
+        self.backend = dict(dtype=dtype, device=device)
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
@@ -688,6 +730,7 @@ class RandomAffineTransform(NonFinalTransform):
             translations, rotations, shears, zooms,
             unit=unit, bound=bound, shared=shared_matrix,
             nearest_if_label=self.nearest_if_label,
+            **self.backend,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -772,19 +815,19 @@ class AffineElasticTransform(NonFinalTransform):
         self.patch = patch
         self.steps = steps
         self.nearest_if_label = nearest_if_label
-        self.affine = AffineTransform(
-            translations, rotations, shears, zooms,
-            unit, bound, nearest_if_label, shared=shared,
-        )
-        self.elastic = ElasticTransform(
-            dmax,  unit, shape, bound, steps, order, zero_center,
-            nearest_if_label, shared=shared,
-        )
         self.backend = dict()
         if dtype:
             self.backend['dtype'] = dtype
         if device:
             self.backend['device'] = device
+        self.affine = AffineTransform(
+            translations, rotations, shears, zooms,
+            unit, bound, nearest_if_label, shared=shared, **self.backend,
+        )
+        self.elastic = ElasticTransform(
+            dmax,  unit, shape, bound, steps, order, zero_center,
+            nearest_if_label, shared=shared, **self.backend,
+        )
 
     def make_final(self, x, max_depth=float('inf')):
         """
