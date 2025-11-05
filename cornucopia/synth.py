@@ -106,8 +106,13 @@ from .noise import (
 from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, LogNormal
 from .io import LoadTransform
+from typing import Union, Sequence, Mapping
 from numbers import Number
 import random as pyrandom
+
+
+LabelMap = Sequence[Union[int, Sequence[int]]]
+RandomLabelMap = Mapping[Union[int, Sequence[int]], float]
 
 
 class IntensityTransform(SequentialTransform):
@@ -380,17 +385,19 @@ class SynthFromLabelTransform(NonFinalTransform):
             Assume inputs are filenames and load from disk
         one_hot : bool, default=False
             Return one-hot labels. Else return a label map.
-        synth_labels : tuple of [tuple of] int
+        synth_labels : tuple of [tuple of] int | dict[tuple of [tuple of] int, float]
             List of labels to use for synthesis.
+
             If multiple labels are grouped in a sublist, they share the
             same intensity in the GMM. All labels not listed are assumed
             background. For example, this option can be ued to ensure
             that symmetric structures share the same intensity.
-        synth_labels_maybe : dict[tuple of [tuple of] int, float]
-            List of labels to sometimes use for synthesis, and their
-            probability of being sampled. This options allow groups parts
-            of the anatomy to be hidden in a random subset of images. This
-            can be used to e.g. model the presence of skull-stripped images.
+
+            If the input is a dictionary, it maps each label or group
+            of labels to the probability of these labels being sampled.
+            This options allow groups parts of the anatomy to be hidden in
+            a random subset of images. This can be used to e.g. model the
+            presence of skull-stripped images.
         target_labels : tuple of [tuple of] int
             List of target labels.
             If multiple labels are grouped in a sublist, they are fused.
@@ -493,7 +500,6 @@ class SynthFromLabelTransform(NonFinalTransform):
             LoadTransform(dtype='long') if from_disk else IdentityTransform()
         )
         self.synth_labels = synth_labels
-        self.synth_labels_maybe = synth_labels_maybe
         if one_hot:
             postproc = OneHotTransform()
             if target_labels:
@@ -514,6 +520,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             patch=patch,
             steps=elastic_steps,
             bound=bound,
+            nearest_if_label=True,  # Faster than per-label high-order
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
@@ -535,14 +542,17 @@ class SynthFromLabelTransform(NonFinalTransform):
             return self
 
         # sample labels to use for synthesis
-        synth_labels = list(self.synth_labels or [])
-        if self.synth_labels_maybe:
+        if isinstance(self.synth_labels, dict):
+            synth_labels = []
             for labels, prob in self.synth_labels_maybe.items():
                 if pyrandom.random() > (1 - prob):
                     if isinstance(labels, Number):
                         synth_labels += [labels]
                     else:
                         synth_labels += list(labels)
+        else:
+            synth_labels = list(self.synth_labels or [])
+
         if synth_labels:
             preproc = RelabelTransform(synth_labels)
         else:
