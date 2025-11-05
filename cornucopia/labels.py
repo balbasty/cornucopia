@@ -157,8 +157,10 @@ class RelabelTransform(NonFinalTransform):
             Relabeling scheme.
 
         """
+        dtype = kwargs.pop("dtype", None)
         super().__init__(**kwargs)
         self.labels = labels
+        self.dtype = dtype
 
     def make_final(self, x, max_depth=float('inf')):
         if self.is_final:
@@ -167,26 +169,55 @@ class RelabelTransform(NonFinalTransform):
         if labels is None:
             labels = x.unique().tolist()[1:]
         return self.Final(
-            labels, **self.get_prm()
+            labels, dtype=self.dtype, **self.get_prm()
         ).make_final(x, max_depth-1)
 
     class Final(FinalTransform):
 
         def __init__(self, labels, **kwargs):
+            dtype = kwargs.pop("dtype", None)
             super().__init__(**kwargs)
             self.labels = labels
+            self.dtype = dtype
 
         def xform(self, x):
             if self.labels is None:
                 return self.make_final(x)(x)
             assert self.labels is not None
-            y = torch.zeros_like(x)
+
+            # Choose most appropriate output dtype based on number of
+            # output labels
+            nb_labels = len(self.labels) + 1
+            dtype = self.dtype
+            if not dtype:
+                if (nb_labels < 2**8):
+                    dtype = torch.uint8
+                elif (nb_labels < 2**15):
+                    dtype = torch.int16
+                elif (nb_labels < 2**31):
+                    dtype = torch.int32
+                else:
+                    dtype = torch.int64
+
+            # In case there are negative values in the input label map,
+            # we shift input labels so that the minimum label is now 0
+            min_label = min([
+                min(label) if isinstance(label, (list, tuple)) else label
+                for label in self.labels
+            ])
+
+            # Generate linear label map
+            labels = x.new_zeros([nb_labels], dtype=dtype)
             for out, inp in enumerate(self.labels):
                 out = out + 1
                 if not isinstance(inp, (list, tuple)):
                     inp = [inp]
                 for inp1 in inp:
-                    y.masked_fill_(x == inp1, out)
+                    labels[inp1 - min_label] = out
+
+            # Remap by indexing into the label map
+            x = (x - min_label).long()
+            y = labels[x]
             return y
 
 
