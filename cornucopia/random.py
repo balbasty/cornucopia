@@ -255,9 +255,8 @@ class RandInt(Sampler):
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
             n = tuple(ensure_list(n or []))
-            return torch.randint(
-                1 + self.max - self.min, n, **backend
-            ).add_(self.min)
+            backend.setdefault('device', getattr(self.max - self.min, 'device', None))
+            return torch.randint(low=self.min, high=1 + self.max, size=n, **backend)
         return self.map(random.randint, self.min, self.max, n=n)
 
 
