@@ -381,7 +381,7 @@ class BaseFieldTransform(NonFinalTransform):
             smallshape = [min(small, full) for small, full
                           in zip(smallshape, fullshape)]
 
-            if self.thickness == 1:
+            if thickness == 1:
                 # bias independent across slices -> batch it
                 batch1 = batch * fullshape[slice]
                 del smallshape[slice]
@@ -552,7 +552,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         self.shape = RandInt.make(make_range(2, shape))
         self.order = Fixed.make(order)
         self.slice = slice
-        self.thickness = RandInt.make(make_range(0, thickness))
+        self.thickness = RandInt.make(make_range(1, thickness))
         self.shape_through = shape_through
         self.shared_field = self._prepare_shared(shared_field)
 
