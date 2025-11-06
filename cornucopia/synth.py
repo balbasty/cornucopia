@@ -106,13 +106,10 @@ from .noise import (
 from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, LogNormal
 from .io import LoadTransform
-from typing import Union, Sequence, Mapping
+from typing import Union, Sequence, Mapping, Optional, List
 from numbers import Number
 import random as pyrandom
-
-
-LabelMap = Sequence[Union[int, Sequence[int]]]
-RandomLabelMap = Mapping[Union[int, Sequence[int]], float]
+import torch
 
 
 class IntensityTransform(SequentialTransform):
@@ -147,16 +144,18 @@ class IntensityTransform(SequentialTransform):
             }
     """  # noqa: E501
 
-    def __init__(self,
-                 bias=7,
-                 bias_strength=0.5,
-                 gamma=0.6,
-                 motion_fwhm=3,
-                 resolution=8,
-                 snr=10,
-                 gfactor=5,
-                 order=3,
-                 **kwargs):
+    def __init__(
+        self,
+        bias: Union[Sampler, int, bool] = 7,
+        bias_strength: Union[Sampler, float, bool] = 0.5,
+        gamma: Union[Sampler, float, bool] = 0.6,
+        motion_fwhm: Union[Sampler, float, bool] = 3,
+        resolution: Union[Sampler, float, bool] = 8,
+        snr: Union[Sampler, float, bool] = 10,
+        gfactor: Union[Sampler, int, bool] = 5,
+        order: Union[Sampler, int, bool] = 3,
+        **kwargs
+    ):
         """
         Parameters
         ----------
@@ -261,6 +260,210 @@ class IntensityTransform(SequentialTransform):
         super().__init__(steps, **kwargs)
 
 
+LabelMapping = Sequence[Union[int, Sequence[int]]]
+RandomLabelMaping = Mapping[Union[int, Sequence[int]], float]
+
+
+class HierarchicalLabelMapping(list):
+    """
+    Hierarchical label mapping used to randomly group or hide labels.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        """
+        !!! example
+        ```json
+        # tissue
+        [
+            [0.01, 0],
+            [0.01, 1],
+            # children
+            [
+                # extracranial
+                [
+                    [0.3, 0],
+                    [0.3, 2],
+                    # children
+                    [
+                        # skull
+                        [
+                            [0.5, 0],
+                            # leaf label
+                            3
+                        ],
+                        # soft
+                        [
+                            [0.5, 4],
+                            # leaf labels
+                            [5, 6, 7]
+                        ]
+                    ]
+                ],
+                # intracranial
+                [
+                    [0.01, 8],
+                    # children
+                    [
+                        # csf
+                        [
+                            [0.5, 0],
+                            # leaf label
+                            9
+                        ],
+                        # brain
+                        [
+                            [0.1, 10],
+                            # children
+                            [
+                                # hindbrain
+                                [
+                                    [0.1, 0],
+                                    # children
+                                    [
+                                        # cerebellum
+                                        [
+                                            [0.1, 0],
+                                            [0.1, 11],
+                                            # leaf labels
+                                            [
+                                                # cerebellar white
+                                                12,
+                                                # cerebellar gray
+                                                13
+                                            ]
+                                        ],
+                                        # brainstem
+                                        [
+                                            [0.1, 0],
+                                            [0.1, 14],
+                                            # leaf labels
+                                            [
+                                                # pons
+                                                125
+                                                # medulla
+                                                16
+                                            ]
+                                        ],
+                                    ]
+                                ],
+                                # midbrain
+                                [
+                                    ...
+                                ],
+                                # forebrain
+                                [
+                                    ...
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        ```
+        """
+        super().__init__(*args, **kwargs)
+
+    def from_explicit_dict(cls, inp: dict) -> "HierarchicalLabelMapping":
+        """
+        !!! example
+        ```json
+        {
+            "tissue": {
+                "prob": {
+                    0: 0.01,  # 1 % of the time, this group is erased
+                    1: 0.01   # 1 % of the time, it is merged into the label 1
+                              # The remaining of the time, use its children
+                },
+                "children": {
+                    "extracranial": {
+                        "prob": {0: 0.3, 2: 0.3},
+                        "children": {
+                            "skull": {"prob": {0: 0.5, 3: 0.5}},
+                            "soft" {
+                                "prob": {4: 0.5},
+                                "children": {
+                                    "muscle": 5,
+                                    "fat": 6,
+                                    "skin": 7
+                                }
+                            }
+                        }
+                    },
+                    "intracranial": {
+                        "prob": {8: 0.01},
+                        "children": {
+                            "csf": {
+
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ```
+        """
+        def recurse(inp):
+            if isinstance(inp, dict):
+                prob = []
+                if "prob" in inp or "children" in inp:
+                    if "prob" in inp:
+                        prob = [[val, key] for key, val in inp["prob"]]
+                    if "children" in inp:
+                        children = recurse(prob["children"])
+                    return [*prob, children]
+                else:
+                    return [recurse(val) for val in inp.values()]
+            elif isinstance(inp, (list, tuple, set, int)):
+                return inp
+
+        return cls(recurse(inp))
+
+    def sample(self) -> dict:
+        """Sample a label mapping"""
+        def is_random(inp):
+            return (
+                isinstance(inp[0], (list, tuple, set)) and
+                isinstance(inp[0][0], float)
+            )
+
+        def get_children(inp):
+            if not inp:
+                return []
+            if is_random(inp):
+                children = [lab for _, lab in inp[:-1] if lab]
+                children += get_children(inp[-1])
+            if isinstance(inp, int):
+                return [inp]
+            children = []
+            for child in inp:
+                children.extend(get_children(child))
+            return children
+
+        label_map = {}
+
+        def recurse(inp):
+            if is_random(inp):
+                rval = pyrandom.random()
+                for p, lab in inp[:-1]:
+                    if p > rval:
+                        if lab:
+                            label_map[lab] = get_children(inp)
+                        return
+                    elif lab:
+                        label_map[lab] = lab
+                    rval -= p
+                return recurse(inp[-1])
+            if isinstance(inp, int):
+                label_map[inp] = inp
+                return
+            for child in inp:
+                recurse(child)
+
+        recurse(self)
+        return label_map
+
+
 class SynthFromLabelTransform(NonFinalTransform):
     """
     Synthesize an MRI from an existing label map
@@ -347,32 +550,35 @@ class SynthFromLabelTransform(NonFinalTransform):
                 self.returns,
             )
 
-    def __init__(self,
-                 patch=None,
-                 from_disk=False,
-                 one_hot=False,
-                 synth_labels=None,
-                 synth_labels_maybe=None,
-                 target_labels=None,
-                 translations=0.1,
-                 rotation=15,
-                 shears=0.012,
-                 zooms=0.15,
-                 elastic=0.05,
-                 elastic_nodes=10,
-                 elastic_steps=0,
-                 bound='border',
-                 gmm_fwhm=10,
-                 bias=7,
-                 bias_strength=0.5,
-                 gamma=0.6,
-                 motion_fwhm=3,
-                 resolution=8,
-                 snr=10,
-                 gfactor=5,
-                 order=3,
-                 sample_in_background=False,
-                 returns=Kwargs(image='image', label='label')):
+    def __init__(
+        self,
+        patch: Optional[Union[int, List[int]]] = None,
+        from_disk: bool = False,
+        one_hot: bool = False,
+        synth_labels: Optional[Union[LabelMapping, RandomLabelMaping]] = None,
+        target_labels: Optional[LabelMapping] = None,
+        translations: Union[Sampler, float, bool] = 0.1,
+        rotation: Union[Sampler, float, bool] = 15,
+        shears: Union[Sampler, float, bool] = 0.012,
+        zooms: Union[Sampler, float, bool] = 0.15,
+        elastic: Union[Sampler, float, bool] = 0.05,
+        elastic_nodes: Union[Sampler, int] = 10,
+        elastic_steps: Union[Sampler, int] = 0,
+        bound: str = 'border',
+        gmm_fwhm: Union[Sampler, float, bool] = 10,
+        bias: Union[Sampler, int, bool] = 7,
+        bias_strength: Union[Sampler, float] = 0.5,
+        gamma: Union[Sampler, float, bool] = 0.6,
+        motion_fwhm: Union[Sampler, float, bool] = 3,
+        resolution: Union[Sampler, float, bool] = 8,
+        snr: Union[Sampler, float, bool] = 10,
+        gfactor: Union[Sampler, int, bool] = 5,
+        order: Union[Sampler, int, bool] = 3,
+        sample_in_background: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        returns=Kwargs(image='image', label='label')
+    ):
         """
 
         Parameters
@@ -385,7 +591,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             Assume inputs are filenames and load from disk
         one_hot : bool, default=False
             Return one-hot labels. Else return a label map.
-        synth_labels : tuple of [tuple of] int | dict[tuple of [tuple of] int, float]
+        synth_labels : LabelMapping | RandomLabelMapping
             List of labels to use for synthesis.
 
             If multiple labels are grouped in a sublist, they share the
@@ -398,7 +604,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             This options allow groups parts of the anatomy to be hidden in
             a random subset of images. This can be used to e.g. model the
             presence of skull-stripped images.
-        target_labels : tuple of [tuple of] int
+        target_labels : LabelMapping
             List of target labels.
             If multiple labels are grouped in a sublist, they are fused.
             All labels not listed are assumed background.
@@ -521,6 +727,8 @@ class SynthFromLabelTransform(NonFinalTransform):
             steps=elastic_steps,
             bound=bound,
             nearest_if_label=True,  # Faster than per-label high-order
+            dtype=dtype,
+            device=device,
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
@@ -554,16 +762,16 @@ class SynthFromLabelTransform(NonFinalTransform):
             synth_labels = list(self.synth_labels or [])
 
         if synth_labels:
-            preproc = RelabelTransform(synth_labels)
+            preproc_labels = RelabelTransform(synth_labels)
         else:
-            preproc = IdentityTransform()
+            preproc_labels = IdentityTransform()
 
         return self.Final(
             self.gmm,
             self.deform,
             self.intensity,
             self.load,
-            preproc,
+            preproc_labels,
             self.postproc_labels,
             **self.get_prm(),
         ).make_final(x, max_depth-1)

@@ -20,13 +20,16 @@ __all__ = [
     'SmoothBernoulliDiskTransform',
 ]
 import math as pymath
+import random as pyrandom
+from numbers import Number
+from typing import Sequence, Optional, Union, Mapping, Tuple
 
 import torch
 import interpol
 import distmap
 
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
-from .base import FinalTransform, NonFinalTransform
+from .base import Transform, FinalTransform, NonFinalTransform
 from .baseutils import prepare_output
 from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
 from .utils.conv import smoothnd
@@ -39,8 +42,14 @@ from . import ctx
 class OneHotTransform(NonFinalTransform):
     """Transform a volume of integer labels into a one-hot representation"""
 
-    def __init__(self, label_map=None, label_ref=None, keep_background=True,
-                 dtype=None, **kwargs):
+    def __init__(
+        self,
+        label_map: Optional[Sequence[Union[int, Sequence[int]]]] = None,
+        label_ref: Optional[Mapping[int, str]] = None,
+        keep_background: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        **kwargs
+    ):
         """
 
         Parameters
@@ -48,7 +57,7 @@ class OneHotTransform(NonFinalTransform):
         label_map : list or [list of] int
             Map one-hot classes to [list of] labels or label names
             !!! warning "Should not include the background class"
-        label_ref : dict[int] -> str
+        label_ref : dict[int, str]
             Map label values to label names
         keep_background : bool
             If True, the first one-hot class is the background class,
@@ -62,7 +71,11 @@ class OneHotTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf'),
+    ) -> Transform:
         if max_depth == 0:
             return self
 
@@ -101,14 +114,19 @@ class OneHotTransform(NonFinalTransform):
 
     class Final(FinalTransform):
 
-        def __init__(self, labels, keep_background=True, dtype=None,
-                     **kwargs):
+        def __init__(
+            self,
+            labels: Sequence[Union[int, Sequence[int]]],
+            keep_background: bool = True,
+            dtype: Optional[torch.dtype] = None,
+            **kwargs
+        ) -> None:
             super().__init__(**kwargs)
             self.labels = labels
             self.keep_background = keep_background
             self.dtype = dtype
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor) -> torch.Tensor:
             if len(x) != 1:
                 raise ValueError('Cannot one-hot multi-channel tensors')
             x = x[0]
@@ -132,14 +150,279 @@ class OneHotTransform(NonFinalTransform):
 
 class ArgMaxTransform(FinalTransform):
 
-    def xform(self, x):
+    def xform(self, x: torch.Tensor) -> torch.Tensor:
         return x.argmax(0)[None]
+
+
+class LabelMapping:
+    """Common base class for label mappins."""
+    ...
+
+
+class DeterministicLabelMapping(dict, LabelMapping):
+    """
+    Deterministic label mapping.
+
+    Must be a dictionary mapping output labels to one or more input labels.
+
+    This dictionary can also be constructed from a list of (list of) labels,
+    which are implicitly mapped to [1..N].
+    """
+
+    @classmethod
+    def from_list(
+        cls,
+        inp: Sequence[Union[int, Sequence[int]]]
+    ) -> "LabelMapping":
+        """Build the dictionary from a list of (list of) labels."""
+        return LabelMapping({i+1: k for i, k in enumerate(inp)})
+
+    def sample(self) -> Mapping[int, Union[int, Sequence[int]]]:
+        """
+        Sample a lbal mapping.
+        (itself, since this is a deterministic mapping)
+        """
+        return dict(self)
+
+
+class RandomLabelMapping(dict, LabelMapping):
+    """
+    Randomized label mapping.
+
+    Must be a dictionary mapping labels or tuple of labels to a probability.
+    """
+
+    def sample(self) -> Mapping[int, Union[int, Sequence[int]]]:
+        """Sample a label mapping."""
+        sampled_labels = []
+        for labels, prob in self.items():
+            if pyrandom.random() > (1 - prob):
+                if isinstance(labels, Number):
+                    sampled_labels += [labels]
+                else:
+                    sampled_labels += list(labels)
+        return {i+1: k for i, k in enumerate(sampled_labels)}
+
+
+class HierarchicalLabelMapping(list, LabelMapping):
+    """
+    Hierarchical label mapping used to randomly group or hide labels.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        """
+        !!! example
+        ```json
+        # tissue
+        [
+            [0.01, 0],
+            [0.01, 1],
+            # children
+            [
+                # extracranial
+                [
+                    [0.3, 0],
+                    [0.3, 2],
+                    # children
+                    [
+                        # skull
+                        [
+                            [0.5, 0],
+                            # leaf label
+                            3
+                        ],
+                        # soft
+                        [
+                            [0.5, 4],
+                            # leaf labels
+                            [5, 6, 7]
+                        ]
+                    ]
+                ],
+                # intracranial
+                [
+                    [0.01, 8],
+                    # children
+                    [
+                        # csf
+                        [
+                            [0.5, 0],
+                            # leaf label
+                            9
+                        ],
+                        # brain
+                        [
+                            [0.1, 10],
+                            # children
+                            [
+                                # hindbrain
+                                [
+                                    [0.1, 0],
+                                    # children
+                                    [
+                                        # cerebellum
+                                        [
+                                            [0.1, 0],
+                                            [0.1, 11],
+                                            # leaf labels
+                                            [
+                                                # cerebellar white
+                                                12,
+                                                # cerebellar gray
+                                                13
+                                            ]
+                                        ],
+                                        # brainstem
+                                        [
+                                            [0.1, 0],
+                                            [0.1, 14],
+                                            # leaf labels
+                                            [
+                                                # pons
+                                                125
+                                                # medulla
+                                                16
+                                            ]
+                                        ],
+                                    ]
+                                ],
+                                # midbrain
+                                [
+                                    ...
+                                ],
+                                # forebrain
+                                [
+                                    ...
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+        ```
+        """
+        super().__init__(*args, **kwargs)
+
+    def from_explicit_dict(cls, inp: dict) -> "HierarchicalLabelMapping":
+        """
+        !!! example
+        ```json
+        {
+            "tissue": {
+                "prob": {
+                    0: 0.01,  # 1 % of the time, this group is erased
+                    1: 0.01   # 1 % of the time, it is merged into the label 1
+                              # The remaining of the time, use its children
+                },
+                "children": {
+                    "extracranial": {
+                        "prob": {0: 0.3, 2: 0.3},
+                        "children": {
+                            "skull": {"prob": {0: 0.5, 3: 0.5}},
+                            "soft" {
+                                "prob": {4: 0.5},
+                                "children": {
+                                    "muscle": 5,
+                                    "fat": 6,
+                                    "skin": 7
+                                }
+                            }
+                        }
+                    },
+                    "intracranial": {
+                        "prob": {8: 0.01},
+                        "children": {
+                            "csf": {
+
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ```
+        """
+        def recurse(inp):
+            if isinstance(inp, dict):
+                prob = []
+                if "prob" in inp or "children" in inp:
+                    if "prob" in inp:
+                        prob = [[val, key] for key, val in inp["prob"]]
+                    if "children" in inp:
+                        children = recurse(prob["children"])
+                    return [*prob, children]
+                else:
+                    return [recurse(val) for val in inp.values()]
+            elif isinstance(inp, (list, tuple, set, int)):
+                return inp
+
+        return cls(recurse(inp))
+
+    def sample(self) -> Mapping[int, Union[int, Sequence[int]]]:
+        """Sample a label mapping"""
+        def is_random(inp):
+            return (
+                isinstance(inp[0], (list, tuple, set)) and
+                isinstance(inp[0][0], float)
+            )
+
+        def get_children(inp):
+            if not inp:
+                return []
+            if is_random(inp):
+                children = [lab for _, lab in inp[:-1] if lab]
+                children += get_children(inp[-1])
+            if isinstance(inp, int):
+                return [inp]
+            children = []
+            for child in inp:
+                children.extend(get_children(child))
+            return children
+
+        label_map = {}
+
+        def recurse(inp):
+            if is_random(inp):
+                rval = pyrandom.random()
+                for p, lab in inp[:-1]:
+                    if p > rval:
+                        if lab:
+                            label_map[lab] = get_children(inp)
+                        return
+                    elif lab:
+                        label_map[lab] = lab
+                    rval -= p
+                return recurse(inp[-1])
+            if isinstance(inp, int):
+                label_map[inp] = inp
+                return
+            for child in inp:
+                recurse(child)
+
+        recurse(self)
+        return label_map
+
+
+DeterministicLabelMappingLike = Union[
+    Mapping[int, Union[int, Sequence[int]]],
+    Sequence[Union[int], Sequence[int]],
+    DeterministicLabelMapping,
+]
+RandomLabelMappingLike = Union[
+    Mapping[Union[int, Tuple[int]], float],
+    LabelMapping,
+]
 
 
 class RelabelTransform(NonFinalTransform):
     """Relabel a label map"""
 
-    def __init__(self, labels=None, **kwargs):
+    def __init__(
+        self,
+        labels: Optional[DeterministicLabelMappingLike] = None,
+        **kwargs
+    ) -> None:
         """
 
         !!! note
@@ -153,7 +436,7 @@ class RelabelTransform(NonFinalTransform):
 
         Parameters
         ----------
-        labels : list of [list of] int, optional
+        labels : list of [list of] int | dict[int, [list of] int], optional
             Relabeling scheme.
 
         """
@@ -162,7 +445,11 @@ class RelabelTransform(NonFinalTransform):
         self.labels = labels
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf')
+    ) -> Transform:
         if self.is_final:
             return self
         labels = self.labels
@@ -174,58 +461,130 @@ class RelabelTransform(NonFinalTransform):
 
     class Final(FinalTransform):
 
-        def __init__(self, labels, **kwargs):
+        def __init__(
+            self,
+            labels: DeterministicLabelMappingLike,
+            **kwargs
+        ) -> None:
             dtype = kwargs.pop("dtype", None)
             super().__init__(**kwargs)
             self.labels = labels
             self.dtype = dtype
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor) -> torch.Tensor:
             if self.labels is None:
                 return self.make_final(x)(x)
             assert self.labels is not None
 
             # Choose most appropriate output dtype based on number of
             # output labels
-            nb_labels = len(self.labels) + 1
+            labels = self.labels
+            if not isinstance(labels, dict):
+                labels = {i+1: j for i, j in enumerate(labels)}
+
+            max_out_label = max(self.labels)
+            min_out_label = min(0, min(self.labels))
+            nb_inp_labels = 1 + max_out_label - min_out_label
+
             dtype = self.dtype
             if not dtype:
-                if (nb_labels < 2**8):
+                if (0 <= min_out_label and max_out_label < 2**8):
                     dtype = torch.uint8
-                elif (nb_labels < 2**15):
+                elif (-2**7 <= min_out_label and max_out_label < 2**7):
+                    dtype = torch.int8
+                elif (-2**15 <= min_out_label and max_out_label < 2**15):
                     dtype = torch.int16
-                elif (nb_labels < 2**31):
+                elif (-2**31 <= min_out_label and max_out_label < 2**31):
                     dtype = torch.int32
                 else:
                     dtype = torch.int64
 
             # In case there are negative values in the input label map,
             # we shift input labels so that the minimum label is now 0
-            min_label = min([
-                min(label) if isinstance(label, (list, tuple)) else label
-                for label in self.labels
-            ])
+            min_inp_label = x.min().item()
+            max_inp_label = x.max().item()
+            nb_inp_labels = 1 + max_inp_label - min_inp_label
 
-            # Generate linear label map
-            labels = x.new_zeros([nb_labels], dtype=dtype)
-            for out, inp in enumerate(self.labels):
-                out = out + 1
-                if not isinstance(inp, (list, tuple)):
-                    inp = [inp]
-                for inp1 in inp:
-                    labels[inp1 - min_label] = out
+            if nb_inp_labels < 2**15:
+                # Generate linear label map
+                y = x.new_zeros([nb_inp_labels], dtype=dtype)
+                for out, inp in self.labels.items():
+                    if not isinstance(inp, (list, tuple)):
+                        inp = [inp]
+                    for inp1 in inp:
+                        inp1 = inp1 - min_inp_label
+                        y[inp1] = out
 
-            # Remap by indexing into the label map
-            x = (x - min_label).long()
-            y = labels[x]
+                # Remap by indexing into the label map
+                x = (x - min_inp_label).long()
+                y = y[x]
+
+            else:
+                # Loop through labels
+                # (allocating the linear label map may take too much memory)
+                y = torch.zeros_like(x, dtype=dtype)
+                for out, inp in self.labels.items():
+                    if not isinstance(inp, (list, tuple)):
+                        inp = [inp]
+                    for inp1 in inp:
+                        inp1 = inp1 - min_inp_label
+                        y.masked_fill_(x == inp1, out)
+
             return y
+
+
+class RandomRelabelTransform(NonFinalTransform):
+
+    def __init__(
+        self,
+        labels: Optional[RandomLabelMappingLike] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        labels : dict[[tuple of] int, float] | LabelMapping, optional
+            Relabeling scheme.
+
+        """
+        dtype = kwargs.pop("dtype", None)
+        super().__init__(**kwargs)
+        if isinstance(labels, dict):
+            labels = RandomLabelMapping(labels)
+        self.labels = labels
+        self.dtype = dtype
+
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf')
+    ) -> Transform:
+        if self.is_final:
+            return self
+        labels = self.labels
+        if labels is None:
+            labels = x.unique().tolist()[1:].tolist()
+            labels = RandomLabelMapping({x: 0.5 for x in labels})
+        labels = labels.sample()
+        return RelabelTransform(
+            labels, dtype=self.dtype, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class GaussianMixtureTransform(NonFinalTransform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
-    def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
-                 dtype=None, *, shared=False, **kwargs):
+    def __init__(
+        self,
+        mu: Optional[Sequence[float]] = None,
+        sigma: Optional[Sequence[float]] = None,
+        fwhm: Union[float, Sequence[float]] = 0.,
+        background: Optional[int] = None,
+        dtype: Optional[torch.dtype] = None,
+        *,
+        shared: Union[bool, str] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -249,7 +608,11 @@ class GaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf'),
+    ) -> Transform:
         if max_depth == 0:
             return self
         nk = len(x) if x.is_floating_point() else x.unique().numel()
@@ -266,8 +629,15 @@ class GaussianMixtureTransform(NonFinalTransform):
 
     class Final(FinalTransform):
 
-        def __init__(self, mu, sigma, fwhm, background=None, dtype=None,
-                     **kwargs):
+        def __init__(
+            self,
+            mu: Sequence[float],
+            sigma: Sequence[float],
+            fwhm: Optional[float],
+            background: Optional[int] = None,
+            dtype: Optional[torch.dtype] = None,
+            **kwargs
+        ) -> None:
             super().__init__(**kwargs)
             self.mu = mu
             self.sigma = sigma
@@ -275,7 +645,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             self.background = background
             self.dtype = dtype
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor) -> torch.Tensor:
             mu, sigma = self.mu, self.sigma
             ndim = x.ndim - 1
 
@@ -325,8 +695,17 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=1, sigma=0.05, fwhm=2, background=None, dtype=None,
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        mu: Union[Sampler, float, Sequence[float]] = 1,
+        sigma: Union[Sampler, float, Sequence[float]] = 0.05,
+        fwhm: Union[Sampler, float, Sequence[float]] = 2,
+        background: Optional[int] = None,
+        dtype: Optional[torch.dtype] = None,
+        *,
+        shared: Union[bool, str] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -347,7 +726,11 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf'),
+    ) -> Transform:
         if max_depth == 0:
             return self
         if ('channels' in self.shared
@@ -374,8 +757,15 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
 class SmoothLabelMap(NonFinalTransform):
     """Generate a random label map"""
 
-    def __init__(self, nb_classes=2, shape=5, soft=False,
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        nb_classes: int = 2,
+        shape: Union[int, Sequence[int]] = 5,
+        soft: bool = False,
+        *,
+        shared: Union[bool, str] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -394,7 +784,11 @@ class SmoothLabelMap(NonFinalTransform):
         self.shape = shape
         self.soft = soft
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: torch.Tensor,
+        max_depth: Number = float('inf'),
+    ) -> Transform:
         if max_depth == 0:
             return self
 
@@ -439,11 +833,11 @@ class SmoothLabelMap(NonFinalTransform):
 
     class Final(FinalTransform):
 
-        def __init__(self, labelmap, **kwargs):
+        def __init__(self, labelmap: torch.Tensor, **kwargs) -> None:
             super().__init__(**kwargs)
             self.labelmap = labelmap
 
-        def xform(self, x):
+        def xform(self, x: torch.Tensor) -> torch.Tensor:
             return self.labelmap.to(x.device)
 
 
