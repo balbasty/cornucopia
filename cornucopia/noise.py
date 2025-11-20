@@ -257,7 +257,7 @@ class GFactorTransform(NonFinalTransform):
                 self.returns
             )
 
-    def __init__(self, noise, shape=5, vmin=0.5, vmax=1.5,
+    def __init__(self, noise, shape=5, vmin=0.5, vmax=1.5, order=3,
                  *, shared=False, **kwargs):
         """
 
@@ -271,6 +271,8 @@ class GFactorTransform(NonFinalTransform):
             Minimum g-factor
         vmax : float
             Maximum g-factor
+        order : int
+            Spline order
 
         Other Parameters
         ------------------
@@ -282,7 +284,7 @@ class GFactorTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.noise = noise
         self.gfactor = MulFieldTransform(
-            shape, vmin=vmin, vmax=vmax, shared=shared
+            shape, vmin=vmin, vmax=vmax, order=order, shared=shared
         )
 
     def make_final(self, x, max_depth=float('inf')):
