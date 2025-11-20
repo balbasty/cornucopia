@@ -235,7 +235,7 @@ class IntensityTransform(SequentialTransform):
                     gfactor = RandInt(2, gfactor)
                 noise = RandomizedTransform(
                     GFactorTransform,
-                    dict(noise=noise1, shape=gfactor),
+                    dict(noise=noise1, shape=gfactor, order=order),
                 )
             else:
                 noise = noise1
@@ -300,63 +300,16 @@ class SynthFromLabelTransform(NonFinalTransform):
             }
     """  # noqa: E501
 
-    class Final(FinalTransform):
-
-        def __init__(self, gmm, deform=None, intensity=None,
-                     load=None, preproc=None, postproc=None, **kwargs):
-            super().__init__(**kwargs)
-            self.load = load or IdentityTransform()
-            self.preproc = preproc or IdentityTransform()
-            self.postproc = postproc or IdentityTransform()
-            self.deform = deform or IdentityTransform()
-            self.intensity = intensity or IdentityTransform()
-            self.gmm = gmm or IdentityTransform()
-
-        @property
-        def is_final(self):
-            return (
-                self.load.is_final and
-                self.preproc.is_final and
-                self.postproc.is_final and
-                self.deform.is_final and
-                self.intensity.is_final and
-                self.gmm.is_final
-            )
-
-        def make_final(self, x, max_depth=float('inf')):
-            if max_depth == 0 or self.is_final:
-                return self
-            return type(self)(
-                self.gmm.make_final(x, 1),
-                self.deform.make_final(x, 1),
-                self.intensity.make_final(x, 1),
-                self.load.make_final(x, 1),
-                self.preproc.make_final(x, 1),
-                self.postproc.make_final(x, 1),
-                **self.get_prm(),
-            ).make_final(x, max_depth-1)
-
-        def xform(self, lab):
-            lab = self.load(lab)
-            dfm = self.deform(lab)
-            gen = self.preproc(dfm)
-            img = self.gmm(gen)
-            img = self.intensity(img)
-            tgt = self.postproc(dfm)
-            return prepare_output(
-                dict(input=lab, deformed=dfm, generators=gen,
-                     target=tgt, label=tgt, image=img, output=img),
-                self.returns,
-            )
-
     def __init__(
         self,
+        *,
         patch: Optional[Union[int, List[int]]] = None,
         from_disk: bool = False,
         one_hot: bool = False,
         synth_labels: Optional[_LabelGrouping] = None,
         synth_labels_maybe: Mapping[_LabelGrouping, float] = None,
         target_labels: Optional[_LabelGrouping] = None,
+        order: Union[Sampler, int, bool] = 3,
         translations: Union[Sampler, float, bool] = 0.1,
         rotation: Union[Sampler, float, bool] = 15,
         shears: Union[Sampler, float, bool] = 0.012,
@@ -373,7 +326,6 @@ class SynthFromLabelTransform(NonFinalTransform):
         resolution: Union[Sampler, float, bool] = 8,
         snr: Union[Sampler, float, bool] = 10,
         gfactor: Union[Sampler, int, bool] = 5,
-        order: Union[Sampler, int, bool] = 3,
         sample_in_background: bool = False,
         dtype: Optional[torch.dtype] = None,
         device: Optional[Union[torch.device, str]] = None,
@@ -527,6 +479,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             bound=bound,
             dtype=dtype,
             device=device,
+            nearest_if_label=True,
         )
         self.gmm = RandomGaussianMixtureTransform(
             fwhm=gmm_fwhm or 0,
@@ -570,3 +523,52 @@ class SynthFromLabelTransform(NonFinalTransform):
             self.postproc_labels,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
+
+    class Final(FinalTransform):
+
+        def __init__(self, gmm, deform=None, intensity=None,
+                     load=None, preproc=None, postproc=None, **kwargs):
+            super().__init__(**kwargs)
+            self.load = load or IdentityTransform()
+            self.preproc = preproc or IdentityTransform()
+            self.postproc = postproc or IdentityTransform()
+            self.deform = deform or IdentityTransform()
+            self.intensity = intensity or IdentityTransform()
+            self.gmm = gmm or IdentityTransform()
+
+        @property
+        def is_final(self):
+            return (
+                self.load.is_final and
+                self.preproc.is_final and
+                self.postproc.is_final and
+                self.deform.is_final and
+                self.intensity.is_final and
+                self.gmm.is_final
+            )
+
+        def make_final(self, x, max_depth=float('inf')):
+            if max_depth == 0 or self.is_final:
+                return self
+            return type(self)(
+                self.gmm.make_final(x, 1),
+                self.deform.make_final(x, 1),
+                self.intensity.make_final(x, 1),
+                self.load.make_final(x, 1),
+                self.preproc.make_final(x, 1),
+                self.postproc.make_final(x, 1),
+                **self.get_prm(),
+            ).make_final(x, max_depth-1)
+
+        def xform(self, lab):
+            lab = self.load(lab)
+            dfm = self.deform(lab)
+            gen = self.preproc(dfm)
+            img = self.gmm(gen)
+            img = self.intensity(img)
+            tgt = self.postproc(dfm)
+            return prepare_output(
+                dict(input=lab, deformed=dfm, generators=gen,
+                     target=tgt, label=tgt, image=img, output=img),
+                self.returns,
+            )
