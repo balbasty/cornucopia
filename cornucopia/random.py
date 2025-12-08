@@ -162,14 +162,18 @@ class Sampler(ABC):
 
 
 class Fixed(Sampler):
-    """Fixed value"""
-    def __init__(self, value):
-        """
+    """Fixed value.
 
-        Parameters
-        ----------
-        value : number or sequence[number]
-        """
+    ```python
+    Fixed(value)
+    ```
+
+    Attributes
+    ----------
+    value : number or sequence[number]
+    """
+
+    def __init__(self, value):
         super().__init__(value=value)
 
     def _use_torch(self, n):
