@@ -11,15 +11,33 @@ __all__ = [
 import random
 import copy
 import torch
+from abc import ABC, abstractmethod
 from numbers import Number
 from .utils.py import ensure_list
 from .utils.smart_inplace import add_, mul_, exp_
 
 
-class Sampler:
+class Sampler(ABC):
     """
     Base class for random samplers, with a bunch of helpers.
-    This class is for developers of new Sampler classes only.
+
+    !!! note
+        Samplers can be combined with determinstic values or between
+        themselves using arithmetic operators:
+            - `P + X -> ShiftedSampler(P, X)`
+            - `P - X -> ShiftedSampler(P, -X)`
+            - `P * X -> MultipliedSampler(P, X)`
+            - `P / X -> DividedSampler(P, X)`
+            - `X / P -> DividedSampler(X, P)`
+            - `P + Q -> SumOfSamplers(P, Q)`
+            - `P - Q -> DifferenceOfSamplers(P, Q)`
+            - `P * Q -> ProductOfSamplers(P, Q)`
+            - `P / Q -> RatioOfSamplers(P, Q)`
+
+    Attributes
+    ----------
+    theta : dict
+        Parameters of the sampler
     """
 
     def __init__(self, **theta):
@@ -74,6 +92,7 @@ class Sampler:
         else:
             return super().__setattr__(item, value)
 
+    @abstractmethod
     def __call__(self, n=None, **backend):
         """
         Parameters
@@ -171,23 +190,23 @@ class Fixed(Sampler):
 
 
 class Uniform(Sampler):
-    """Continuous uniform sampler"""
+    """Continuous uniform sampler.
+
+    ```python
+    Uniform()
+    Uniform(max)
+    Uniform(min, max)
+    ```
+
+    Attributes
+    ----------
+    min : float or sequence[float], default=0
+        Lower bound (inclusive)
+    max : float or sequence[float], default=1
+        Upper bound (inclusive or exclusive, depending on rounding)
+    """
 
     def __init__(self, *args, **kwargs):
-        """
-        ```python
-        Uniform()
-        Uniform(max)
-        Uniform(min, max)
-        ```
-
-        Parameters
-        ----------
-        min : float or sequence[float], default=0
-            Lower bound (inclusive)
-        max : float or sequence[float], default=1
-            Upper bound (inclusive or exclusive, depending on rounding)
-        """
         min, max = 0, 1
         if len(args) == 2:
             min, max = args
@@ -216,22 +235,22 @@ class Uniform(Sampler):
 
 
 class RandInt(Sampler):
-    """Discrete uniform sampler"""
+    """Discrete uniform sampler
+
+    ```python
+    RandInt(max)
+    RandInt(min, max)
+    ```
+
+    Attributes
+    ----------
+    min : int or sequence[int], default=0
+        Lower bound (inclusive)
+    max : int or sequence[int]
+        Upper bound (inclusive)
+    """
 
     def __init__(self, *args, **kwargs):
-        """
-        ```python
-        RandInt(max)
-        RandInt(min, max)
-        ```
-
-        Parameters
-        ----------
-        min : float or sequence[float], default=0
-            Lower bound (inclusive)
-        max : float or sequence[float]
-            Upper bound (inclusive)
-        """
         min, max = 0, None
         if len(args) == 2:
             min, max = args
@@ -261,20 +280,24 @@ class RandInt(Sampler):
 
 
 class RandKFrom(Sampler):
-    """Discrete uniform sampler"""
+    """Discrete uniform sampler
+
+    ```python
+    RandKFrom(range, k=None, replacement=False)
+    ```
+
+    Attributes
+    ----------
+    range : sequence
+        Values from which to sample
+    k : int, default=None
+        Number of values to sample.
+        Sample random number if None.
+    replacement : bool, default=False
+        Whether to sample with replacement
+    """
 
     def __init__(self, range, k=None, replacement=False):
-        """
-        Parameters
-        ----------
-        range : sequence
-            Values from which to sample
-        k : int, default=None
-            Number of values to sample.
-            Sample random number if None.
-        replacement : bool, default=False
-            Whether to sample with replacement
-        """
         super().__init__()
         range = list(range)
         if not replacement and k and k > len(range):
@@ -300,17 +323,23 @@ class RandKFrom(Sampler):
 
 
 class Normal(Sampler):
-    """Gaussian sampler"""
+    """Gaussian sampler.
+
+    ```python
+    Normal()
+    Normal(mu)
+    Normal(mu, sigma)
+    ```
+
+    Attributes
+    ----------
+    mu : float or sequence[float], default=0
+        Mean
+    sigma : float or sequence[float], default=1
+        Standard deviation
+    """
 
     def __init__(self, mu=0, sigma=1):
-        """
-        Parameters
-        ----------
-        mu : float or sequence[float]
-            Mean
-        sigma : float or sequence[float]
-            Standard deviation
-        """
         super().__init__(mu=mu, sigma=sigma)
 
     def _use_torch(self, n):
@@ -330,17 +359,23 @@ class Normal(Sampler):
 
 
 class LogNormal(Sampler):
-    """LogNormal sampler"""
+    """LogNormal sampler
+
+    ```python
+    LogNormal()
+    LogNormal(mu)
+    LogNormal(mu, sigma)
+    ```
+
+    Attributes
+    ----------
+    mu : float or sequence[float], default=0
+        Mean of the log
+    sigma : float or sequence[float], default=1
+        Standard deviation of the log
+    """
 
     def __init__(self, mu=0, sigma=1):
-        """
-        Parameters
-        ----------
-        mu : float or sequence[float]
-            Mean of the log
-        sigma : float or sequence[float]
-            Standard deviation of the log
-        """
         super().__init__(mu=mu, sigma=sigma)
 
     def _use_torch(self, n):
@@ -360,18 +395,27 @@ class LogNormal(Sampler):
 
 
 class TransformedSampler(Sampler):
-    """A random variable that gets transformed by a deterministic function"""
+    """A random variable that gets transformed by a deterministic function.
+
+    1. Apply the sampler to get samples
+    2. Apply the transform to each sample
+
+    ```python
+    TransformedSampler(
+        sampler: Sample,
+        transform: Callable[[float], float]
+    )
+    ```
+
+    Attributes
+    ----------
+    sampler : Sampler
+        A random sampler
+    transform : callable(float) -> float
+        A value-wise transformation
+    """
 
     def __init__(self, sampler, transform):
-        """
-
-        Parameters
-        ----------
-        sampler : Sampler
-            A random sampler
-        transform : callable(float) -> float
-            A value-wise transformation
-        """
         super().__init__(sampler=sampler, transform=transform)
 
     def __call__(self, n=None, **backend):
@@ -383,18 +427,28 @@ class TransformedSampler(Sampler):
 
 
 class CombinedSamplers(Sampler):
-    """Random variables that get combined by a deterministic function"""
+    """Random variables that get combined by a deterministic function.
+
+    1. Apply each sampler to get samples
+    2. Apply the transform to the samples
+
+    ```python
+    CombinedSamplers(
+        samplers: list[Sampler],
+        transform: Callable[[float, ...], float]
+    )
+    ```
+
+    Attributes
+    ----------
+    samplers : list[Sampler]
+        A random sampler
+    transform : callable(*float) -> float
+        A value-wise transformation
+
+    """
 
     def __init__(self, samplers, transform):
-        """
-
-        Parameters
-        ----------
-        samplers : list[Sampler]
-            A random sampler
-        transform : callable(*float) -> float
-            A value-wise transformation
-        """
         super().__init__(samplers=samplers, transform=transform)
 
     def __call__(self, n=None, **backend):
@@ -406,6 +460,7 @@ class CombinedSamplers(Sampler):
 
 
 class MultipliedSampler(TransformedSampler):
+    """Multiply each sample by a fixed value."""
 
     class _Op:
         def __init__(self, value):
@@ -419,6 +474,8 @@ class MultipliedSampler(TransformedSampler):
 
 
 class DividedSampler(TransformedSampler):
+    """Divide each sample by a fixed value."""
+
     class _Op:
         def __init__(self, value):
             self.value = value
@@ -431,6 +488,8 @@ class DividedSampler(TransformedSampler):
 
 
 class DividingSampler(TransformedSampler):
+    """Divide a fixed value by each sample."""
+
     class _Op:
         def __init__(self, value):
             self.value = value
@@ -443,6 +502,8 @@ class DividingSampler(TransformedSampler):
 
 
 class ShiftedSampler(TransformedSampler):
+    """Add a fixed value to each sample."""
+
     class _Op:
         def __init__(self, value):
             self.value = value
@@ -455,6 +516,8 @@ class ShiftedSampler(TransformedSampler):
 
 
 class ReverseShiftedSampler(TransformedSampler):
+    """Subtract each sample from a fixed value."""
+
     class _Op:
         def __init__(self, value):
             self.value = value
@@ -467,6 +530,7 @@ class ReverseShiftedSampler(TransformedSampler):
 
 
 class ProductOfSamplers(CombinedSamplers):
+    """Multiply samples from two samplers."""
 
     class _Op:
         def __call__(self, x, y):
@@ -477,6 +541,7 @@ class ProductOfSamplers(CombinedSamplers):
 
 
 class RatioOfSamplers(CombinedSamplers):
+    """Divide samples from two samplers."""
 
     class _Op:
         def __call__(self, x, y):
@@ -487,6 +552,7 @@ class RatioOfSamplers(CombinedSamplers):
 
 
 class SumOfSamplers(CombinedSamplers):
+    """Add samples from two samplers."""
 
     class _Op:
         def __call__(self, x, y):
@@ -497,6 +563,7 @@ class SumOfSamplers(CombinedSamplers):
 
 
 class DifferenceOfSamplers(CombinedSamplers):
+    """Subtract samples from two samplers."""
 
     class _Op:
         def __call__(self, x, y):
