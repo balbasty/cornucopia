@@ -92,10 +92,15 @@ class BatchedTransform(nn.Module):
         def pack(x):
             x0 = x[0]
             if isinstance(x0, (list, tuple)):
-                return type(x0)(pack([x1[i] for x1 in x])
-                                for i in range(len(x0)))
+                return type(x0)(
+                    pack([x1[i] for x1 in x])
+                    for i in range(len(x0))
+                )
             elif hasattr(x0, 'items'):
-                return {key: pack([x1[key] for x1 in x]) for key in x0.keys()}
+                return type(x0)({
+                    key: pack([x1[key] for x1 in x])
+                    for key in x0.keys()
+                })
             elif torch.is_tensor(x0):
                 return torch.stack(x)
             else:
