@@ -1,3 +1,4 @@
+import torch
 from torch.nn import functional as F
 from .py import ensure_list, make_vector
 from .padding import pad
@@ -14,7 +15,7 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
         Number of spatial dimensions
     tensor : (*batch, [channel_in,] *spatial_in) tensor
         Input tensor
-    kernel : ([channel_in, channel_out,] *kernel_size) tensor
+    kernel : ([channel_out, channel_in,] *kernel_size) tensor
         Convolution kernel
     bias : ([channel_out,]) tensor, optional
         Bias tensor
@@ -41,24 +42,39 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
         bias = bias.to(tensor)
 
     # sanity checks + reshape for torch's conv
-    if kernel.dim() not in (ndim, ndim + 2):
+    if kernel.dim() not in (ndim, ndim + 1, ndim + 2):
         raise ValueError('Kernel shape should be (*kernel_size) or '
                          '(channel_in, channel_out, *kernel_size) but '
                          'got {}'.format(kernel.shape))
-    has_channels = kernel.dim() == ndim + 2
-    channels_in = kernel.shape[0] if has_channels else 1
-    channels_out = kernel.shape[1] if has_channels else 1
-    kernel_size = kernel.shape[(2*has_channels):]
-    kernel = kernel.reshape([channels_in, channels_out, *kernel_size])
+    kernel_size = kernel.shape[-ndim:]
+    has_channels = bias is not None or (kernel.ndim > ndim)
+    if kernel.ndim == ndim + 2:
+        channels_out = kernel.shape[0]
+        channels_in = kernel.shape[1]
+        kernel = kernel.reshape([channels_out, channels_in, *kernel_size])
+    elif kernel.ndim == ndim + 1:
+        # Grouped kernel -> one single-channel convolution per channel
+        groups = channels_in = channels_out = kernel.shape[0]
+        kernel = kernel.reshape([channels_out, 1, *kernel_size])
+    else:
+        # Iso kernel -> Same single-channel convolution for all channels
+        if bias is not None:
+            groups = channels_in = channels_out = bias.numel()
+            kernel = torch.stack([kernel] * channels_out, dim=0)[:, None]
+        else:
+            groups = channels_out = channels_in = 1
+            kernel = kernel[None, None]
+
     batch = tensor.shape[:-(ndim+has_channels)]
     spatial_in = tensor.shape[(-ndim):]
-    if has_channels and tensor.shape[-(ndim+has_channels)] != channels_in:
+    if channels_in not in (tensor.shape[-(ndim+has_channels)], None):
         raise ValueError(
             'Number of input channels not consistent: '
             'Got {} (kernel) and {} (tensor).'.format(
                 channels_in, tensor.shape[-(ndim+has_channels)]
             )
         )
+
     tensor = tensor.reshape([-1, channels_in, *spatial_in])
     if bias:
         bias = bias.flatten()
