@@ -13,6 +13,7 @@ import copy
 import torch
 from abc import ABC, abstractmethod
 from numbers import Number
+from typing import Callable, Protocol, Sequence, overload
 from .utils.py import ensure_list
 from .utils.smart_inplace import add_, mul_, exp_
 
@@ -25,15 +26,17 @@ class Sampler(ABC):
         Samplers can be combined with determinstic values or between
         themselves using arithmetic operators:
 
-        - `P + X -> ShiftedSampler(P, X)`
-        - `P - X -> ShiftedSampler(P, -X)`
-        - `P * X -> MultipliedSampler(P, X)`
-        - `P / X -> DividedSampler(P, X)`
-        - `X / P -> DividedSampler(X, P)`
-        - `P + Q -> SumOfSamplers(P, Q)`
-        - `P - Q -> DifferenceOfSamplers(P, Q)`
-        - `P * Q -> ProductOfSamplers(P, Q)`
-        - `P / Q -> RatioOfSamplers(P, Q)`
+        ```python
+        P + X -> ShiftedSampler(P, X)
+        P - X -> ShiftedSampler(P, -X)
+        P * X -> MultipliedSampler(P, X)
+        P / X -> DividedSampler(P, X)
+        X / P -> DividedSampler(X, P)
+        P + Q -> SumOfSamplers(P, Q)
+        P - Q -> DifferenceOfSamplers(P, Q)
+        P * Q -> ProductOfSamplers(P, Q)
+        P / Q -> RatioOfSamplers(P, Q)
+        ```
 
     Attributes
     ----------
@@ -93,6 +96,21 @@ class Sampler(ABC):
         else:
             return super().__setattr__(item, value)
 
+    @overload
+    def __call__(self) -> Number: ...
+
+    @overload
+    def __call__(self, n: int) -> Sequence[Number]: ...
+
+    @overload
+    def __call__(
+        self,
+        n: Sequence[int],
+        *,
+        dtype=None,
+        device=None,
+    ) -> torch.Tensor: ...
+
     @abstractmethod
     def __call__(self, n=None, **backend):
         """
@@ -104,6 +122,15 @@ class Sampler(ABC):
             - if `None`, return a scalar
             - if an `int`, return a list
             - if a `list`, return a tensor
+
+        Other parameters
+        ----------------
+        dtype : torch.dtype, optional
+            Data type of the returned tensor. By default, inferred from
+            the sampler parameters. Only used if `n` is a list.
+        device : torch.device, optional
+            Device of the returned tensor. By default, inferred from
+            the sampler parameters. Only used if `n` is a list.
 
         Returns
         -------
@@ -164,10 +191,6 @@ class Sampler(ABC):
 class Fixed(Sampler):
     """Fixed value.
 
-    ```python
-    Fixed(value)
-    ```
-
     Attributes
     ----------
     value : number or sequence[number]
@@ -197,12 +220,6 @@ class Fixed(Sampler):
 class Uniform(Sampler):
     """Continuous uniform sampler.
 
-    ```python
-    Uniform()
-    Uniform(max)
-    Uniform(min, max)
-    ```
-
     Attributes
     ----------
     min : float or sequence[float], default=0
@@ -210,6 +227,15 @@ class Uniform(Sampler):
     max : float or sequence[float], default=1
         Upper bound (inclusive or exclusive, depending on rounding)
     """
+
+    @overload
+    def __init__(self): ...
+
+    @overload
+    def __init__(self, max): ...
+
+    @overload
+    def __init__(self, min, max): ...
 
     def __init__(self, *args, **kwargs):
         min, max = 0, 1
@@ -242,11 +268,6 @@ class Uniform(Sampler):
 class RandInt(Sampler):
     """Discrete uniform sampler
 
-    ```python
-    RandInt(max)
-    RandInt(min, max)
-    ```
-
     Attributes
     ----------
     min : int or sequence[int], default=0
@@ -254,6 +275,15 @@ class RandInt(Sampler):
     max : int or sequence[int]
         Upper bound (inclusive)
     """
+
+    @overload
+    def __init__(self): ...
+
+    @overload
+    def __init__(self, max): ...
+
+    @overload
+    def __init__(self, min, max): ...
 
     def __init__(self, *args, **kwargs):
         min, max = 0, None
@@ -279,17 +309,18 @@ class RandInt(Sampler):
     def __call__(self, n=None, **backend):
         if self._use_torch(n):
             n = tuple(ensure_list(n or []))
-            backend.setdefault('device', getattr(self.max - self.min, 'device', None))
-            return torch.randint(low=self.min, high=1 + self.max, size=n, **backend)
+            backend.setdefault(
+                'device',
+                getattr(self.max - self.min, 'device', None)
+            )
+            return torch.randint(
+                low=self.min, high=1 + self.max, size=n, **backend
+            )
         return self.map(random.randint, self.min, self.max, n=n)
 
 
 class RandKFrom(Sampler):
     """Discrete uniform sampler
-
-    ```python
-    RandKFrom(range, k=None, replacement=False)
-    ```
 
     Attributes
     ----------
@@ -330,12 +361,6 @@ class RandKFrom(Sampler):
 class Normal(Sampler):
     """Gaussian sampler.
 
-    ```python
-    Normal()
-    Normal(mu)
-    Normal(mu, sigma)
-    ```
-
     Attributes
     ----------
     mu : float or sequence[float], default=0
@@ -365,12 +390,6 @@ class Normal(Sampler):
 
 class LogNormal(Sampler):
     """LogNormal sampler
-
-    ```python
-    LogNormal()
-    LogNormal(mu)
-    LogNormal(mu, sigma)
-    ```
 
     Attributes
     ----------
@@ -405,22 +424,17 @@ class TransformedSampler(Sampler):
     1. Apply the sampler to get samples
     2. Apply the transform to each sample
 
-    ```python
-    TransformedSampler(
-        sampler: Sample,
-        transform: Callable[[float], float]
-    )
-    ```
-
     Attributes
     ----------
     sampler : Sampler
         A random sampler
-    transform : callable(float) -> float
+    transform : Callable[[float], float]
         A value-wise transformation
     """
 
-    def __init__(self, sampler, transform):
+    Transform = Callable[[float], float]
+
+    def __init__(self, sampler: Sampler, transform: Transform):
         super().__init__(sampler=sampler, transform=transform)
 
     def __call__(self, n=None, **backend):
@@ -437,23 +451,19 @@ class CombinedSamplers(Sampler):
     1. Apply each sampler to get samples
     2. Apply the transform to the samples
 
-    ```python
-    CombinedSamplers(
-        samplers: list[Sampler],
-        transform: Callable[[float, ...], float]
-    )
-    ```
-
     Attributes
     ----------
     samplers : list[Sampler]
         A random sampler
-    transform : callable(*float) -> float
+    transform : Callable[[float, ...], float]
         A value-wise transformation
 
     """
 
-    def __init__(self, samplers, transform):
+    class Transform(Protocol):
+        def __call__(self, *args: float) -> float: ...
+
+    def __init__(self, samplers: Sequence[Sampler], transform: Transform):
         super().__init__(samplers=samplers, transform=transform)
 
     def __call__(self, n=None, **backend):
@@ -578,31 +588,52 @@ class DifferenceOfSamplers(CombinedSamplers):
         super().__init__([left, right], self._Op())
 
 
-def make_range(*args, **kwargs):
-    """
-    ```python
-    make_range([min], max, *, offset=0)
-    ```
+@overload
+def make_range(max, *, min=0, offset=0) -> Uniform: ...
 
+
+@overload
+def make_range(min, *, max, offset=0) -> Uniform: ...
+
+
+@overload
+def make_range(min, max, *, offset=0) -> Uniform: ...
+
+
+def make_range(*args, **kwargs) -> Uniform:
+    """
     If any of the inputs is a Sampler, return the Sampler.
 
-    Else, build a (lower, upper) range.
+    Else, build a {lower|upper} range.
 
     !!! examples
-        ```python
-        # full range
-        make_range(x, y) -> (x, y)
-        make_range(x, y, offset=1) -> (1+x, 1+y)
-        # symmetric range
-        make_range(x) -> (-x, x)
-        make_range(x, offset=1) -> (1-x, 1+x)
-        # upper bound
-        make_range(0, x) -> (0, x)
-        make_range(x, min=0) -> (0, x)
-        # lower bound
-        make_range(x, 1) -> (x, 1)
-        make_range(x, max=1) -> (x, 1)
-        ```
+        === "Range"
+
+            ```python
+            make_range(x, y)           -> (x, y)
+            make_range(x, y, offset=1) -> (1+x, 1+y)
+            ```
+
+        === "Symmetric range"
+
+            ```python
+            make_range(x)           -> (-x, x)
+            make_range(x, offset=1) -> (1-x, 1+x)
+            ```
+
+        === "Upper bound"
+
+            ```python
+            make_range(0, x)     -> (0, x)
+            make_range(x, min=0) -> (0, x)
+            ```
+
+        === "Lower bound"
+
+            ```python
+            make_range(x, 1)     -> (x, 1)
+            make_range(x, max=1) -> (x, 1)
+            ```
     """
     for x in args:
         if isinstance(x, Sampler):
