@@ -24,15 +24,16 @@ class Sampler(ABC):
     !!! note
         Samplers can be combined with determinstic values or between
         themselves using arithmetic operators:
-            - `P + X -> ShiftedSampler(P, X)`
-            - `P - X -> ShiftedSampler(P, -X)`
-            - `P * X -> MultipliedSampler(P, X)`
-            - `P / X -> DividedSampler(P, X)`
-            - `X / P -> DividedSampler(X, P)`
-            - `P + Q -> SumOfSamplers(P, Q)`
-            - `P - Q -> DifferenceOfSamplers(P, Q)`
-            - `P * Q -> ProductOfSamplers(P, Q)`
-            - `P / Q -> RatioOfSamplers(P, Q)`
+
+        - `P + X -> ShiftedSampler(P, X)`
+        - `P - X -> ShiftedSampler(P, -X)`
+        - `P * X -> MultipliedSampler(P, X)`
+        - `P / X -> DividedSampler(P, X)`
+        - `X / P -> DividedSampler(X, P)`
+        - `P + Q -> SumOfSamplers(P, Q)`
+        - `P - Q -> DifferenceOfSamplers(P, Q)`
+        - `P * Q -> ProductOfSamplers(P, Q)`
+        - `P / Q -> RatioOfSamplers(P, Q)`
 
     Attributes
     ----------
