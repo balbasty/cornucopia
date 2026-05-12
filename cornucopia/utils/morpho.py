@@ -3,12 +3,12 @@ from .conv import convnd
 import itertools
 
 
-def connectivity_kernel(dim, conn=1, **backend):
+def connectivity_kernel(ndim, conn=1, **backend):
     """Build a connectivity kernel
 
     Parameters
     ----------
-    dim : int
+    ndim : int
         Number of spatial dimensions
     conn : int, default=1
         Order of the connectivity
@@ -20,29 +20,28 @@ def connectivity_kernel(dim, conn=1, **backend):
     kernel : (*spatial) tensor
 
     """
-    kernel = torch.zeros((3,)*dim, **backend)
-    for coord in itertools.product([0, 1], repeat=dim):
+    kernel = torch.zeros((3,)*ndim, **backend)
+    for coord in itertools.product([0, 1], repeat=ndim):
         if sum(coord) > conn:
             continue
-        for sgn in itertools.product([-1, 1], repeat=dim):
+        for sgn in itertools.product([-1, 1], repeat=ndim):
             coord1 = [1 + c*s for c, s in zip(coord, sgn)]
             kernel[tuple(coord1)] = 1
     return kernel
 
 
-# @torch.jit.script
 def xor(x, y):
     return (x + y) == 1
 
 
 def _dist1(x, ix, dist, conn, n_iter):
-    dim = conn.dim()
+    ndim = conn.ndim
     if dist is not None:
         ox, oix = x, ix
     if x is not None:
-        x = convnd(dim, x, conn, padding='same').clamp_max_(1)
+        x = convnd(ndim, x, conn, padding='same').clamp_max_(1)
     if ix is not None:
-        ix = convnd(dim, ix, conn, padding='same').clamp_max_(1)
+        ix = convnd(ndim, ix, conn, padding='same').clamp_max_(1)
     if dist is not None:
         # NOTE: this function used to be inlined in the `_morpho` loop,
         # but  the two following lines caused massive memory leaks
@@ -54,7 +53,7 @@ def _dist1(x, ix, dist, conn, n_iter):
     return x, ix, dist
 
 
-def _morpho(mode, x, conn, nb_iter, dim):
+def _morpho(mode, x, conn, nb_iter, ndim):
     """Common worker for binary operations
 
     Notes
@@ -67,7 +66,7 @@ def _morpho(mode, x, conn, nb_iter, dim):
     x : (..., *spatial) tensor
     conn : tensor or int
     nb_iter : int
-    dim : int
+    ndim : int
 
     Returns
     -------
@@ -80,9 +79,9 @@ def _morpho(mode, x, conn, nb_iter, dim):
     x = x.to(torch.float32 if x.is_cuda else torch.uint8)
     backend = dict(dtype=x.dtype, device=x.device)
 
-    dim = dim or x.dim()
+    ndim = ndim or x.ndim
     if isinstance(conn, int):
-        conn = connectivity_kernel(dim, conn, **backend)
+        conn = connectivity_kernel(ndim, conn, **backend)
     else:
         conn = conn.to(**backend)
 
@@ -109,7 +108,7 @@ def _morpho(mode, x, conn, nb_iter, dim):
     return dist
 
 
-def _soft_morpho(mode, x, conn, nb_iter, dim):
+def _soft_morpho(mode, x, conn, nb_iter, ndim):
     """Common worker for soft operations
 
     Parameters
@@ -118,7 +117,7 @@ def _soft_morpho(mode, x, conn, nb_iter, dim):
     x : (..., *spatial) tensor
     conn : tensor or int
     nb_iter : int
-    dim : int
+    ndim : int
 
     Returns
     -------
@@ -127,9 +126,9 @@ def _soft_morpho(mode, x, conn, nb_iter, dim):
     """
     backend = dict(dtype=x.dtype, device=x.device)
 
-    dim = dim or x.dim()
+    ndim = ndim or x.ndim
     if isinstance(conn, int):
-        conn = connectivity_kernel(dim, conn, **backend)
+        conn = connectivity_kernel(ndim, conn, **backend)
     else:
         conn = conn.to(**backend)
 
@@ -139,7 +138,7 @@ def _soft_morpho(mode, x, conn, nb_iter, dim):
     x = x.clamp_(0.001, 0.999).log_()
 
     for n_iter in range(1, nb_iter+1):
-        x = convnd(dim, x, conn, padding='same')
+        x = convnd(ndim, x, conn, padding='same')
 
     x = x.exp_()
     if mode == 'dilate':
@@ -147,7 +146,7 @@ def _soft_morpho(mode, x, conn, nb_iter, dim):
     return x
 
 
-def erode(x, conn=1, nb_iter=1, dim=None, soft=False):
+def erode(x, conn=1, nb_iter=1, ndim=None, soft=False):
     """Binary erosion
 
     Parameters
@@ -162,7 +161,7 @@ def erode(x, conn=1, nb_iter=1, dim=None, soft=False):
             3 :                     // 26-connectivity (3D)
     nb_iter : int, default=1
         Number of iterations
-    dim : int, default=`x.dim()`
+    ndim : int, default=`x.ndim`
         Number of spatial dimensions
     soft : bool, default=False
         Assume input are probabilities and use a soft operator.
@@ -174,10 +173,10 @@ def erode(x, conn=1, nb_iter=1, dim=None, soft=False):
 
     """
     fn = _soft_morpho if soft else _morpho
-    return fn('erode', x, conn, nb_iter, dim)
+    return fn('erode', x, conn, nb_iter, ndim)
 
 
-def dilate(x, conn=1, nb_iter=1, dim=None, soft=False):
+def dilate(x, conn=1, nb_iter=1, ndim=None, soft=False):
     """Binary dilation
 
     Parameters
@@ -192,7 +191,7 @@ def dilate(x, conn=1, nb_iter=1, dim=None, soft=False):
             3 :                     // 26-connectivity (3D)
     nb_iter : int, default=1
         Number of iterations
-    dim : int, default=`x.dim()`
+    ndim : int, default=`x.ndim`
         Number of spatial dimensions
     soft : bool, default=False
         Assume input are probabilities and use a soft operator.
@@ -204,10 +203,10 @@ def dilate(x, conn=1, nb_iter=1, dim=None, soft=False):
 
     """
     fn = _soft_morpho if soft else _morpho
-    return fn('dilate', x, conn, nb_iter, dim)
+    return fn('dilate', x, conn, nb_iter, ndim)
 
 
-def bounded_distance(x, conn=1, nb_iter=1, dim=None):
+def bounded_distance(x, conn=1, nb_iter=1, ndim=None):
     """Bounded signed (city block) distance to a binary object.
 
     Parameters
@@ -223,7 +222,7 @@ def bounded_distance(x, conn=1, nb_iter=1, dim=None):
     nb_iter : int, default=1
         Number of iterations. All voxels farther from the object than
         `nb_iter` will be given the distance `nb_iter + 1`
-    dim : int, default=`x.dim()`
+    ndim : int, default=`x.ndim`
         Number of spatial dimensions
 
     Returns
@@ -232,4 +231,4 @@ def bounded_distance(x, conn=1, nb_iter=1, dim=None):
         Dilated tensor
 
     """
-    return _morpho('dist', x, conn, nb_iter, dim)
+    return _morpho('dist', x, conn, nb_iter, ndim)
