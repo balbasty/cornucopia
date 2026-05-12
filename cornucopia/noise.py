@@ -19,22 +19,25 @@ from .utils.smart_inplace import mul_, add_, sqrt_
 from . import ctx
 
 
+class GaussianNoiseFinalTransform(AddValueTransform):
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, value_name='noise', **kwargs)
+        self.Parent = GaussianNoiseTransform
+
+    @property
+    def noise(self):
+        return self.value
+
+    @noise.setter
+    def noise(self, value):
+        self.value = value
+
+
 class GaussianNoiseTransform(NonFinalTransform):
     """Additive Gaussian noise"""
 
-    class Final(AddValueTransform):
-
-        def __init__(self, value, **kwargs):
-            super().__init__(value, value_name='noise', **kwargs)
-            self.Parent = GaussianNoiseTransform
-
-        @property
-        def noise(self):
-            return self.value
-
-        @noise.setter
-        def noise(self, value):
-            self.value = value
+    Final = GaussianNoiseFinalTransform
 
     def __init__(self, sigma=0.1, *, shared=False, **kwargs):
         """
@@ -105,26 +108,29 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
         return prm
 
 
+class ChiNoiseFinalTransform(FinalTransform):
+
+    def __init__(self, noise, **kwargs):
+        super().__init__(**kwargs)
+        self.noise = noise
+        self.Parent = ChiNoiseTransform
+
+    def xform(self, x):
+        noise = self.noise.to(x)
+        y = sqrt_(add_(x.square(), noise.square()))
+        return prepare_output(
+            dict(input=x, output=y, noise=noise),
+            self.returns
+        )
+
+
 class ChiNoiseTransform(NonFinalTransform):
     """Additive Noncentral Chi noise
 
     (Rician is a special case with nb_channels = 2)
     """
 
-    class Final(FinalTransform):
-
-        def __init__(self, noise, **kwargs):
-            super().__init__(**kwargs)
-            self.noise = noise
-            self.Parent = ChiNoiseTransform
-
-        def xform(self, x):
-            noise = self.noise.to(x)
-            y = sqrt_(add_(x.square(), noise.square()))
-            return prepare_output(
-                dict(input=x, output=y, noise=noise),
-                self.returns
-            )
+    Final = ChiNoiseFinalTransform
 
     def __init__(self, sigma=0.1, nb_channels=2, *, shared=False, **kwargs):
         """
@@ -218,44 +224,47 @@ class RandomChiNoiseTransform(RandomizedTransform):
         return prm
 
 
+class GFactorFinalTransform(NonFinalTransform):
+
+    def __init__(self, noisetrf, gfactor, **kwargs):
+        super().__init__(**kwargs)
+        self.noisetrf = noisetrf
+        self.gfactor = gfactor
+        self.Parent = GFactorTransform
+
+    @property
+    def is_final(self):
+        return self.noisetrf.is_final and self.gfactor.is_final
+
+    def make_final(self, x, max_depth=float('inf')):
+        if max_depth == 0 or self.is_final:
+            return self
+        return type(self)(
+            self.noisetrf.make_final(x, max_depth-1),
+            self.gfactor.make_final(x, max_depth-1),
+        ).make_final(x, max_depth-1)
+
+    def xform(self, x):
+        noisetrf = self.noisetrf.make_final(x)
+        with ctx.returns(noisetrf, 'noise'):
+            noise = noisetrf(x)
+        with ctx.returns(self.gfactor, ['output', 'field']):
+            scalednoise, gfactor = self.gfactor(noise)
+        if isinstance(noisetrf, PerChannelTransform):
+            # FIXME this is messy -- hope this works in most cases
+            noisetrf = noisetrf.transforms[0]
+        scalednoisetrf = type(noisetrf)(scalednoise)
+        y = scalednoisetrf(x)
+        return prepare_output(
+            dict(input=x, output=y, noise=noise,
+                    scalednoise=scalednoise, gfactor=gfactor),
+            self.returns
+        )
+
+
 class GFactorTransform(NonFinalTransform):
 
-    class Final(NonFinalTransform):
-
-        def __init__(self, noisetrf, gfactor, **kwargs):
-            super().__init__(**kwargs)
-            self.noisetrf = noisetrf
-            self.gfactor = gfactor
-            self.Parent = GFactorTransform
-
-        @property
-        def is_final(self):
-            return self.noisetrf.is_final and self.gfactor.is_final
-
-        def make_final(self, x, max_depth=float('inf')):
-            if max_depth == 0 or self.is_final:
-                return self
-            return type(self)(
-                self.noisetrf.make_final(x, max_depth-1),
-                self.gfactor.make_final(x, max_depth-1),
-            ).make_final(x, max_depth-1)
-
-        def xform(self, x):
-            noisetrf = self.noisetrf.make_final(x)
-            with ctx.returns(noisetrf, 'noise'):
-                noise = noisetrf(x)
-            with ctx.returns(self.gfactor, ['output', 'field']):
-                scalednoise, gfactor = self.gfactor(noise)
-            if isinstance(noisetrf, PerChannelTransform):
-                # FIXME this is messy -- hope this works in most cases
-                noisetrf = noisetrf.transforms[0]
-            scalednoisetrf = type(noisetrf)(scalednoise)
-            y = scalednoisetrf(x)
-            return prepare_output(
-                dict(input=x, output=y, noise=noise,
-                     scalednoise=scalednoise, gfactor=gfactor),
-                self.returns
-            )
+    Final = GFactorFinalTransform
 
     def __init__(self, noise, shape=5, vmin=0.5, vmax=1.5, order=3,
                  *, shared=False, **kwargs):
@@ -297,21 +306,24 @@ class GFactorTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+class GammaNoiseFinalTransform(MulValueTransform):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, value_name='noise', **kwargs)
+        self.Parent = GammaNoiseTransform
+
+    @property
+    def noise(self):
+        return self.value
+
+    @noise.setter
+    def noise(self, value):
+        self.value = value
+
+
 class GammaNoiseTransform(NonFinalTransform):
     """Multiplicative Gamma noise"""
 
-    class Final(MulValueTransform):
-        def __init__(self, value, **kwargs):
-            super().__init__(value, value_name='noise', **kwargs)
-            self.Parent = GammaNoiseTransform
-
-        @property
-        def noise(self):
-            return self.value
-
-        @noise.setter
-        def noise(self, value):
-            self.value = value
+    Final = GammaNoiseFinalTransform
 
     def __init__(self, sigma=0.1, mean=1, *, shared=False, **kwargs):
         """

@@ -11,9 +11,14 @@ __all__ = [
     'RandomLowResSliceTransform',
 ]
 
+# stdlib
 import math
+
+# dependencies
+import torch
 from torch.nn.functional import interpolate
 
+# internals
 from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform
 from .baseutils import prepare_output
@@ -99,7 +104,12 @@ class LowResSliceTransform(NonFinalTransform):
             factor = [1] * ndim
             factor[self.axis] = 1/self.resolution
             ishape = x.shape[1:]
-            oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
+            oshape = [
+                (s*f).ceil().long().clamp_min(2).detach().item()
+                if torch.is_tensor(f) else
+                max(2, math.ceil(s*f))
+                for s, f in zip(ishape, factor)
+            ]
             y = interpol(y, oshape)
             if self.noise:
                 y = self.noise(y)
@@ -146,7 +156,12 @@ class LowResSliceTransform(NonFinalTransform):
             factor = [1] * (x.ndim-1)
             factor[self.axis] = 1/self.resolution
             ishape = x.shape[1:]
-            oshape = [max(2, math.ceil(s*f)) for s, f in zip(ishape, factor)]
+            oshape = [
+                (s*f).ceil().long().clamp_min(2).detach().item()
+                if torch.is_tensor(f) else
+                max(2, math.ceil(s*f))
+                for s, f in zip(ishape, factor)
+            ]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
             noise = self.noise.make_final(fake_x, max_depth-1)
 
@@ -245,9 +260,12 @@ class LowResTransform(NonFinalTransform):
 
             resolution = make_vector(self.resolution, ndim)
             y = smoothnd(x, fwhm=resolution)
-            factor = [1/r for r in resolution]
+            factor = resolution.reciprocal()
             ishape = x.shape[1:]
-            oshape = [math.ceil(s*f) for s, f in zip(ishape, factor)]
+            oshape = [
+                (s*f).ceil().long().detach().item()
+                for s, f in zip(ishape, factor)
+            ]
             y = interpol(y, oshape)
             if self.noise is not None:
                 y = self.noise(y)
@@ -280,8 +298,11 @@ class LowResTransform(NonFinalTransform):
         if self.noise:
             ndim = x.dim() - 1
             resolution = make_vector(self.resolution, ndim)
-            factor = [1/r for r in resolution]
-            oshape = [math.ceil(s*f) for s, f in zip(x.shape[1:], factor)]
+            factor = resolution.reciprocal()
+            oshape = [
+                (s*f).ceil().long().detach().item()
+                for s, f in zip(x.shape[1:], factor)
+            ]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
             noise = self.noise.make_final(fake_x, max_depth-1)
         return self.Final(
