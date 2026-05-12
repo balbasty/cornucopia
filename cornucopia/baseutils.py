@@ -1,4 +1,10 @@
+# stdlib
+from collections.abc import Mapping, Sequence
+
+# external
 import torch
+
+# internal
 from .utils.indexing import guess_shape
 from .utils.py import ensure_list
 
@@ -82,17 +88,17 @@ def prepare_output(results, returns):
     return Returned(results)
 
 
-def return_requires(returns):
+def return_requires(returns) -> set[str]:
     """Return all requires fields in a flat structure"""
     if returns is None:
-        return ['output']
+        return {'output'}
     returns = flatstruct(returns)
     if isinstance(returns, dict):
-        return list(returns.values())
-    elif isinstance(returns, (list, tuple)):
-        return list(returns)
+        return set(returns.values())
+    elif isinstance(returns, (list, tuple, set)):
+        return set(returns)
     else:
-        return [returns]
+        return {returns}
 
 
 def returns_find(flag, returned, returns):
@@ -104,7 +110,7 @@ def returns_find(flag, returned, returns):
             return None
     if isinstance(returns, dict):
         return returned.get(flag, None)
-    elif isinstance(returns, (list, tuple)):
+    elif isinstance(returns, (list, tuple, set)):
         if flag in returns:
             return returned[returns.index(flag)]
         else:
@@ -184,34 +190,281 @@ def flatstruct(x):
 
 
 class Arguments:
-    """Base class for returned arguments"""
-    pass
+    """Base class for wrapping arguments of a transform call.
+
+    No instance of this class are ever created. Instead, it returns
+    instances of one of its concrete subclasses:
+
+    - `NoArguments`: when no arguments are passed
+    - `Arg`: when a single argument is passed
+    - `Args`: when only positional arguments are passed
+    - `Kwargs`: when only keyword arguments are passed
+    - `ArgsAndKwargs`: when both positional and keyword arguments are passed
+    """
+
+    def __new__(cls, *args, **kwargs):
+        if cls is Arguments:
+            if not kwargs and len(args) == 1:
+                arg, = args
+                if not isinstance(arg, Arguments):
+                    arg = Arg(arg)
+                return arg
+            if args and kwargs:
+                return ArgsAndKwargs(*args, **kwargs)
+            elif args:
+                return Args(*args)
+            elif kwargs:
+                return Kwargs(**kwargs)
+            else:
+                return NoArguments()
+        return super().__new__(cls)
+
+    def __str__(self):
+        return repr(self)
+
+class NoArguments(Arguments):
+    """Wrapper when no arguments where passed."""
+
+    def __bool__(self):
+        return False
+
+    def __len__(self):
+        return 0
+
+    def __iter__(self):
+        return
+
+    def keys(self):
+        return set()
+
+    def values(self):
+        return set()
+
+    def items(self):
+        return set()
+
+    def unwrap(self):
+        return None
+
+    def to_args_kwargs(self):
+        return (), {}
+
+    def __repr__(self):
+        return "NoArguments()"
+
+
+class Arg(Arguments):
+    """Single argument"""
+
+    def __new__(cls, arg):
+        if cls is Arg:
+            if isinstance(arg, Arguments):
+                return arg
+            if isinstance(arg, Mapping):
+                return DictArg(arg)
+            if isinstance(arg, Sequence) and not isinstance(arg, str):
+                return TupleArg(arg)
+        return super().__new__(cls)
+
+    def __init__(self, arg):
+        if arg is self:
+            # This can happen when calling `Arg` on an `Arg`.
+            # Our `__new__` should return the input object instead of
+            # creating a new one, but because this object _is_ an instance
+            # of `Arg`, `__init__` is still called.
+            return
+        self.arg = arg
+
+    def unwrap(self):
+        return self.arg
+
+    def to_args_kwargs(self):
+        return (self.arg,), {}
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.arg!r})"
+
+
+class DictArg(Arg, Mapping):
+    """Single argument that is a mapping."""
+
+    def __len__(self):
+        return len(self.arg)
+
+    def __iter__(self):
+        return iter(self.arg)
+
+    def __getitem__(self, key):
+        return self.arg[key]
+
+
+class TupleArg(Arg, Sequence):
+    """Single argument that is a sequence."""
+
+    def __len__(self):
+        return len(self.arg)
+
+    def __getitem__(self, index):
+        return self.arg[index]
 
 
 class Args(tuple, Arguments):
-    """Tuple-like"""
-    pass
+    """Tuple of arguments: `*args`"""
+
+    def __init__(self, *args):
+        super().__init__(args)
+
+    def unwrap(self):
+        return tuple(self)
+
+    def to_args_kwargs(self):
+        return tuple(self), {}
+
+    def __repr__(self):
+        args = ", ".join(repr(a) for a in self)
+        return f"{self.__class__.__name__}({args})"
+
+    class Keys:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for i in range(len(self.parent)):
+                yield i
+
+        def __repr__(self):
+            return f"Keys({list(self)!r})"
+
+    class Values:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for a in self.parent:
+                yield a
+
+        def __repr__(self):
+            return f"Values({list(self)!r})"
+
+    class Items:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for i, a in enumerate(self.parent):
+                yield (i, a)
+
+        def __repr__(self):
+            return f"Items({list(self)!r})"
 
 
 class Kwargs(dict, Arguments):
     """Dict-like, except that unzipping works on values instead of keys"""
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def unwrap(self):
+        return dict(self)
+
+    def to_args_kwargs(self):
+        return (), dict(self)
+
+    def __repr__(self):
+        kwargs = ", ".join(f"{k}={v!r}" for k, v in self.items())
+        return f"{self.__class__.__name__}({kwargs})"
+
     def __iter__(self):
+        # Iterate across values instead of keys.
+        # This allows `Kwargs` to act like a tuple of values.
         for v in self.values():
             yield v
 
 
 class ArgsAndKwargs(Arguments):
     """Iterator across both args and kwargs"""
-    def __init__(self, args, kwargs):
-        self.args = Args(args)
-        self.kwargs = Kwargs(kwargs)
+
+    def __init__(self, *args, **kwargs):
+        self.args = Args(*args)
+        self.kwargs = Kwargs(**kwargs)
+
+    def to_args_kwargs(self):
+        return tuple(self.args), dict(self.kwargs)
+
+    def unwrap(self):
+        return self.to_args_kwargs()
+
+    def __repr__(self):
+        args = ", ".join(repr(a) for a in self.args)
+        kwargs = ", ".join(f"{k}={v!r}" for k, v in self.items())
+        args_kwargs = ", ".join([args, kwargs])
+        return f"{self.__class__.__name__}({args_kwargs})"
 
     def __iter__(self):
+        # Iterate across values of both args and kwargs, in that order.
+        # This allows `ArgsAndKwargs` to act like the concatenation of
+        # an `Args` and a `Kwargs`.
         for a in self.args:
             yield a
         for v in self.kwargs:
             yield v
+
+    def __len__(self):
+        return len(self.args) + len(self.kwargs)
+
+    def __getitem__(self, index):
+        if isinstance(index, int):
+            return self.args[index]
+        else:
+            return self.kwargs[index]
+
+    def keys(self):
+        return self.Keys(self)
+
+    def values(self):
+        return self.Values(self)
+
+    def items(self):
+        return self.Items(self)
+
+    class Keys:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for i in range(len(self.parent.args)):
+                yield i
+            for k in self.parent.kwargs.keys():
+                yield k
+
+        def __repr__(self):
+            return f"Keys({list(self)!r})"
+
+    class Values:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for a in self.parent.args:
+                yield a
+            for v in self.parent.kwargs.values():
+                yield v
+
+        def __repr__(self):
+            return f"Values({list(self)!r})"
+
+    class Items:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def __iter__(self):
+            for i, a in enumerate(self.parent.args):
+                yield (i, a)
+            for k, v in self.parent.kwargs.items():
+                yield (k, v)
+
+        def __repr__(self):
+            return f"Items({list(self)!r})"
 
 
 class Returned:
@@ -269,5 +522,4 @@ class VirtualTensor:
         )
 
 
-class unset:
-    pass
+UNSET = object()

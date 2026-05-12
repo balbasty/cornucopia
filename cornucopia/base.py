@@ -4,46 +4,58 @@ __all__ = [
     'NonFinalTransform',
     'SpecialMixin',
 ]
+# stdlib
+import inspect
+import random
+from abc import ABC, abstractmethod
+from typing import Callable, Dict, Iterator, List, Optional, Union
+from math import inf
+
+# external
 import torch
 from torch import nn
-import random
+from torch import Tensor
+
+# internal
 from .random import Sampler
 from .utils.py import ensure_list, cumsum
 from .baseutils import (
-    Args, Kwargs, ArgsAndKwargs, Returned, VirtualTensor,
-    get_first_element, prepare_output, unset, recursive_cat,
+    Arguments, Arg, Args, Kwargs, ArgsAndKwargs, NoArguments, Returned, VirtualTensor,
+    get_first_element, prepare_output, UNSET, recursive_cat,
 )
 
 
-class Transform(nn.Module):
-    """
-    Base class for all transforms
-    """
+class Transform(nn.Module, ABC):
+    """Base class for all transforms."""
 
-    def __init__(self, *,
-                 returns=None,
-                 append=False,
-                 prefix=True,
-                 include=None,
-                 exclude=None,
-                 ):
+    def __init__(
+        self, *,
+        returns: Union[str, List[str], Dict[str, str], None] = None,
+        append: bool = False,
+        prefix: Union[bool, str] = True,
+        include: Union[str, List[str], None] = None,
+        exclude: Union[str, List[str], None] = None,
+    ):
         """
         Parameters
         ----------
-        returns : [list or dict of] str
-            Which tensors to return.
+        returns : [list or dict of] str, optional
+            Which tensors to return. Can be a nested structure.
             Most transforms accept `'input'` and `'output'` as valid
-            returns.
-        append : bool
+            returns. The default is `'output'`.
+        append : bool, default=False
             Append the (structure of) returned tensors to the parent
             structure.
-        prefix : bool
-            If `append` and parent is a dict, prefix the child's key with
-            the parent key.
-        include : str or list[str]
-            List of keys to which the transform should apply
-        exclude : str or list[str]
-            List of keys to which the transform should not apply
+        prefix : bool or str, default=True
+            If `append` and parent is a dict, prefix the returned key
+            before inserting it in the output dictionary.
+            If `True`, the prefix is the input key.
+        include : str or list[str], optional
+            List of keys to which the transform should apply.
+            Default: all.
+        exclude : str or list[str], optional
+            List of keys to which the transform should not apply.
+            Default: none.
         """
         super().__init__()
         self.returns = returns
@@ -53,10 +65,12 @@ class Transform(nn.Module):
         self.exclude = ensure_list(exclude or tuple())
 
     @property
-    def is_final(self):
+    def is_final(self) -> bool:
+        """Whether the transform is final (i.e., deterministic) or not."""
         return False
 
-    def get_prm(self):
+    def get_prm(self) -> dict:
+        """Get the parameters of the transform, for use in subtransforms."""
         return dict(
             returns=self.returns,
             append=self.append,
@@ -65,43 +79,48 @@ class Transform(nn.Module):
             exclude=self.exclude,
         )
 
-    def __enter__(self):
+    def __enter__(self) -> "Transform":
+        # On most tranfsorms, this does nothing but return the transform
+        # itself. However, some subclasses use this to act as context
+        # managers that temporarily modify the transform's behavior.
+        # See: `IncludeKeysTransform` and `ExcludeKeysTransform`.
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         return False
 
-    def __add__(self, other):
+    def __add__(self, other: "Transform") -> "SequentialTransform":
         return SequentialTransform([self, other])
 
-    def __radd__(self, other):
+    def __radd__(self, other: "Transform") -> "SequentialTransform":
         return SequentialTransform([other, self])
 
-    def __iadd__(self, other):
+    def __iadd__(self, other: "Transform") -> "SequentialTransform":
         return SequentialTransform([self, other])
 
-    def __mul__(self, prob):
+    def __mul__(self, prob: float) -> "MaybeTransform":
         return MaybeTransform(self, prob)
 
-    def __rmul__(self, prob):
+    def __rmul__(self, prob: float) -> "MaybeTransform":
         return MaybeTransform(self, prob)
 
-    def __imul__(self, prob):
+    def __imul__(self, prob: float) -> "MaybeTransform":
         return MaybeTransform(self, prob)
 
-    def __or__(self, other):
+    def __or__(self, other: "Transform") -> "SwitchTransform":
         return SwitchTransform([self, other])
 
-    def __ior__(self, other):
+    def __ior__(self, other: "Transform") -> "SwitchTransform":
         return SwitchTransform([self, other])
 
     def __call__(self, *a, **k):
+        # Use the torch machinery, although `Returned` objects get unwrapped.
         out = super().__call__(*a, **k)
         if isinstance(out, Returned):
             out = out.obj
         return out
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         """Apply the transform recursively.
 
         Parameters
@@ -115,117 +134,281 @@ class Transform(nn.Module):
             Output tensors. with shape `(C, *shape)`
 
         """
-        if k:
-            return self.forward(ArgsAndKwargs(a, k) if a else Kwargs(k))
-        elif len(a) > 1:
-            return self.forward(Args(a))
-        elif not a:
+        # We wrap positional and keywork arguments in special classes
+        # to differentiate from inputs that are lists or dicts.
+        x = args = Arguments(*a, **k)
+
+        if not args:
+            # If no input arguments, return None.
+            # NOTE: Only `NoArguments()` reduces to `False`.
             return None
 
-        x = a[0]
-        intype = type(x)
+        # Arguments are passed to `_Forward.__init__` and `_Forward.__call__`.
+        # The former is preserved as is in the `_Forward` object, and passed
+        # to each `xform` or `make_final` call, while the latter is
+        # recursively unwrapped and processed by `_Forward.__call__`.
+        return self._Forward(self, args, **self.get_prm())(x)
 
-        def outtype(x):
-            return (ArgsAndKwargs(*x) if intype is ArgsAndKwargs
-                    else intype(x) if issubclass(intype, (Args, Kwargs))
-                    else x)
+    class _Forward:
 
-        if isinstance(x, ArgsAndKwargs):
-            x = [tuple(x.args), dict(x.kwargs)]
-        elif isinstance(x, Args):
-            x = tuple(x)
-        elif isinstance(x, Kwargs):
-            x = dict(x)
+        def __init__(self, transform, args: Arguments, **prm) -> None:
+            self.transform = transform
+            self.args = args
+            self.prm = prm
 
-        # not shared across images -> unfold
-        if isinstance(x, (list, tuple)):
-            return outtype(self._forward_list(x, self.forward))
-        if hasattr(x, 'items'):
-            x = self._forward_dict(x, self.forward)
-            if not isinstance(x, dict) and outtype in (Kwargs, ArgsAndKwargs):
-                return Args(x)
-            else:
-                return x
+        @property
+        def include(self) -> Optional[List[str]]:
+            return self.prm.get('include')
 
-        # now we're working with a single tensor (or str)
-        y = self.xform(x)
-        if not isinstance(y, Returned):
-            if not isinstance(y, type(self.returns)):
-                y = dict(input=x, output=y)
-                y = prepare_output(y, self.returns).obj
-            elif isinstance(self.returns, dict):
-                for key, target in self.returns.items():
-                    if target == 'input':
-                        y[key] = x
-            elif isinstance(self.returns, (list, tuple)):
-                for i, target in enumerate(self.returns):
-                    if target == 'input':
-                        y[i] = x
-            y = Returned(y)
-        return y
+        @property
+        def exclude(self) -> Optional[List[str]]:
+            return self.prm.get('exclude')
 
-    def _get_valid_keys(self, x):
-        valid_keys = x.keys()
-        if self.include is not None:
-            valid_keys = [k for k in valid_keys if k in self.include]
-        if self.exclude:
-            valid_keys = [k for k in valid_keys if k not in self.exclude]
-        return valid_keys
+        @property
+        def append(self) -> bool:
+            return self.prm.get('append', False)
 
-    def _forward_list(self, x: list, forward: callable = None):
-        """Apply forward pass to elements of a list"""
-        forward = forward or self.forward
-        y = []
-        for elem in x:
-            elem = forward(elem)
-            if isinstance(elem, Returned):
-                elem = elem.obj
-                if self.append:
-                    if isinstance(elem, dict):
-                        y.extend(elem.values())
-                        continue
-                    elif isinstance(elem, (list, tuple)):
-                        y.extend(elem)
-                        continue
-            y.append(elem)
-        return type(x)(y)
+        @property
+        def prefix(self) -> Union[bool, str]:
+            return self.prm.get('prefix', True)
 
-    def _forward_dict(self, x: dict, forward: callable = None):
-        """Apply forward pass to elements of a dict"""
-        forward = forward or self.forward
-        valid_keys = self._get_valid_keys(x)
-        y = {key: value for key, value in x.items() if key not in valid_keys}
-        for key, value in x.items():
-            if key not in valid_keys:
-                continue
-            value = forward(value)
-            if isinstance(value, Returned):
-                value = value.obj
-                if self.append:
-                    if isinstance(y, dict) and isinstance(value, dict):
-                        if self.prefix:
-                            value = {
-                                key + '_' + child_key: child_value
-                                for child_key, child_value in value.items()
-                            }
-                        y.update(value)
-                        continue
-                    elif isinstance(y, list) and isinstance(value, dict):
-                        y.extend(value.values())
-                        continue
-                    elif isinstance(y, dict):
-                        y = list(y.values())
+        @property
+        def returns(self) -> Optional[Union[str, List[str], Dict[str, str]]]:
+            return self.prm.get('returns')
+
+        def __call__(self, x: Union[Tensor, List, Dict, Arguments]):
+            if isinstance(x, NoArguments):
+                return None
+
+            # At this point, there is a single positional argument
+            # (which may be an Args, Kwargs, or ArgsAndKwargs object)
+            # and no keyword arguments. We save the original input type
+            # to be able to return the same kind of `Parameters` object.
+            intype = type(x)
+
+            # If the input is an `Arguments` object, convert it to list/dict
+            if isinstance(x, Arguments):
+                x = x.unwrap()
+
+            def outtype(x):
+                # Convert back to the original input type if needed
+                if intype is ArgsAndKwargs:
+                    args, kwargs = x
+                elif intype is Args:
+                    args, kwargs = x, {}
+                elif intype is Kwargs:
+                    args, kwargs = (), x
+                else:
+                    return x
+                return Arguments(*args, **kwargs)
+
+            # Not shared across tensors -> unfold
+            if isinstance(x, (list, tuple)):
+                return outtype(self._forward_list(x))
+
+            if hasattr(x, 'items'):
+                x = self._forward_dict(x)
+                if not isinstance(x, dict) and intype in (Kwargs, ArgsAndKwargs):
+                    return Args(*x)
+                else:
+                    return outtype(x)
+
+            # ---- Now we're working with a single tensor (or str) ----
+
+            # Ensure that the transform is final
+            transform = self.transform.safe_make_final(x, args=self.args)
+
+            # Apply the tranform to the input tensor
+            y = transform.safe_xform(x, args=self.args)
+
+            # Most transforms return a well-formatted `Returned` object,
+            # which contain all possible outputs of a transform, mapped
+            # into a structure specified by the `returns` argument.
+            if not isinstance(y, Returned):
+                # When they do not, we have to build the `Returned`
+                # object ourselves.
+                if not isinstance(y, type(self.returns)):
+                    # The transform returned a single output (likely a
+                    # tensor), which we assign to the `output` key,
+                    # while the input is assigned to the `input` key.
+                    y = dict(input=x, output=y)
+                    y = prepare_output(y, self.returns).obj
+                else:
+                    # `returns` and `y` have the same type, but `y` may
+                    # have been obtained from a subtransform. We cannot
+                    # guarantee that the keys of `y` are the same as
+                    # those of `returns`, but we can insert the correct
+                    # `input` tensor, it it was requested.
+                    # NOTE: we cannot break early once `"input"` is
+                    # encountered, because multiple outputs elements can
+                    # contain the same target
+                    # (e.g. `returns=['input', 'input']`).
+                    if isinstance(self.returns, dict):
+                        for key, target in self.returns.items():
+                            if target == 'input':
+                                y[key] = x
+                    elif isinstance(self.returns, (list, tuple)):
+                        for i, target in enumerate(self.returns):
+                            if target == 'input':
+                                y[i] = x
+                # Wrap output in a `Returned` object, so that helpers
+                # know how to handle it (e.g. when `append=True`).
+                y = Returned(y)
+
+            # ---- Now we're working with a `Returned` object ----
+            return y
+
+        def _get_valid_keys(self, x: Dict[str, str]) -> List[str]:
+            valid_keys = x.keys()
+            if self.include is not None:
+                valid_keys = [k for k in valid_keys if k in self.include]
+            if self.exclude:
+                valid_keys = [k for k in valid_keys if k not in self.exclude]
+            return valid_keys
+
+        def _forward_list(
+            self, x: list, forward: Optional[Callable] = None
+        ) -> list:
+            """Apply forward pass to elements of a list"""
+            forward = forward or self
+            y = []
+            for elem in x:
+                elem = forward(elem)
+                if isinstance(elem, Returned):
+                    elem = elem.obj
+                    if self.append:
+                        if isinstance(elem, dict):
+                            y.extend(elem.values())
+                            continue
+                        elif isinstance(elem, (list, tuple)):
+                            y.extend(elem)
+                            continue
+                y.append(elem)
+            return type(x)(y)
+
+        def _forward_dict(
+            self, x: dict, forward: Optional[Callable] = None
+        ) -> Union[dict, list]:
+            """Apply forward pass to elements of a dict"""
+            forward = forward or self
+            valid_keys = self._get_valid_keys(x)
+
+            # Initialise output dictionary with input keys and values
+            # that *will not* be transformed so that they are preserved.
+            y = {key: value for key, value in x.items() if key not in valid_keys}
+
+            # For each input item, apply the transform and save its outputs
+            for key, value in x.items():
+                if key not in valid_keys:
+                    continue
+
+                # Compute prefix
+                prefix = self.prefix
+                if prefix and not isinstance(self.prefix, str):
+                    prefix = key
+
+                # Apply transform to input value
+                value = forward(value)
+
+                # Deal with returned values.
+                if isinstance(value, Returned):
+                    value = value.obj
+
+                    if self.append:
+
+                        if isinstance(y, dict) and isinstance(value, dict):
+                            # Insert the returned values in the output dictionary,
+                            # using a new key, so that the input value is preserved.
+                            if prefix:
+                                value = {
+                                    prefix + '.' + child_key: child_value
+                                    for child_key, child_value in value.items()
+                                }
+                            y.update(value)
+                            continue
+
+                        if isinstance(y, dict):
+                            # The transform did not return a dictionary, so
+                            # we cannot insert its values in the output dict.
+                            # We transform it into a list and append the
+                            # returned values to it.
+                            y = list(y.values())
+
                         if isinstance(value, (list, tuple)):
+                            # Append the returned values to the output list.
                             y.extend(value)
                             continue
+
+                        if isinstance(value, dict):
+                            # The output dictionary was previously transformed
+                            # into a list, so we cannot insert the returned
+                            # (key, value) pairs. We append the values instead.
+                            y.extend(value.values())
+                            continue
+
+                # We insert the returned value (whether it is a single tensor,
+                # or a nested strucutre of tensors) it in the output dictionary,
+                # in place of the input value.
+                if isinstance(y, dict):
+                    y[key] = value
+                else:
+                    y.append(value)
+
             if isinstance(y, dict):
-                y[key] = value
+                return type(x)(y)
             else:
-                y.append(value)
-        if isinstance(y, dict):
-            return type(x)(y)
+                return y
+
+    def safe_xform(
+        self, x: Tensor, /,
+        args: Arguments = NoArguments(),
+    ) -> Returned:
+        # Wrapper that calls `xform`, but only passes `args` if the
+        # `xform` method accepts it, to avoid errors with legacy `xform`.
+        if 'args' in inspect.signature(self.xform).parameters:
+            return self.xform(x, args=args)
         else:
-            return y
+            return self.xform(x)
+
+    def safe_make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> Returned:
+        # Wrapper that calls `make_final`, but only passes `args` if the
+        # `make_final` method accepts it.
+        if 'args' in inspect.signature(self.make_final).parameters:
+            return self.make_final(x, max_depth, args=args)
+        else:
+            return self.make_final(x, max_depth)
+
+    @abstractmethod
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> "Transform":
+        """
+        Generate a final (i.e., deterministic) version of the transform.
+
+        Parameters
+        ----------
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
+        max_depth : int | {inf}
+            Maximum depth to apply `make_final` recursively.
+            If not `inf`, the resulting transform may not be fully final.
+            Default: no limit.
+        args: Arguments, optional
+            The original inputs arguments to the transform, in case
+            they are needed.
+
+        Returns
+        -------
+        Transform
+            A final version of the transform.
+        """
+        return NotImplemented
 
 
 class FinalTransform(Transform):
@@ -233,31 +416,39 @@ class FinalTransform(Transform):
     Mixin for determinstic transforms.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
     @property
-    def is_final(self):
+    def is_final(self) -> bool:
         return True
 
-    def xform(self, x):
+    @abstractmethod
+    def xform(
+        self, x: Tensor, /,
+        args: Arguments = NoArguments(),
+    ) -> Returned:
         """Apply the transform to a tensor
 
         Parameters
         ----------
         x : (C_inp, *spatial_inp) tensor
+            A single input tensor
+        args: Arguments, optional
+            The original inputs arguments to the transform, in case
+            they are needed.
 
         Returns
         -------
-        y : (C_out, *spatial_out) tensor
-        """
-        raise NotImplementedError()
+        y : Returned | (C_out, *spatial_out) tensor
+            A single output tensor, or a `Returned` object containing
+            multiple output tensors and their corresponding keys.
 
-    def make_inverse(self):
+        """
+        raise NotImplemented
+
+    def make_inverse(self) -> "FinalTransform":
         """Generate the inverse transform"""
         return IdentityTransform()
 
-    def inverse(self, *a, **k):
+    def inverse(self, *a, **k) -> "FinalTransform":
         """Apply the inverse transform recursively
 
         Parameters
@@ -273,20 +464,23 @@ class FinalTransform(Transform):
         """
         return self.make_inverse()(*a, **k)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> "FinalTransform":
         return self
 
 
 class IdentityTransform(FinalTransform):
     """Identity transform"""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def xform(
+        self, x: Tensor, /, args: Arguments = NoArguments()
+    ) -> Returned:
+        return prepare_output(dict(input=x, output=x), self.returns)
 
-    def xform(self, x):
-        return x
-
-    def make_inverse(self):
+    def make_inverse(self) -> "IdentityTransform":
         return self
 
 
@@ -305,35 +499,58 @@ class SharedMixin:
             shared = ''
         return shared
 
-    def xform(self, x):
+    def xform(
+        self, x: Tensor, /, args: Arguments = NoArguments(),
+    ) -> Returned:
+        template = x
         if 'channels' in self.shared:
-            xform = self.make_final(x[:1], max_depth=1)
-        else:
-            xform = self.make_final(x, max_depth=1)
-        return xform.xform(x)
+            # Use the first channel only to compute the final transform
+            template = template[:1]
+        # Compute the next form of this transform
+        # NOTE: we do not use `max_depth=inf` because the `shared` option
+        # may differ across transformations in the hierarchy. For example,
+        # the top-level parameters of a transformation may be shared
+        # (e.g., the number of control points in a bias field), but not
+        # the lower level ones (e.g., the values of the control points).
+        transformation = self.safe_make_final(template, 1, args=args)
+        # Apply the final transform to all channels
+        # FIXME: there cannot be an `xform` if the transformation is not
+        # final, so I am not quite sure about the logic with `max_depth=1`
+        # above.
+        return transformation.safe_xform(x)
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         return self._shared_forward(*a, **k)
 
-    def _shared_forward(self, *a, _fallback=None, **k):
+    def _shared_forward(self, *a, _fallback=None, **k) -> Returned:
         _fallback = _fallback or super().forward
-        if 'tensors' in self.shared:
+        args = Arguments(*a, **k)
+        a, k = args.to_args_kwargs()
+        if 'tensors' in self.shared and (len(a) + len(k) > 1):
+            # Get the first valid tensor across all inputs, and use it
+            # as the template to compute the final transform.
             first_tensor = get_first_element(
                 [a, k], include=self.include, exclude=self.exclude)
             if 'channels' in self.shared:
-                transform = self.make_final(first_tensor[:1], max_depth=1)
-            else:
-                transform = self.make_final(first_tensor, max_depth=1)
+                # Get the first channel only, to compute the final transform.
+                first_tensor = first_tensor[:1]
+            transform = self.safe_make_final(first_tensor, 1, args=args)
             return transform(*a, **k)
+        # Else, we let `xform` deal with shared parameters across channels.
         return _fallback(*a, **k)
 
-    def make_per_channel(self, x, max_depth=float('inf'), *args, **kwargs):
+    def make_per_channel(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments(),
+        **kwargs
+    ) -> "PerChannelTransform":
         prm = dict(self.get_prm())
         prm.pop('shared', None)
         return PerChannelTransform([
-            self.make_final(x[i:i+1], max_depth, *args, **kwargs)
+            self.safe_make_final(x[i:i+1], max_depth, args=args, **kwargs)
             for i in range(len(x))
-        ], **prm).make_final(x, max_depth-1)
+        ], **prm).safe_make_final(x, max_depth-1)
 
 
 class NonFinalTransform(SharedMixin, Transform):
@@ -355,24 +572,29 @@ class NonFinalTransform(SharedMixin, Transform):
         - '' or False: A different transform is applied to each
             channel and each tensor.
     """
-    def __init__(self, *, shared=False, **kwargs):
+    def __init__(self, *, shared: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self,
+        x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> Transform:
         if self.is_final or max_depth == 0:
             return self
-        return NotImplemented
+        raise NotImplementedError()
 
 
 class SpecialMixin:
     """Mixin for special transforms (i.e. transforms of transforms)"""
 
-    def make_inverse(self):
+    def make_inverse(self) -> Transform:
         """Generate the inverse transform"""
         return IdentityTransform()
 
-    def inverse(self, *a, **k):
+    def inverse(self, *a, **k) -> Returned:
         """Apply the inverse transform recursively
 
         Parameters
@@ -388,10 +610,14 @@ class SpecialMixin:
         """
         return self.make_inverse()(*a, **k)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> Transform:
         if x.is_final or max_depth == 0:
             return self
-        return NotImplemented
+        raise NotImplementedError()
 
 
 class SequentialTransform(SpecialMixin, SharedMixin, Transform):
@@ -414,7 +640,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
 
     """
 
-    def __init__(self, transforms, **kwargs):
+    def __init__(self, transforms: List[Transform], **kwargs) -> None:
         """
         Parameters
         ----------
@@ -444,7 +670,11 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         self.shared = self._prepare_shared(shared)
         self.transforms = transforms
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         if self.is_final:
@@ -452,40 +682,34 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         # x = VirtualTensor.from_any(x, compute_stats=True)
         trf = []
         for t in self:
-            t = t.make_final(x, max_depth=max_depth-1)
+            t = t.safe_make_final(x, max_depth=max_depth-1, args=args)
             x = t(x)
+            args = Arguments(x)
             trf.append(t)
         trf = SequentialTransform(trf, **self.get_prm())
         return trf
 
     @property
-    def is_final(self):
+    def is_final(self) -> bool:
         return all(t.is_final for t in self)
 
-    def make_inverse(self):
+    def make_inverse(self) -> Transform:
         return SequentialTransform([t.make_inverse() for t in self])
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         return self._shared_forward(*a, **k, _fallback=self._forward_impl)
 
     def _forward_impl(self, *args, **kwargs):
-        if kwargs and args:
-            x = ArgsAndKwargs(args, kwargs)
-        elif kwargs:
-            x = Kwargs(kwargs)
-        elif len(args) > 1:
-            x = Args(args)
-        elif args:
-            x = args[0]
-        else:
-            return None
+        x = Arguments(*args, **kwargs)
         for trf in self:
             with IncludeKeysTransform(trf, self.include), \
                  ExcludeKeysTransform(trf, self.exclude):
                 x = trf(x)
         return x
 
-    def xform(self, x):
+    def xform(
+        self, x: Tensor, /, args: Arguments = NoArguments()
+    ) -> Returned:
         # This should only be called when a Layer's `make_final` returns
         # a `SequentialTransform`` (i.e., it is created implictly under
         # the hood, not explicitly by the user).
@@ -496,27 +720,27 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         #   what happens if there's weird stuff in returns/include/exclude?
         return self(x)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.transforms)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Transform]:
         for t in self.transforms:
             yield t
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: Union[int, slice]) -> Transform:
         if isinstance(item, slice):
             return SequentialTransform(self.transforms[item])
         else:
             return self.transforms[item]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'{type(self).__name__}({repr(self.transforms)})'
 
 
 class PerChannelTransform(SpecialMixin, Transform):
     """Apply a different transform to each channel"""
 
-    def __init__(self, transforms, **kwargs):
+    def __init__(self, transforms: List[Transform], **kwargs) -> None:
         """
         Parameters
         ----------
@@ -526,29 +750,37 @@ class PerChannelTransform(SpecialMixin, Transform):
         super().__init__(**kwargs)
         self.transforms = transforms
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         trf = []
         for i, t in enumerate(self.transforms):
-            t = t.make_final(x[i:i+1], max_depth=max_depth-1)
+            t = t.safe_make_final(x[i:i+1], max_depth-1, args=args)
             trf.append(t)
         prm = dict(self.get_prm())
         prm.pop('shared', None)
         trf = PerChannelTransform(trf, **prm)
         return trf
 
-    def xform(self, x):
+    def xform(
+        self, x: Tensor, /, args: Arguments = NoArguments()
+    ) -> Returned:
         results = []
         for i, t in enumerate(self.transforms):
-            with ReturningTransform(t, self.returns), \
-                 IncludeKeysTransform(t, self.include), \
-                 ExcludeKeysTransform(t, self.exclude):
+            with (
+                ReturningTransform(t, self.returns),
+                IncludeKeysTransform(t, self.include),
+                ExcludeKeysTransform(t, self.exclude)
+            ):
                 results.append(t(x[i:i+1]))
         return Returned(recursive_cat(results))
 
     @property
-    def is_final(self):
+    def is_final(self) -> bool:
         return all(t.is_final for t in self.transforms)
 
 
@@ -573,7 +805,14 @@ class MaybeTransform(SpecialMixin, SharedMixin, Transform):
     !!! changedin "![v0.4](https://img.shields.io/badge/v0.4-yellow) \
                    Default for `shared` changed from `False` to `True`"
     """
-    def __init__(self, transform, prob=0.5, *, shared=True, **kwargs):
+    def __init__(
+        self,
+        transform: Transform,
+        prob: float = 0.5,
+        *,
+        shared: bool = True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -590,21 +829,27 @@ class MaybeTransform(SpecialMixin, SharedMixin, Transform):
         self.subtransform = transform
         self.prob = prob
 
-    def throw_dice(self):
+    def throw_dice(self) -> bool:
         return random.random() > 1 - self.prob
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         if self.throw_dice():
             trf = self.subtransform
-            with IncludeKeysTransform(trf, self.include), \
-                 ExcludeKeysTransform(trf, self.exclude):
-                return trf.make_final(x, max_depth=max_depth-1)
+            with (
+                IncludeKeysTransform(trf, self.include),
+                ExcludeKeysTransform(trf, self.exclude)
+            ):
+                return trf.safe_make_final(x, max_depth-1, args=args)
         else:
             return IdentityTransform()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         s = f'{repr(self.subtransform)}?'
         if self.prob != 0.5:
             s += f'[{self.prob}]'
@@ -637,7 +882,14 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
                    Default for `shared` changed from `False` to `True`"
     """
 
-    def __init__(self, transforms, prob=0, *, shared=True, **kwargs):
+    def __init__(
+        self,
+        transforms: List[Transform],
+        prob: Union[float, List[float]] = 0,
+        *,
+        shared: bool = True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -652,11 +904,9 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
         self.transforms = list(transforms)
-        if not prob:
-            prob = []
-        self.prob = prob
+        self.prob = prob or []
 
-    def _make_prob(self):
+    def _make_prob(self) -> List[float]:
         prob = ensure_list(self.prob, len(self.transforms), default=0)
         sumprob = sum(prob)
         if not sumprob:
@@ -665,7 +915,7 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
             prob = [x / sumprob for x in prob]
         return prob
 
-    def throw_dice(self):
+    def throw_dice(self) -> int:
         prob = cumsum(self._make_prob())
         dice = random.random()
         for k in range(len(self.transforms)):
@@ -673,31 +923,39 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
                 return k
         return len(self.transforms) - 1
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         t = self.transforms[self.throw_dice()]
-        t = t.make_final(x, max_depth=max_depth-1)
-        with IncludeKeysTransform(t, self.include), \
-             ExcludeKeysTransform(t, self.exclude):
+        t = t.safe_make_final(x, max_depth-1, args=args)
+        with (
+            IncludeKeysTransform(t, self.include),
+            ExcludeKeysTransform(t, self.exclude)
+        ):
             return t
 
-    def __or__(self, other):
-        if isinstance(other, SwitchTransform) \
-                and not self.prob and not other.prob:
+    def __or__(self, other: Transform) -> "SwitchTransform":
+        if (isinstance(other, SwitchTransform)
+            and not self.prob and not other.prob
+        ):
             return SwitchTransform([*self.transforms, *other.transforms])
         else:
             return SwitchTransform([self, other])
 
-    def __ior__(self, other):
-        if isinstance(other, SwitchTransform) \
-                and not self.prob and not other.prob:
+    def __ior__(self, other: Transform) -> "SwitchTransform":
+        if (isinstance(other, SwitchTransform)
+            and not self.prob and not other.prob
+        ):
             self.transforms.append(other.transforms)
             return self
         else:
             return SwitchTransform([self, other])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.prob:
             prob = self._make_prob()
             s = [f'{p} * {str(t)}' for p, t in zip(prob, self.transforms)]
@@ -706,12 +964,6 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
         s = ' | '.join(s)
         s = f'({s})'
         return s
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return False
 
 
 class IncludeKeysTransform(SpecialMixin, Transform):
@@ -747,7 +999,12 @@ class IncludeKeysTransform(SpecialMixin, Transform):
         ```
     """
 
-    def __init__(self, transform, keys, union=True):
+    def __init__(
+        self,
+        transform: Transform,
+        keys: Union[List[str], str],
+        union: bool = True
+    ) -> None:
         """
         Parameters
         ----------
@@ -765,25 +1022,29 @@ class IncludeKeysTransform(SpecialMixin, Transform):
         self.keys = list(keys) if keys else keys
         self.union = union
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         with self as transform:
             return transform.forward(*a, **k)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         with self as trf:
-            final_trf = trf.make_final(x, max_depth)
+            final_trf = trf.safe_make_final(x, max_depth, args=args)
             with IncludeKeysTransform(final_trf) as final_final_trf:
                 return final_final_trf
 
-    def make_inverse(self):
+    def make_inverse(self) -> Transform:
         with self as trf:
-            inv_trf = trf.make_inverse()
+            inv_trf = trf.safe_make_inverse()
             with IncludeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
-    def __enter__(self):
+    def __enter__(self) -> Transform:
         self.include = self.transform.include
         self.transform.include = self.keys
         if self.union and self.include is not None:
@@ -794,7 +1055,7 @@ class IncludeKeysTransform(SpecialMixin, Transform):
                 self.transform.include = self.include
         return self.transform
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.transform.include = self.include
         delattr(self, 'include')
 
@@ -833,7 +1094,12 @@ class ExcludeKeysTransform(SpecialMixin, Transform):
         ```
     """
 
-    def __init__(self, transform, keys, union=True):
+    def __init__(
+        self,
+        transform: Transform,
+        keys: Union[List[str], str],
+        union: bool = True
+    ) -> None:
         """
         Parameters
         ----------
@@ -851,25 +1117,29 @@ class ExcludeKeysTransform(SpecialMixin, Transform):
         self.keys = list(keys) if keys else keys
         self.union = union
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         with self as transform:
             return transform.forward(*a, **k)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         with self as trf:
-            final_trf = trf.make_final(x, max_depth)
+            final_trf = trf.safe_make_final(x, max_depth, args=args)
             with ExcludeKeysTransform(final_trf) as final_final_trf:
                 return final_final_trf
 
-    def make_inverse(self):
+    def make_inverse(self) -> Transform:
         with self as trf:
             inv_trf = trf.make_inverse()
             with ExcludeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
-    def __enter__(self):
+    def __enter__(self) -> Transform:
         self.exclude = self.transform.exclude
         self.transform.exclude = self.keys
         if self.union and self.exclude:
@@ -880,7 +1150,7 @@ class ExcludeKeysTransform(SpecialMixin, Transform):
                 self.transform.exclude = self.exclude
         return self.transform
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.transform.exclude = self.exclude
         delattr(self, 'exclude')
 
@@ -898,7 +1168,9 @@ class SharedTransform(SpecialMixin, SharedMixin, Transform):
         ```
     """
 
-    def __init__(self, transform, mode=unset):
+    def __init__(
+        self, transform: Transform, mode: Union[str, bool] = UNSET
+    ) -> None:
         """
         Parameters
         ----------
@@ -921,18 +1193,18 @@ class SharedTransform(SpecialMixin, SharedMixin, Transform):
         self.transform = transform
         self.mode = mode
 
-    def forward(self, *a, **k):
+    def forward(self, *a, **k) -> Returned:
         with self as transform:
             return transform.forward(*a, **k)
 
-    def __enter__(self):
+    def __enter__(self) -> Transform:
         self.hasattr = hasattr(self.transform, 'shared')
         self.saved_mode = getattr(self.transform, 'shared', None)
-        if self.mode is not unset:
+        if self.mode is not UNSET:
             self.transform.shared = self.mode
         return self.transform
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self.hasattr:
             self.transform.shared = self.saved_mode
         elif hasattr(self.transform, 'shared'):
@@ -953,17 +1225,21 @@ class ReturningTransform(SpecialMixin, Transform):
         ```
     """
 
-    def __init__(self, transform, returns=None):
+    def __init__(
+        self,
+        transform: Transform,
+        returns: Union[str, List[str], Dict[str, str], None] = None
+    ) -> None:
         super().__init__()
         self.transform = transform
         self.returns = returns
 
-    def __enter__(self):
+    def __enter__(self) -> Transform:
         self.saved_returns = self.transform.returns
         self.transform.returns = self.returns
         return self.transform
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.transform.returns = self.saved_returns
         delattr(self, 'saved_returns')
 
@@ -993,7 +1269,13 @@ class MappedTransform(SpecialMixin, Transform):
 
     """
 
-    def __init__(self, *mapargs, nested=False, default=None, **mapkwargs):
+    def __init__(
+        self,
+        *mapargs,
+        nested: bool = False,
+        default: Optional[Transform] = None,
+        **mapkwargs
+    ) -> None:
         """
 
         Parameters
@@ -1022,57 +1304,55 @@ class MappedTransform(SpecialMixin, Transform):
                 'Cannot have both `nested` and positional transforms'
             )
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, **kwargs) -> Returned:
+
         if self.include is not None or self.exclude:
-            def wrap(f):
+            def wrap(f: Callable) -> Callable:
+                if not f:
+                    return f
                 def ff(*a, **k):
                     with IncludeKeysTransform(f, self.include), \
                          ExcludeKeysTransform(f, self.exclude):
                         return f(*a, **k)
                 return ff
         else:
-            def wrap(f):
+            def wrap(f: Callable) -> Callable:
                 return f
 
-        if args:
-            a0 = args[0]
-            if isinstance(a0, Args):
-                return self.forward(*a0)
-            if isinstance(a0, Kwargs):
-                return self.forward(**a0)
-            if isinstance(a0, ArgsAndKwargs):
-                return self.forward(*a0.args, **a0.kwargs)
+        # If the input is a wrapped `Arguments`, unwrap it and recurse.
+        arguments = Arguments(*args, **kwargs)
+        if not arguments:
+            return None
+        args, kwargs = arguments.to_args_kwargs()
 
         def default(x):
+            # Default transform to apply if nothing is mapped.
             if torch.is_tensor(x):
                 return self.default(x) if self.default else x
             else:
                 return self.forward(x) if self.nested else x
 
         if args:
-            mapargs = tuple(wrap(f) if f else None for f in self.mapargs)
+            # Apply each transform to its corresponding positional argument
+            mapargs = tuple(wrap(f) for f in self.mapargs)
             mapargs += (default,) * max(0, len(args) - len(mapargs))
             args = tuple(f(a) if f else a for f, a in zip(mapargs, args))
 
         if kwargs:
-            mapkwargs = {k: wrap(f) if f else None
-                         for k, f in self.mapkwargs.items()}
+            # Apply each transform to its corresponding keyword argument
+            mapkwargs = {k: wrap(f) for k, f in self.mapkwargs.items()}
 
             def func(key):
                 return mapkwargs.get(key, default) or (lambda x: x)
 
             kwargs = {key: func(key)(value) for key, value in kwargs.items()}
 
-        if args and kwargs:
-            return ArgsAndKwargs(args, kwargs)
-        elif kwargs:
-            return Kwargs(kwargs)
-        elif len(args) > 1:
-            return Args(args)
-        else:
-            return args[0]
+        # If more than a single input argument, wrap them in `Arguments`
+        if kwargs or len(args) > 1:
+            return Arguments(*args, **kwargs)
+        return args[0]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         s = []
         for v in self.mapargs:
             s += [f'{v}']
@@ -1108,22 +1388,29 @@ class RandomizedTransform(NonFinalTransform):
 
     class Delayed:
         # Temproary parameter holder for delayed calls
-        def __init__(self, transform, **kwargs):
+        def __init__(self, transform: Transform, **kwargs) -> None:
             self.transform = transform
             self.kwargs = kwargs
 
-        def __call__(self, *args, **kwargs):
+        def __call__(self, *args, **kwargs) -> "RandomizedTransform":
             return RandomizedTransform(
                 self.transform, args, kwargs, **self.kwargs)
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args, **kwargs) -> "RandomizedTransform":
         if cls is RandomizedTransform:
             return cls._base_new(*args, **kwargs)
         return super().__new__(cls)
 
     @classmethod
-    def _base_new(cls, transform, sample=tuple(), ksample=dict(),
-                  *, shared=False, **kwargs):
+    def _base_new(
+        cls,
+        transform: Transform,
+        sample: tuple = tuple(),
+        ksample: dict = dict(),
+        *,
+        shared: Union[bool, str] = False,
+        **kwargs
+    ) -> "RandomizedTransform":
         assert cls is RandomizedTransform
         if not sample and not ksample:
             # If no arguments are passed, it means that the user calls
@@ -1135,8 +1422,15 @@ class RandomizedTransform(NonFinalTransform):
         # randomized object.
         return super().__new__(cls)
 
-    def __init__(self, transform, sample=tuple(), ksample=dict(),
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        transform: Transform,
+        sample: tuple = tuple(),
+        ksample: dict = dict(),
+        *,
+        shared: Union[bool, str] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -1158,11 +1452,15 @@ class RandomizedTransform(NonFinalTransform):
         self.ksample = ksample
         self.subtransform = transform
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments()
+    ) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
-            return self.make_per_channel(x, max_depth)
+            return self.make_per_channel(x, max_depth, args=args)
         args = []
         kwargs = {}
         if isinstance(self.sample, (list, tuple)):
@@ -1177,10 +1475,10 @@ class RandomizedTransform(NonFinalTransform):
             kwargs.update({k: f() if isinstance(f, Sampler) else f
                            for k, f in self.ksample.items()})
         xform = self.subtransform(*args, **kwargs)
-        xform = xform.make_final(x, max_depth-1)
+        xform = xform.safe_make_final(x, max_depth-1, args=args)
         return xform
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if type(self) is RandomizedTransform:
             xform = self.subtransform
             if isinstance(xform, type) and issubclass(xform, Transform):
