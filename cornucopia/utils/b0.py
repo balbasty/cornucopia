@@ -7,10 +7,15 @@ __all__ = [
     'spherical_harmonics',
     'yield_spherical_harmonics',
 ]
-import torch
-from torch import fft
+# stdlib
 import math
 import itertools
+
+# external
+import torch
+from torch import fft
+
+# internal
 from .warps import identity as identity_grid, cartesian_grid
 from .py import prod, make_vector
 from .smart_inplace import mul_, div_
@@ -163,7 +168,7 @@ def ppm_to_hz(fmap, b0=3, freq=42.576E6):
 
 
 def chi_to_fieldmap(
-        ds, zdim=-1, dim=None, s0=mr_chi['air'],
+        ds, zaxis=-1, ndim=None, s0=mr_chi['air'],
         s1=mr_chi['water'] - mr_chi['air'], vx=1):
     """Generate a MR fieldmap from a MR susceptibility map.
 
@@ -173,9 +178,14 @@ def chi_to_fieldmap(
         Susceptibility delta map (delta from air susceptibility) in ppm.
         If bool, `s1` will be used to set the value inside the mask.
         If float, should contain quantitative delta values in ppm.
-    zdim : int, default=-1
-        Dimension of the main magnetic field.
-    dim : int, default=ds.dim()
+    zaxis : int | sequence[float], default=-1
+        Direction of the main magnetic field.
+        If a vector or floats, it is unit vector that encodes the direction
+        of the main magnetic field in the "scaled voxel" coordinate systems.
+        If an int, the main magnetic field is assumed to be aligned
+        with one of the dimensions of the voxel grid, and `zaxis` is the
+        index of this dimension. I.e., `0` is equivalent to `[1, 0, 0]`.
+    ndim : int, default=`ds.ndim`
         Number of spatial dimensions.
     s0 : float, default=0.4
         Susceptibility of air (ppm)
@@ -204,11 +214,11 @@ def chi_to_fieldmap(
     if ds.dtype is torch.bool:
         backend['dtype'] = torch.get_default_dtype()
 
-    dim = dim or ds.dim()
-    shape = ds.shape[-dim:]
-    zdim = zdim - ds.dim() if zdim >= 0 else zdim
+    ndim = ndim or ds.ndim
+    shape = ds.shape[-ndim:]
+    zaxis = zaxis - ds.ndim if zaxis >= 0 else zaxis
     # ^ number from end so that we can apply to vx
-    vx = make_vector(vx, dim)
+    vx = make_vector(vx, ndim)
 
     if ds.dtype is torch.bool:
         ds = ds.to(**backend)
@@ -219,7 +229,7 @@ def chi_to_fieldmap(
     s0 = s0 * 1e-6
 
     # Analytical implementation following Jenkinson et al.
-    g = greens(shape, zdim, voxel_size=vx, **backend)
+    g = greens(shape, zaxis, voxel_size=vx, **backend)
     f = greens_apply(ds, g)
 
     # apply rest of the equation
@@ -230,7 +240,7 @@ def chi_to_fieldmap(
     return out
 
 
-def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
+def greens(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
     """Semi-analytical second derivative of the Greens kernel.
 
     This function implements exactly the solution from Jenkinson et al.
@@ -249,8 +259,13 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
     ----------
     shape : sequence of int
         Lattice shape
-    zdim : int, defualt=-1
-        Dimension of the main magnetic field
+    zaxis : int | sequence[float], default=-1
+        Direction of the main magnetic field.
+        If a vector or floats, it is unit vector that encodes the direction
+        of the main magnetic field in the "scaled voxel" coordinate systems.
+        If an int, the main magnetic field is assumed to be aligned
+        with one of the dimensions of the voxel grid, and `zaxis` is the
+        index of this dimension. I.e., `0` is equivalent to `[1, 0, 0]`.
     voxel_size : [sequence of] int
         Voxel size
     dtype : torch.dtype, optional
@@ -269,24 +284,51 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
         den[(den > -1e-8) & (den < 0)] -= 1e-8
         return torch.atan2(num, den)
 
-    dim = len(list(shape))
-    dims = list(range(-dim, 0))
-    voxel_size = make_vector(voxel_size, dim)
-    zdim = -dim + zdim if zdim >= 0 else zdim  # use negative indexing
+    def dot(a, b):
+        return a.unsqueeze(-2).matmul(b.unsqueeze(-1)).squeeze(-1).squeeze(-1)
 
-    if dim not in (2, 3):
-        raise ValueError('Invalid dim', dim)
-    if zdim not in range(-dim, 0):
-        raise ValueError('Invalid zdim', zdim)
+    ndim = len(list(shape))
+    dims = list(range(-ndim, 0))
+    dtype = dtype or torch.get_default_dtype()
+    voxel_size = make_vector(voxel_size, ndim, dtype=dtype, device=device)
 
-    if dim == 3:
-        odims = ([-3, -2] if zdim == -1 else
-                 [-3, -1] if zdim == -2 else
-                 [-2, -1])
-    elif dim == 2:
-        odim = -2 if zdim == -1 else -1
+    if ndim not in (2, 3):
+        raise ValueError('Invalid ndim', ndim)
+
+    if isinstance(zaxis, int):
+
+        zaxis = -ndim + zaxis if zaxis >= 0 else zaxis  # use negative indexing
+
+        if zaxis not in range(-ndim, 0):
+            raise ValueError('Invalid zaxis', zaxis)
+
+        if ndim == 3:
+            yaxis, xaxis = ([-2, -3] if zaxis == -1 else
+                            [-1, -3] if zaxis == -2 else
+                            [-1, -2])
+        elif ndim == 2:
+            yaxis = -2 if zaxis == -1 else -1
+        else:
+            raise NotImplementedError
+
     else:
-        raise NotImplementedError
+        zaxis = make_vector(zaxis, dtype=dtype, device=device)
+        zaxis = zaxis / zaxis.norm()  # ensure unit vector
+
+        if len(zaxis) not in (2, 3):
+            raise ValueError('Invalid zaxis', zaxis)
+
+        if ndim == 3:
+            yaxis, xaxis = zaxis.clone(), zaxis.clone()
+            yaxis[:2] = yaxis[:2].flip(0)
+            yaxis[1].neg_()
+            yaxis[2].zero_()
+            xaxis[-2:] = xaxis[-2:].flip(0)
+            xaxis[2].neg_()
+            xaxis[0].zero_()
+        else:
+            yaxis = zaxis.flip(0)
+            yaxis[1].neg_()
 
     # make zero-centered meshgrid
     g0 = identity_grid(shape, dtype=dtype, device=device)
@@ -297,27 +339,35 @@ def greens(shape, zdim=-1, voxel_size=1, dtype=None, device=None):
         return mul_(grid + make_vector(shift).to(grid), voxel_size.to(grid))
 
     g = 0
-    for shift in itertools.product([-0.5, 0.5], repeat=dim):
+    for shift in itertools.product([-0.5, 0.5], repeat=ndim):
         # Integrate across a voxel
         g1 = shift_and_scale_grid(g0, shift)
         # Compute \int G" dx dy dz
         # where G is the Green function of the 2D or 3D Laplacian and
         # G" is the second derivative of G wrt z.
-        z = g1[..., zdim]
-        if dim == 3:
+
+        if isinstance(zaxis, int):
+            z = g1[..., zaxis]
+            y = g1[..., yaxis]
+            if ndim == 3:
+                x = g1[..., xaxis]
+        else:
+            z = dot(g1, zaxis)
+            y = dot(g1, yaxis)
+            if ndim == 3:
+                x = dot(g1, xaxis)
+
+        if ndim == 3:
             r = g1.square().sum(-1).clamp_min_(1e-8).sqrt_()
-            x = g1[..., odims[0]]
-            y = g1[..., odims[1]]
             g1 = atan(x * y, z * r)
         else:
-            y = g1[..., odim]
             g1 = atan(y, z)
         if prod(shift) < 0:
             g -= g1
         else:
             g += g1
 
-    g = div_(g, (2 ** (dim-1)) * math.pi)
+    g = div_(g, (2 ** (ndim-1)) * math.pi)
     g = fft.ifftshift(g, dims)  # move center voxel to first voxel
 
     # fourier transform
@@ -342,8 +392,8 @@ def greens_apply(mom, greens):
 
     """
     greens = greens.to(mom)
-    dim = greens.dim()
-    dims = list(range(-dim, 0))
+    ndim = greens.ndim
+    dims = list(range(-ndim, 0))
 
     # fourier transform
     mom = fft.fftn(mom, dim=dims)
@@ -399,7 +449,7 @@ def diff(x, ndim):
     return g
 
 
-def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
+def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
          lam_abs=1, lam_grad=10, returns='corrected'):
     """Subtract a linear combination of spherical harmonics that
     minimize absolute values and gradients
@@ -414,7 +464,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         Mask of voxels to include (typically brain mask)
     isocenter : [sequence of] float, default=shape/2
         Coordinate of isocenter, in voxels
-    dim : int, default=fmap.dim()
+    ndim : int, default=fmap.ndim
         Number of spatial dimensions
     lam_abs : float, default=1
         Penalty on absolute values
@@ -434,9 +484,9 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
 
     """
     fmap = torch.as_tensor(fmap)
-    dim = dim or fmap.dim()
-    shape = fmap.shape[-dim:]
-    batch = fmap.shape[:-dim]
+    ndim = ndim or fmap.ndim
+    shape = fmap.shape[-ndim:]
+    batch = fmap.shape[:-ndim]
     backend = dict(dtype=fmap.dtype, device=fmap.device)
 
     if mask is not None:
@@ -444,7 +494,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         mask = mask.expand(fmap.shape)
 
     # compute gradients
-    gmap = diff(fmap, dim)
+    gmap = diff(fmap, ndim)
     gmap = torch.cat([gmap, fmap.unsqueeze(-1)], -1)
     gmap[..., :-1] *= lam_grad
     gmap[..., -1] *= lam_abs
@@ -457,7 +507,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
     for i in range(1, max_order + 1):
         b0 = spherical_harmonics(shape, i, isocenter, **backend)
         b0 = torch.movedim(b0, -1, 0)
-        b = diff(b0, dim)
+        b = diff(b0, ndim)
         b = torch.cat([b, b0.unsqueeze(-1)], -1)
         del b0
         b[..., :-1] *= lam_grad
@@ -467,7 +517,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         b = b.reshape([b.shape[0], *batch, -1])
         basis.append(b)
     basis = torch.cat(basis, 0)
-    basis = torch.movedim(basis, 0, -1)  # (*batch, vox*dim, k)
+    basis = torch.movedim(basis, 0, -1)  # (*batch, vox*ndim, k)
 
     # solve system
     prm = basis.pinverse().matmul(gmap.unsqueeze(-1)).squeeze(-1)
@@ -481,7 +531,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, dim=None,
         b = b.reshape([b.shape[0], *batch, -1])
         basis.append(b)
     basis = torch.cat(basis, 0)
-    basis = torch.movedim(basis, 0, -1)  # (*batch, vox*dim, k)
+    basis = torch.movedim(basis, 0, -1)  # (*batch, vox*ndim, k)
 
     comb = basis.matmul(prm.unsqueeze(-1)).squeeze(0)
     comb = comb.reshape([*batch, *shape])
@@ -524,8 +574,8 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
 
     """
     shape = list(shape)
-    dim = len(shape)
-    if dim not in (2, 3):
+    ndim = len(shape)
+    if ndim not in (2, 3):
         raise ValueError('Dimension must be 2 or 3')
     if order not in (1, 2):
         raise ValueError('Order must be 1 or 2')
@@ -533,7 +583,7 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
     if isocenter is None:
         isocenter = [s / 2 for s in shape]
     isocenter = list(isocenter)
-    isocenter += isocenter[-1:] * max(0, dim-len(isocenter))
+    isocenter += isocenter[-1:] * max(0, ndim-len(isocenter))
 
     ramps = identity_grid(shape, **backend)
     for i, ramp in enumerate(ramps.unbind(-1)):
@@ -543,7 +593,7 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
     if order == 1:
         return ramps
     # order == 2
-    if dim == 3:
+    if ndim == 3:
         basis = [ramps[..., 0] * ramps[..., 1],
                  ramps[..., 0] * ramps[..., 2],
                  ramps[..., 1] * ramps[..., 2],
@@ -581,8 +631,8 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
     """
     backend.setdefault('dtype', torch.get_default_dtype())
     shape = list(shape)
-    dim = len(shape)
-    if dim not in (2, 3):
+    ndim = len(shape)
+    if ndim not in (2, 3):
         raise ValueError('Dimension must be 2 or 3')
     if order not in (1, 2):
         raise ValueError('Order must be 1 or 2')
@@ -596,7 +646,7 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
     if isocenter is None:
         isocenter = [s / 2 for s in shape]
     isocenter = list(isocenter)
-    isocenter += isocenter[-1:] * max(0, dim-len(isocenter))
+    isocenter += isocenter[-1:] * max(0, ndim-len(isocenter))
 
     ramps = []
     for i, ramp in enumerate(cartesian_grid(shape, **backend)):
@@ -610,14 +660,14 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
         return
 
     # 2nd order (quadratics)
-    if dim == 3:
+    if ndim == 3:
         yield 2 * ramps[0] * ramps[1]
         yield 2 * ramps[0] * ramps[2]
         yield 2 * ramps[1] * ramps[2]
         yield ramps[0].square() - ramps[1].square()
         yield ramps[0].square() - ramps[2].square()
     else:
-        assert dim == 2
+        assert ndim == 2
         yield 2 * ramps[0] * ramps[1]
         yield ramps[0].square() - ramps[1].square()
 
