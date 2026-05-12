@@ -41,41 +41,49 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
     if bias is not None:
         bias = bias.to(tensor)
 
-    # sanity checks + reshape for torch's conv
-    if kernel.dim() not in (ndim, ndim + 1, ndim + 2):
-        raise ValueError('Kernel shape should be (*kernel_size) or '
-                         '(channel_in, channel_out, *kernel_size) but '
-                         'got {}'.format(kernel.shape))
+    # sanity check
+    if ndim not in (1, 2, 3):
+        raise NotImplementedError(
+            'Convolution is only implemented in dimension 1, 2 or 3.'
+        )
+    if kernel.ndim not in (ndim, ndim + 1, ndim + 2):
+        raise ValueError(
+            f'Kernel shape should be (*kernel_size) or '
+            f'(channel_in, channel_out, *kernel_size) '
+            f'but got {kernel.shape}'
+        )
+
+    # reshape for torch's conv
     kernel_size = kernel.shape[-ndim:]
     has_channels = bias is not None or (kernel.ndim > ndim)
     if kernel.ndim == ndim + 2:
         channels_out = kernel.shape[0]
-        channels_in = kernel.shape[1]
-        kernel = kernel.reshape([channels_out, channels_in, *kernel_size])
+        channels_inp = kernel.shape[1]
+        kernel = kernel.reshape([channels_out, channels_inp, *kernel_size])
     elif kernel.ndim == ndim + 1:
         # Grouped kernel -> one single-channel convolution per channel
-        groups = channels_in = channels_out = kernel.shape[0]
+        groups = channels_inp = channels_out = kernel.shape[0]
         kernel = kernel.reshape([channels_out, 1, *kernel_size])
     else:
         # Iso kernel -> Same single-channel convolution for all channels
         if bias is not None:
-            groups = channels_in = channels_out = bias.numel()
+            groups = channels_inp = channels_out = bias.numel()
             kernel = torch.stack([kernel] * channels_out, dim=0)[:, None]
         else:
-            groups = channels_out = channels_in = 1
+            groups = channels_out = channels_inp = 1
             kernel = kernel[None, None]
 
     batch = tensor.shape[:-(ndim+has_channels)]
-    spatial_in = tensor.shape[(-ndim):]
-    if channels_in not in (tensor.shape[-(ndim+has_channels)], None):
+    spatial_inp = tensor.shape[(-ndim):]
+
+    if has_channels and tensor.shape[-(ndim+1)] != channels_inp:
         raise ValueError(
-            'Number of input channels not consistent: '
-            'Got {} (kernel) and {} (tensor).'.format(
-                channels_in, tensor.shape[-(ndim+has_channels)]
-            )
+            f'Number of input channels not consistent: '
+            f'Got {channels_inp} (kernel) and '
+            f'{tensor.shape[-(ndim+1)]} (tensor).'
         )
 
-    tensor = tensor.reshape([-1, channels_in, *spatial_in])
+    tensor = tensor.reshape([-1, channels_inp, *spatial_inp])
     if bias:
         bias = bias.flatten()
         if bias.numel() == 1:
@@ -104,12 +112,7 @@ def convnd(ndim, tensor, kernel, bias=None, stride=1, padding=0, bound='zero',
         tensor = pad(tensor, padding, bound, side='both')
         padding = 0
 
-    conv_fn = (F.conv1d if ndim == 1 else
-               F.conv2d if ndim == 2 else
-               F.conv3d if ndim == 3 else None)
-    if not conv_fn:
-        raise NotImplementedError('Convolution is only implemented in '
-                                  'dimension 1, 2 or 3.')
+    conv_fn = getattr(F, f'conv{ndim}d')
     tensor = conv_fn(tensor, kernel, bias, stride=stride, padding=padding,
                      dilation=dilation, groups=groups)
     spatial_out = tensor.shape[(-ndim):]
@@ -150,16 +153,16 @@ def conv1d(input, kernel, dim=-1,  padding='same',
     kernel = kernel.to(input)
 
     # sanity checks + reshape for torch's conv
-    if kernel.dim() > 1:
+    if kernel.ndim > 1:
         raise ValueError(f'Kernel should be a vector but got {kernel.shape}')
 
     # make sure input shape is [B, C, X, Y, Z]
-    indim = input.dim()
+    indim = input.ndim
     input = input.movedim(dim, -1)
-    while input.dim() < 5:
-        input = input.unsqueeze(max(-input.dim()-1, -4))
+    while input.ndim < 5:
+        input = input.unsqueeze(max(-input.ndim-1, -4))
     batch = input.shape[:1]
-    if input.dim() > 5:
+    if input.ndim > 5:
         batch = input.shape[:-4]
         input = input.reshape([-1, *input.shape[-4:]])
 
@@ -186,8 +189,8 @@ def conv1d(input, kernel, dim=-1,  padding='same',
 
     # reshape
     output = output.reshape([*batch, *output.shape[1:]])
-    while output.dim() > indim:
-        output = output.squeeze(max(-output.dim(), -4))
+    while output.ndim > indim:
+        output = output.squeeze(max(-output.ndim, -4))
     output = output.movedim(-1, dim)
     return output
 
