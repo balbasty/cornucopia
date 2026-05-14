@@ -502,21 +502,21 @@ class ErodeLabelTransform(FinalTransform):
         if self.method == 'conv':
             def dist(x, r):
                 return bounded_distance(
-                    x, nb_iter=int(round(r)), dim=x.dim()-1
+                    x, nb_iter=int(round(r)), ndim=x.ndim-1
                 )
             dtype = torch.int
             dmax = max_radius+1
         elif self.method == 'l1':
             def dist(x, r):
                 return distmap.l1_signed_transform(
-                    x, ndim=x.dim()-1
+                    x, ndim=x.ndim-1
                 ).neg_()
             dtype = torch.get_default_dtype()
             dmax = float('inf')
         elif self.method == 'l2':
             def dist(x, r):
                 return distmap.euclidean_signed_transform(
-                    x, ndim=x.dim()-1
+                    x, ndim=x.ndim-1
                 ).neg_()
             dtype = torch.get_default_dtype()
             dmax = float('inf')
@@ -552,17 +552,17 @@ class ErodeLabelTransform(FinalTransform):
         if self.method == 'conv':
             def dist(x, r):
                 return bounded_distance(
-                    x, nb_iter=int(round(r)), dim=x.dim()-1
+                    x, nb_iter=int(round(r)), ndim=x.ndim-1
                 )
         elif self.method == 'l1':
             def dist(x, r):
                 return distmap.l1_distance_transform(
-                    x, ndim=x.dim()-1
+                    x, ndim=x.ndim-1
                 ).neg_()
         elif self.method == 'l2':
             def dist(x, r):
                 return distmap.euclidean_distance_transform(
-                    x, ndim=x.dim()-1
+                    x, ndim=x.ndim-1
                 ).neg_()
         else:
             raise ValueError('Unknown method', self.method)
@@ -618,19 +618,19 @@ class DilateLabelTransform(FinalTransform):
         if self.method == 'conv':
             def dist(x, r):
                 return bounded_distance(
-                    x, nb_iter=int(round(r)), dim=x.dim()-1
+                    x, nb_iter=int(round(r)), ndim=x.ndim-1
                 )
             dtype = torch.int
             dmax = max_radius+1
         elif self.method == 'l1':
             def dist(x, r):
-                d = distmap.l1_signed_transform(x, ndim=x.dim()-1)
+                d = distmap.l1_signed_transform(x, ndim=x.ndim-1)
                 return d.neg_()
             dtype = torch.get_default_dtype()
             dmax = float('inf')
         elif self.method == 'l2':
             def dist(x, r):
-                d = distmap.euclidean_signed_transform(x, ndim=x.dim()-1)
+                d = distmap.euclidean_signed_transform(x, ndim=x.ndim-1)
                 return d.neg_()
             dtype = torch.get_default_dtype()
             dmax = float('inf')
@@ -848,17 +848,17 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
             if self.method == 'conv':
                 def dist(x):
                     return bounded_distance(
-                        x, nb_iter=max_abs_radius, dim=x.dim()-1
+                        x, nb_iter=max_abs_radius, ndim=x.ndim-1
                     )
             elif self.method == 'l1':
                 def dist(x):
                     return distmap.l1_signed_transform(
-                        x, ndim=x.dim()-1
+                        x, ndim=x.ndim-1
                     ).neg_()
             elif self.method == 'l2':
                 def dist(x):
                     return distmap.euclidean_signed_transform(
-                        x, ndim=x.dim()-1
+                        x, ndim=x.ndim-1
                     ).neg_()
             else:
                 raise ValueError('Unknown method', self.method)
@@ -1046,12 +1046,12 @@ class SmoothShallowLabelTransform(NonFinalTransform):
             if self.method == 'l1':
                 def dist(x):
                     return distmap.l1_signed_transform(
-                        x, ndim=x.dim()-1
+                        x, ndim=x.ndim-1
                     ).neg_()
             elif self.method == 'l2':
                 def dist(x):
                     return distmap.euclidean_signed_transform(
-                        x, ndim=x.dim()-1
+                        x, ndim=x.ndim-1
                     ).neg_()
             else:
                 raise ValueError('Unknown method', self.method)
@@ -1264,7 +1264,7 @@ class SmoothBernoulliTransform(NonFinalTransform):
         if max_depth == 0:
             return self
 
-        ndim = x.dim() - 1
+        ndim = x.ndim - 1
         batch, *shape = x.shape
         if 'channels' in self.shared:
             batch = 1
@@ -1323,7 +1323,7 @@ class BernoulliDiskTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        ndim = x.dim() - 1
+        ndim = x.ndim - 1
         nvoxball = pymath.pow(pymath.pi, ndim/2) / pymath.gamma(ndim/2 + 1)
 
         nvoxball *= self.radius
@@ -1404,7 +1404,7 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        ndim = x.dim() - 1
+        ndim = x.ndim - 1
         nvoxball = pymath.pow(pymath.pi, ndim / 2)
         nvoxball /= pymath.gamma(ndim / 2 + 1)
         nvoxball *= sum(self.radius) / 2
