@@ -1151,15 +1151,15 @@ class SharedTransform(SharedMixin, Transform):
             Transform to apply
         mode : {'channels', 'tensors', 'channels+tensor', ''}
 
-        - 'channel': the same transform is applied to all channels
-            in a tensor, but different transforms are used in different
-            tensors.
-        - 'tensors': the same transform is applied to all tensors,
-            but with a different transform for each channel.
-        - 'channels+tensors' or True: the same transform is applied
-            to all channels of all tensors.
-        - None or False: A different transform is applied to each
-            channel and each tensor.
+            - 'channel': the same transform is applied to all channels
+                in a tensor, but different transforms are used in different
+                tensors.
+            - 'tensors': the same transform is applied to all tensors,
+                but with a different transform for each channel.
+            - 'channels+tensors' or True: the same transform is applied
+                to all channels of all tensors.
+            - None or False: A different transform is applied to each
+                channel and each tensor.
 
         """
         super().__init__()
