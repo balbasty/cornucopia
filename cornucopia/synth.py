@@ -550,15 +550,57 @@ class SynthFromLabelTransform(NonFinalTransform):
         def make_final(self, x, max_depth=float('inf')):
             if max_depth == 0 or self.is_final:
                 return self
-            return type(self)(
-                self.gmm.make_final(x, 1),
-                self.deform.make_final(x, 1),
-                self.intensity.make_final(x, 1),
-                self.load.make_final(x, 1),
-                self.preproc.make_final(x, 1),
-                self.postproc.make_final(x, 1),
-                **self.get_prm(),
-            ).make_final(x, max_depth-1)
+
+            layers = dict(
+                load=self.load,
+                preproc=self.preproc,
+                postproc=self.postproc,
+                deform=self.deform,
+                intensity=self.intensity,
+                gmm=self.gmm,
+            )
+
+            while not layers['load'].is_final and max_depth > 0:
+                layers['load'] = layers['load'].make_final(x, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            lab = layers['load'](x)
+            while not layers['deform'].is_final and max_depth > 0:
+                layers['deform'] = layers['deform'].make_final(lab, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            dfm = layers['deform'](lab)
+            while not layers['preproc'].is_final and max_depth > 0:
+                layers['preproc'] = layers['preproc'].make_final(dfm, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            gen = layers['preproc'](dfm)
+            while not layers['gmm'].is_final and max_depth > 0:
+                layers['gmm'] = layers['gmm'].make_final(gen, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            img = layers['gmm'](gen)
+            while not layers['intensity'].is_final and max_depth > 0:
+                layers['intensity'] = layers['intensity'].make_final(img, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            while not layers['postproc'].is_final and max_depth > 0:
+                layers['postproc'] = layers['postproc'].make_final(dfm, max_depth)
+                max_depth -= 1
+            if max_depth == 0:
+                return type(self)(**layers, **self.get_prm())
+
+            return type(self)(**layers, **self.get_prm()).make_final(x, max_depth-1)
 
         def xform(self, lab):
             lab = self.load(lab)
