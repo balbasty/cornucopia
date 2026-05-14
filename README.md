@@ -43,11 +43,11 @@ pip install cornucopia@git+https://github.com/balbasty/cornucopia
 
 ## Documentation
 
-Read the [documentation](https://cornucopia.readthedocs.io) and in particular:
-- [installation](https://cornucopia.readthedocs.io/en/latest/install/)
-- [get started](https://cornucopia.readthedocs.io/en/latest/start/)
-- [examples](https://cornucopia.readthedocs.io/en/latest/examples/overview/)
-- [API](https://cornucopia.readthedocs.io/en/latest/api/overview/)
+Read the [documentation](https://balbasty.github.io/cornucopia) and in particular:
+- [installation](https://balbasty.github.io/cornucopia/install/)
+- [get started](https://balbasty.github.io/cornucopia/start/)
+- [examples](https://balbasty.github.io/cornucopia/examples/)
+- [API](https://balbasty.github.io/cornucopia/api/)
 
 ## Other augmentation packages
 
