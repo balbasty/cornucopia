@@ -1,0 +1,14 @@
+name: Test package and publish
+description: Test package and publish
+
+on:
+  push:
+    paths:
+      - cornucopia/**
+      - setup.py
+      - pyproject.toml
+  pull_request:
+
+jobs:
+  tests:
+    uses: ./.github/workflows/test-matrix.yaml
