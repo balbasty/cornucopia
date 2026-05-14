@@ -2,7 +2,6 @@ __all__ = [
     'Transform',
     'FinalTransform',
     'NonFinalTransform',
-    'SpecialMixin',
 ]
 # stdlib
 import inspect
@@ -215,11 +214,8 @@ class Transform(nn.Module, ABC):
 
             # ---- Now we're working with a single tensor (or str) ----
 
-            # Ensure that the transform is final
-            transform = self.transform.safe_make_final(x, args=self.args)
-
-            # Apply the tranform to the input tensor
-            y = transform.safe_xform(x, args=self.args)
+            # Apply the transform to the input tensor
+            y = self.transform.safe_xform(x, args=self.args)
 
             # Most transforms return a well-formatted `Returned` object,
             # which contain all possible outputs of a transform, mapped
@@ -370,6 +366,29 @@ class Transform(nn.Module, ABC):
         else:
             return self.xform(x)
 
+    def xform(
+        self, x: Tensor, /,
+        args: Arguments = NoArguments(),
+    ) -> Returned:
+        """Apply the transform to a tensor
+
+        Parameters
+        ----------
+        x : (C_inp, *spatial_inp) tensor
+            A single input tensor
+        args: Arguments, optional
+            The original inputs arguments to the transform, in case
+            they are needed.
+
+        Returns
+        -------
+        y : Returned | (C_out, *spatial_out) tensor
+            A single output tensor, or a `Returned` object containing
+            multiple output tensors and their corresponding keys.
+
+        """
+        raise NotImplementedError("This transform does not implement `xform`.")
+
     def safe_make_final(
         self, x: Tensor, /,
         max_depth: int = inf,
@@ -382,7 +401,6 @@ class Transform(nn.Module, ABC):
         else:
             return self.make_final(x, max_depth)
 
-    @abstractmethod
     def make_final(
         self, x: Tensor, /,
         max_depth: int = inf,
@@ -408,45 +426,11 @@ class Transform(nn.Module, ABC):
         Transform
             A final version of the transform.
         """
-        return NotImplemented
-
-
-class FinalTransform(Transform):
-    """
-    Mixin for determinstic transforms.
-    """
-
-    @property
-    def is_final(self) -> bool:
-        return True
-
-    @abstractmethod
-    def xform(
-        self, x: Tensor, /,
-        args: Arguments = NoArguments(),
-    ) -> Returned:
-        """Apply the transform to a tensor
-
-        Parameters
-        ----------
-        x : (C_inp, *spatial_inp) tensor
-            A single input tensor
-        args: Arguments, optional
-            The original inputs arguments to the transform, in case
-            they are needed.
-
-        Returns
-        -------
-        y : Returned | (C_out, *spatial_out) tensor
-            A single output tensor, or a `Returned` object containing
-            multiple output tensors and their corresponding keys.
-
-        """
-        raise NotImplemented
-
-    def make_inverse(self) -> "FinalTransform":
-        """Generate the inverse transform"""
-        return IdentityTransform()
+        if self.is_final or max_depth == 0:
+            return self
+        raise NotImplementedError(
+            "This transform does not implement `make_final`."
+        )
 
     def inverse(self, *a, **k) -> "FinalTransform":
         """Apply the inverse transform recursively
@@ -463,6 +447,23 @@ class FinalTransform(Transform):
 
         """
         return self.make_inverse()(*a, **k)
+
+    def make_inverse(self) -> "FinalTransform":
+        """Generate the inverse transform"""
+        # We fallback to the identity, rather than raising an error.
+        return IdentityTransform()
+
+
+class FinalTransform(Transform):
+    """
+    Base class for determinstic transforms.
+
+    Final transforms *must* implement the `xform` method.
+    """
+
+    @property
+    def is_final(self) -> bool:
+        return True
 
     def make_final(
         self, x: Tensor, /,
@@ -513,11 +514,14 @@ class SharedMixin:
         # (e.g., the number of control points in a bias field), but not
         # the lower level ones (e.g., the values of the control points).
         transformation = self.safe_make_final(template, 1, args=args)
+        if transformation is self:
+            # Avoid infinite recursion. This should not happen.
+            raise ValueError(
+                f"The transform is not final, but calling `make_final` "
+                f"returned itself. Transform: {self}"
+            )
         # Apply the final transform to all channels
-        # FIXME: there cannot be an `xform` if the transformation is not
-        # final, so I am not quite sure about the logic with `max_depth=1`
-        # above.
-        return transformation.safe_xform(x)
+        return transformation.safe_xform(x, args=args)
 
     def forward(self, *a, **k) -> Returned:
         return self._shared_forward(*a, **k)
@@ -526,7 +530,8 @@ class SharedMixin:
         _fallback = _fallback or super().forward
         args = Arguments(*a, **k)
         a, k = args.to_args_kwargs()
-        if 'tensors' in self.shared and (len(a) + len(k) > 1):
+
+        if 'tensors' in self.shared:
             # Get the first valid tensor across all inputs, and use it
             # as the template to compute the final transform.
             first_tensor = get_first_element(
@@ -534,8 +539,11 @@ class SharedMixin:
             if 'channels' in self.shared:
                 # Get the first channel only, to compute the final transform.
                 first_tensor = first_tensor[:1]
+            # Compute the next form of this transform...
             transform = self.safe_make_final(first_tensor, 1, args=args)
+            # ...and apply it to all tensors.
             return transform(*a, **k)
+
         # Else, we let `xform` deal with shared parameters across channels.
         return _fallback(*a, **k)
 
@@ -576,51 +584,8 @@ class NonFinalTransform(SharedMixin, Transform):
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
 
-    def make_final(
-        self,
-        x: Tensor, /,
-        max_depth: int = inf,
-        args: Arguments = NoArguments(),
-    ) -> Transform:
-        if self.is_final or max_depth == 0:
-            return self
-        raise NotImplementedError()
 
-
-class SpecialMixin:
-    """Mixin for special transforms (i.e. transforms of transforms)"""
-
-    def make_inverse(self) -> Transform:
-        """Generate the inverse transform"""
-        return IdentityTransform()
-
-    def inverse(self, *a, **k) -> Returned:
-        """Apply the inverse transform recursively
-
-        Parameters
-        ----------
-        x : [nested list or dict of] tensor
-            Input tensors, with shape `(C, *shape)`
-
-        Returns
-        -------
-        [nested list or dict of] tensor
-            Output tensors. with shape `(C, *shape)`
-
-        """
-        return self.make_inverse()(*a, **k)
-
-    def make_final(
-        self, x: Tensor, /,
-        max_depth: int = inf,
-        args: Arguments = NoArguments(),
-    ) -> Transform:
-        if x.is_final or max_depth == 0:
-            return self
-        raise NotImplementedError()
-
-
-class SequentialTransform(SpecialMixin, SharedMixin, Transform):
+class SequentialTransform(SharedMixin, Transform):
     """A sequence of transforms
 
     !!! example
@@ -694,9 +659,17 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         return all(t.is_final for t in self)
 
     def make_inverse(self) -> Transform:
-        return SequentialTransform([t.make_inverse() for t in self])
+        return SequentialTransform([t.make_inverse() for t in reversed(self)])
 
     def forward(self, *a, **k) -> Returned:
+        # If the entire sequence is shared across tensors, we use the
+        # behavior from `SharedMixin`, which is to call `make_final` on
+        # the first valid tensor, and apply the resulting transform to all
+        # tensors.
+        # Finalizing a sequence of transforms is a bit tricky, but sequences
+        # are not shared by default, so this should rarely be used.
+        # If the sequence is not shared (or onlt shared across channels),
+        # we simply apply the transforms sequentially.
         return self._shared_forward(*a, **k, _fallback=self._forward_impl)
 
     def _forward_impl(self, *args, **kwargs):
@@ -711,7 +684,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         self, x: Tensor, /, args: Arguments = NoArguments()
     ) -> Returned:
         # This should only be called when a Layer's `make_final` returns
-        # a `SequentialTransform`` (i.e., it is created implictly under
+        # a `SequentialTransform` (i.e., it is created implictly under
         # the hood, not explicitly by the user).
         # In such cases, `shared=False` and hopefully we can just fallback
         # to `forward()`.
@@ -737,7 +710,7 @@ class SequentialTransform(SpecialMixin, SharedMixin, Transform):
         return f'{type(self).__name__}({repr(self.transforms)})'
 
 
-class PerChannelTransform(SpecialMixin, Transform):
+class PerChannelTransform(Transform):
     """Apply a different transform to each channel"""
 
     def __init__(self, transforms: List[Transform], **kwargs) -> None:
@@ -784,7 +757,7 @@ class PerChannelTransform(SpecialMixin, Transform):
         return all(t.is_final for t in self.transforms)
 
 
-class MaybeTransform(SpecialMixin, SharedMixin, Transform):
+class MaybeTransform(SharedMixin, Transform):
     """Randomly apply a transform
 
     !!! example "20% chance of adding noise"
@@ -856,7 +829,7 @@ class MaybeTransform(SpecialMixin, SharedMixin, Transform):
         return s
 
 
-class SwitchTransform(SpecialMixin, SharedMixin, Transform):
+class SwitchTransform(SharedMixin, Transform):
     """Randomly choose a transform to apply
 
     !!! example "Randomly apply either Gaussian or Chi noise"
@@ -966,7 +939,7 @@ class SwitchTransform(SpecialMixin, SharedMixin, Transform):
         return s
 
 
-class IncludeKeysTransform(SpecialMixin, Transform):
+class IncludeKeysTransform(Transform):
     """
     Context manager for keys to include
 
@@ -1060,7 +1033,7 @@ class IncludeKeysTransform(SpecialMixin, Transform):
         delattr(self, 'include')
 
 
-class ExcludeKeysTransform(SpecialMixin, Transform):
+class ExcludeKeysTransform(Transform):
     """
     Context manager for keys to exclude.
     Can also be used as a transform.
@@ -1155,7 +1128,7 @@ class ExcludeKeysTransform(SpecialMixin, Transform):
         delattr(self, 'exclude')
 
 
-class SharedTransform(SpecialMixin, SharedMixin, Transform):
+class SharedTransform(SharedMixin, Transform):
     """
     Context manager for sharing transforms across channels / tensors.
     Can also be used as a transform.
@@ -1213,7 +1186,7 @@ class SharedTransform(SpecialMixin, SharedMixin, Transform):
         delattr(self, 'saved_mode')
 
 
-class ReturningTransform(SpecialMixin, Transform):
+class ReturningTransform(Transform):
     """
     Context manager for sharing transforms across channels / tensors
 
@@ -1244,7 +1217,7 @@ class ReturningTransform(SpecialMixin, Transform):
         delattr(self, 'saved_returns')
 
 
-class MappedTransform(SpecialMixin, Transform):
+class MappedTransform(Transform):
     """
     Transforms that are applied to specific positional or arguments
 
