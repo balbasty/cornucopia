@@ -1,3 +1,7 @@
+---
+icon: fontawesome/brands/python
+---
+
 # API overview
 
 ### Meta transforms

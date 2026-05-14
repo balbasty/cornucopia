@@ -1,3 +1,9 @@
+---
+icon: fontawesome/solid/home
+---
+
+# Home
+
 <picture align="center">
   <img alt="Cornucopia logo" src="icons/cornucopia_orange.svg">
 </picture>

@@ -1,3 +1,7 @@
+---
+icon: fontawesome/solid/rocket
+---
+
 # Getting started
 
 ### Import
@@ -68,7 +72,7 @@ or by simply adding them together:
 ```python
 # programatic instantiation of a sequence
 seq = cc.SequentialTransform([
-       cc.ElasticTransform(), 
+       cc.ElasticTransform(),
        cc.GaussianNoiseTransform()
 ])
 
@@ -82,7 +86,7 @@ img = seq(img)
 
 Better augmentation can be obtained if the parameters of a random transform
 (_e.g._, Gaussian noise variance) are themselves sampled from a prior
-distribution (_e.g._, a uniform distribution between [0 and 10]).
+distribution (_e.g._, a uniform distribution between 0 and 10).
 We provide high-level randomized transform for this, as well as a utility
 class that allows any transform to be easily randomized:
 ```python
@@ -128,7 +132,7 @@ img1, lab1 = dat['image'], dat['label']
 
 It is then possible to take advantage of positional arguments, keywords
 and/or dictionaries to apply some transforms to a subset of inputs.
-This is done using the `cc.MappedTransform` meta-transform (or the 
+This is done using the `cc.MappedTransform` meta-transform (or the
 `cc.ctx.map` utility function):
 ```python
 # using positionals

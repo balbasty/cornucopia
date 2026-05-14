@@ -1,0 +1,96 @@
+[project]
+
+nav = [
+  {"Home" = "index.md"},
+  {"Installation" = "install.md"},
+  {"Getting Started" = "start.md"},
+  {"Examples" = [
+    "examples/index.md",
+    {"Field-of-view transforms" = "examples/fov.md"},
+    {"Noise transforms" = "examples/noise.md"},
+    {"Geometric transforms" = "examples/geom.md"},
+    {"Random intra-scan motion" = "examples/motion.md"},
+    {"Contrast augmentation" = "examples/contrast.md"},
+    {"Label augmentation" = "examples/labels.md"},
+    {"Quantitative MRIs" = "examples/qmri.md"},
+    {"Random coil sensitivities" = "examples/coils.md"},
+    {"Benchmark" = "examples/benchmark.md"}
+  ]},
+  {"API" = [
+    "api/index.md",
+    {"cc.base" = "api/base.md"},
+    {"cc.contrast" = "api/contrast.md"},
+    {"cc.ctx" = "api/ctx.md"},
+    {"cc.fov" = "api/fov.md"},
+    {"cc.geometric" = "api/geometric.md"},
+    {"cc.intensity" = "api/intensity.md"},
+    {"cc.io" = "api/io.md"},
+    {"cc.kspace" = "api/kspace.md"},
+    {"cc.labels" = "api/labels.md"},
+    {"cc.noise" = "api/noise.md"},
+    {"cc.psf" = "api/psf.md"},
+    {"cc.qmri" = "api/qmri.md"},
+    {"cc.random" = "api/random.md"},
+    {"cc.special" = "api/special.md"},
+    {"cc.synth" = "api/synth.md"}
+  ]}
+]
+
+site_name = "cornucopia"
+site_description = "An abundance of augmentation layers"
+site_url = "https://balbasty.github.io/cornucopia"
+repo_url = "https://github.com/balbasty/cornucopia"
+edit_uri = "blob/main/docs"
+site_dir = "site"
+docs_dir = "docs"
+
+extra_css = "stylesheets/extra.css"
+extra_javascript = [
+  "javascripts/mathjax.js",
+  "https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"
+]
+
+[project.theme]
+# variant = "classic"
+logo = "icons/cc.svg"
+
+features = [
+  "content.code.copy",
+  "content.code.select",
+  "navigation.indexes",
+]
+
+[project.theme.palette]
+primary = "orange"
+accent = "orange"
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = [".."]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "numpy"
+merge_init_into_class = true
+separate_signature = true
+members_order = "source"
+show_source = false
+show_root_heading = true
+show_overloads = true
+overloads_only = true
+
+[markdown_extensions.admonition]
+[markdown_extensions.pymdownx.details]
+[markdown_extensions.pymdownx.superfences]
+[markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+[markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[markdown_extensions.pymdownx.inlinehilite]
+[markdown_extensions.pymdownx.snippets]
+[markdown_extensions.pymdownx.arithmatex]
+generic = true

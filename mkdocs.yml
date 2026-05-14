@@ -54,7 +54,7 @@ nav:
 - Installation: install.md
 - Getting Started: start.md
 - Examples:
-  -  Overview: examples/overview.md
+  -  Overview: examples/index.md
   -  Field-of-view transforms: examples/fov.ipynb
   -  Noise transforms: examples/noise.ipynb
   -  Geometric transforms: examples/geom.ipynb
@@ -66,7 +66,7 @@ nav:
   -  Random coil sensitivities: examples/coils.ipynb
   -  Benchmark: examples/benchmark.ipynb
 - API:
-  - overview: api/overview.md
+  - overview: api/index.md
   - base: api/base.md
   - contrast: api/contrast.md
   - ctx: api/ctx.md
