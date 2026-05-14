@@ -435,7 +435,7 @@ class HertzToVoxelShiftTransform(FinalTransform):
         return x / self.bandwidth
 
 
-class B0DistortionTransform(FinalTransform):
+class B0DistortionTransform(NonFinalTransform):
     """Elastic distortion along a single dimension.
 
     The number of control points is fixed but coefficients are
