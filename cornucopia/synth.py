@@ -159,27 +159,27 @@ class IntensityTransform(SequentialTransform):
         """
         Parameters
         ----------
-        bias : int or Sampler or False
+        bias : Sampler | int | {False}
             The sampled value controls the smoothness of the intensity
             bias field (smaller values yield smoother fields).
-            If a `float`, sample from `RandInt(2, value)`.
-        bias_strength : (0..1) or Sampler
+            If an `int`, sample from `RandInt(2, value)`.
+        bias_strength : Sampler | (0..1)
             The maximum magnitude of the bias field (about 1).
             If a `float`, sample from `Uniform(0, value)`.
             The minimum and maximum values of the bias field will be
             `1 - bias_strength` and `1 + bias_strength`.
-        gamma : float or Sampler or False
+        gamma : Sampler | float | {False}
             The Gamma transform squeezes intensities such that the contrast
             to noise ratio is decreased (positive values lead to less
             decreased contrast, positive values lead to increased contrast).
             If a `float`, sample the gamma exponent from `LogNormal(0, value)`.
-        motion_fwhm : float or Sampler or False
+        motion_fwhm : Sampler | float | {False}
             A blur can be perform to model the point spread function or
             motion-related smearing. The amount of smoothing is encoded by
             the full-width at half-maximum (FWHM) of the underlying
             Gaussian kernel.
             If a `float`, sample the FWHM from `Uniform(0, value)`.
-        resolution : float or Sampler or False
+        resolution : Sampler | float | {False}
             Thick-slice or isotropic low-resolution (LR) images are randomly
             applied. and their (through-slice or iso) resolution is
             controlled here. It is defined as a proportion of the
@@ -187,18 +187,18 @@ class IntensityTransform(SequentialTransform):
             that the LR voxel size will be four times as large as the
             input voxel size)
             If a `float`, sampled form `Uniform(0, value)`.
-        snr : float or Sampler or False
+        snr : Sampler | float | {False}
             The amount of noise added is encoded by the signal-to-noise ratio
             (SNR) of the noisy image (larger sampled values yield less
             noisy images).
             If a `float`, the value is a lower bound for SNR (no image
             will have a poorer SNR than this). The noise variance is
             then sampled from `Uniform(0, 1/snr)`.
-        gfactor : int or Sampler or False
+        gfactor : Sampler | int | {False}
             The g-factor is a smooth field that locally scales the noise
             variance. The `gfactor` argument controls the smoothness of
             the g-factor field.
-            If a `float`, sample from `RandInt(2, value)`.
+            If an `int`, sample from `RandInt(2, value)`.
         order : {1..7}
             Spline order of the bias/g-factor fields (1 is much faster)
         """
@@ -371,7 +371,7 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        geom: {'affine', 'elastic', 'affine+elastic', ''} | bool
+        geom: bool | {'affine', 'elastic', 'affine+elastic', ''}
             Which geometric transforms to apply.
             `True` (default) corresponds to `affine+elastic`.
             `False` corresponds to no geometric transform.
