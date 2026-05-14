@@ -663,6 +663,58 @@ class RandomAddFieldTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+class GammaFinalTransform(FinalTransform):
+
+    def __init__(self, gamma, vmin, vmax, **kwargs):
+        super().__init__(**kwargs)
+        self.gamma = gamma
+        self.vmin = vmin
+        self.vmax = vmax
+
+    def __repr__(self):
+        gamma, vmin, vmax = self.gamma, self.vmin, self.vmax
+        if torch.is_tensor(gamma):
+            gamma = gamma.detach().tolist()
+        if torch.is_tensor(vmin):
+            vmin = vmin.detach().tolist()
+        if torch.is_tensor(vmax):
+            vmax = vmax.detach().tolist()
+        return f"{type(self).__name__}(gamma={gamma}, vmin={vmin}, vmax={vmax})"
+
+    def xform(self, x):
+        vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
+        vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
+        gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
+        vmin = vmin.reshape([-1] + [1] * (x.ndim-1))
+        vmax = vmax.reshape([-1] + [1] * (x.ndim-1))
+        gamma = gamma.reshape([-1] + [1] * (x.ndim-1))
+
+        # NOTE
+        # * we add a little epsilon to the denominator to avoid
+        #   division by zero.
+        # * We also ensure that the rescaled input is in (0+eps, 1-eps)
+        #   to ensure differentiability everywhere.
+        # * The vmin/vmax may have been computed on a different image
+        #   than x, so we cannot trust that x.min() < vmin.
+
+        den = vmax - vmin
+        num = x - vmin
+        num.clamp_(1e-5 * den, (1.0 - 1e-5) * den)
+        y = div_(num, add_(den, 1e-5))
+        y = pow_(y, gamma)
+        if gamma.requires_grad:
+            # When gamma requires grad,  mul_(y, vmax-vmin) is happy
+            # to overwrite y, but we cant because we need y to
+            # backprop through pow. So we need an explicit branch.
+            y = torch.add(torch.mul(y, vmax - vmin), vmin)
+        else:
+            y = add_(mul_(y, vmax - vmin), vmin)
+
+        return prepare_output(
+            dict(input=x, output=y, vmin=vmin, vmax=vmax, gamma=gamma),
+            self.returns)
+
+
 class GammaTransform(NonFinalTransform):
     """Gamma correction
 
@@ -671,38 +723,7 @@ class GammaTransform(NonFinalTransform):
     1. https://en.wikipedia.org/wiki/Gamma_correction
     """
 
-    class FinalGammaTransform(FinalTransform):
-
-        def __init__(self, gamma, vmin, vmax, **kwargs):
-            super().__init__(**kwargs)
-            self.gamma = gamma
-            self.vmin = vmin
-            self.vmax = vmax
-
-        def xform(self, x):
-            vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
-            vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
-            gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
-            vmin = vmin.reshape([-1] + [1] * (x.ndim-1))
-            vmax = vmax.reshape([-1] + [1] * (x.ndim-1))
-            gamma = gamma.reshape([-1] + [1] * (x.ndim-1))
-
-            # we add a little epsilon to avoid have nans when the
-            # image is full of zeros
-
-            y = div_(x.sub(vmin), (vmax - vmin).clamp_min_(1e-8))
-            y = pow_(y, gamma)
-            if gamma.requires_grad:
-                # When gamma requires grad,  mul_(y, vmax-vmin) is happy
-                # to overwrite y, but we cant because we need y to
-                # backprop through pow. So we need an explicit branch.
-                y = torch.add(torch.mul(y, vmax - vmin), vmin)
-            else:
-                y = add_(mul_(y, vmax - vmin), vmin)
-
-            return prepare_output(
-                dict(input=x, output=y, vmin=vmin, vmax=vmax, gamma=gamma),
-                self.returns)
+    Final = GammaFinalTransform
 
     def __init__(self, gamma=1, vmin=None, vmax=None,
                  *, shared=False, **kwargs):
@@ -750,7 +771,7 @@ class GammaTransform(NonFinalTransform):
                 vmax = vmax.max()
         else:
             vmax = self.vmax
-        return self.FinalGammaTransform(
+        return self.Final(
             self.gamma, vmin, vmax, **self.get_prm()
         ).make_final(max_depth-1)
 
@@ -879,7 +900,9 @@ class QuantileTransform(NonFinalTransform):
         pmin = pmin[(Ellipsis,) + (None,) * ndim]
         pmax = pmax[(Ellipsis,) + (None,) * ndim]
 
-        slope = (self.vmax - self.vmin) / (pmax - pmin)
+        num = self.vmax - self.vmin
+        den = (pmax - pmin).clamp_min_(1e-16)
+        slope = num / den
         offset = self.vmin - pmin * slope
 
         if self.clip:
