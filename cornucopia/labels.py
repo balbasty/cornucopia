@@ -19,12 +19,15 @@ __all__ = [
     'BernoulliDiskTransform',
     'SmoothBernoulliDiskTransform',
 ]
+# stdlib
 import math as pymath
 
+# dependencies
 import torch
 import interpol
 import distmap
 
+# internals
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
 from .base import FinalTransform, NonFinalTransform
 from .baseutils import prepare_output

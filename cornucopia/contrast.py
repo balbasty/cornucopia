@@ -1,9 +1,76 @@
-__all__ = ['ContrastMixtureTransform', 'ContrastLookupTransform']
+__all__ = [
+    'ContrastMixtureTransform',
+    'ContrastMixtureFinalTransform',
+    'ContrastLookupTransform',
+    'ContrastLookupFinalTransform'
+]
 
+# stdlib
+from math import inf
+# dependencies
 import torch
-from .base import NonFinalTransform, FinalTransform
+from torch import Tensor
+# internals
+from .base import NonFinalTransform, FinalTransform, Transform
 from .special import PerChannelTransform
 from .utils.gmm import fit_gmm
+
+
+class ContrastMixtureFinalTransform(FinalTransform):
+    """Classwise shift and rescaling."""
+
+    def __init__(
+        self, z: Tensor,
+        mu0: Tensor, sigma0: Tensor, mu: Tensor, sigma: Tensor,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        z : (K, *spatial) tensor
+            Probability that each voxel belongs to a given class.
+        mu0 : (K, C) tensor
+            Original means for each class.
+        sigma0 : (K, C, C) tensor
+            Original covariances for each class.
+        mu : (K, C) tensor
+            New means for each class.
+        sigma : (K, C, C) tensor
+            New covariances for each class.
+        """
+        super().__init__(**kwargs)
+        self.z = z
+        self.mu0 = mu0
+        self.sigma0 = sigma0
+        self.mu = mu
+        self.sigma = sigma
+
+    def xform(self, x: Tensor) -> Tensor:
+        z = self.z.to(x)
+        mu0 = self.mu0.to(x)
+        sigma0 = self.sigma0.to(x)
+        mu = self.mu.to(x)
+        sigma = self.sigma.to(x)
+
+        # Whiten using fitted parameters
+        chol = torch.linalg.cholesky(sigma0)
+        chol = chol.inverse()
+        x = x.movedim(0, -1)
+        x = x[..., None, :] - mu0                       # [..., nk, nc]
+        x = torch.matmul(chol, x[..., :, None])         # [..., nk, nc, 1]
+
+        # Color using new parameters
+        chol = torch.linalg.cholesky(sigma)
+        x = torch.matmul(chol, x)                        # [..., nk, nc, 1]
+        x = x[..., 0] + mu                               # [..., nk, nc]
+        x = x.movedim(-1, 0)                             # [..., nc, nk]
+
+        # Weight using posterior
+        z = z.movedim(0, -1)
+        x = torch.matmul(x[..., None, :], z[..., None])  # [..., nc, 1, 1]
+        x = x[..., 0, 0]                                 # [..., nc]
+
+        return x
 
 
 class ContrastMixtureTransform(NonFinalTransform):
@@ -35,45 +102,16 @@ class ContrastMixtureTransform(NonFinalTransform):
 
     """
 
-    class MixtureFinalTransform(FinalTransform):
-        """Final class that applies the augmentation"""
-        def __init__(self, z, mu0, sigma0, mu, sigma, **kwargs):
-            super().__init__(**kwargs)
-            self.z = z
-            self.mu0 = mu0
-            self.sigma0 = sigma0
-            self.mu = mu
-            self.sigma = sigma
+    Final = ContrastMixtureFinalTransform
 
-        def xform(self, x):
-            z = self.z.to(x)
-            mu0 = self.mu0.to(x)
-            sigma0 = self.sigma0.to(x)
-            mu = self.mu.to(x)
-            sigma = self.sigma.to(x)
-
-            # Whiten using fitted parameters
-            chol = torch.linalg.cholesky(sigma0)
-            chol = chol.inverse()
-            x = x.movedim(0, -1)
-            x = x[..., None, :] - mu0                       # [..., nk, nc]
-            x = torch.matmul(chol, x[..., :, None])         # [..., nk, nc, 1]
-
-            # Color using new parameters
-            chol = torch.linalg.cholesky(sigma)
-            x = torch.matmul(chol, x)                        # [..., nk, nc, 1]
-            x = x[..., 0] + mu                               # [..., nk, nc]
-            x = x.movedim(-1, 0)                             # [..., nc, nk]
-
-            # Weight using posterior
-            z = z.movedim(0, -1)
-            x = torch.matmul(x[..., None, :], z[..., None])  # [..., nc, 1, 1]
-            x = x[..., 0, 0]                                 # [..., nc]
-
-            return x
-
-    def __init__(self, nk=16, keep_background=True,
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        nk: int =16,
+        keep_background: bool =True,
+        *,
+        shared: bool = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -93,16 +131,16 @@ class ContrastMixtureTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.nk = nk
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         z, mu0, sigma0, _ = fit_gmm(x, self.nk)
-        mu, sigma = self.make_parameters(mu0, sigma0)
-        return self.MixtureFinalTransform(
+        mu, sigma = self._make_parameters(mu0, sigma0)
+        return self.Final(
             z, mu0, sigma0, mu, sigma, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    def make_parameters(self, old_mu, old_sigma):
+    def _make_parameters(self, old_mu, old_sigma):
         backend = dict(dtype=old_mu.dtype, device=old_mu.device)
         nk, nc = old_mu.shape
         old_mu_min = old_mu.min(0).values
@@ -134,28 +172,41 @@ class ContrastMixtureTransform(NonFinalTransform):
         return mu, fullsigma
 
 
+
+class ContrastLookupFinalTransform(FinalTransform):
+    """Binwise intensity shift."""
+
+    def __init__(self, edges: Tensor, mu: Tensor, **kwargs) -> None:
+        """
+        Parameters
+        ----------
+        edges : (K+1,) tensor
+            The limits of each input bin.
+        mu : (K,) tensor
+            The new mean value for each bin.
+        """
+        super().__init__(**kwargs)
+        self.edges = edges
+        self.mu = mu
+
+    def xform(self, x: Tensor) -> Tensor:
+        edges, mu = self.edges.to(x), self.mu.to(x)
+        mu0 = (edges[:-1] + edges[1:]) / 2
+        nk = len(mu)
+
+        new_x = x.clone()
+        for k in range(nk):
+            mask = (edges[k] <= x) & (x < edges[k+1])
+            new_x[mask] += mu[k] - mu0[k]
+        return new_x
+
+
 class ContrastLookupTransform(NonFinalTransform):
     """
     Segment intensities into equidistant bins and change their mean value.
     """
 
-    class LookupFinalTransform(FinalTransform):
-
-        def __init__(self, edges, mu, **kwargs):
-            super().__init__(**kwargs)
-            self.edges = edges
-            self.mu = mu
-
-        def xform(self, x):
-            edges, mu = self.edges.to(x), self.mu.to(x)
-            mu0 = (edges[:-1] + edges[1:]) / 2
-            nk = len(mu)
-
-            new_x = x.clone()
-            for k in range(nk):
-                mask = (edges[k] <= x) & (x < edges[k+1])
-                new_x[mask] += mu[k] - mu0[k]
-            return new_x
+    Final = ContrastLookupFinalTransform
 
     def __init__(self, nk=16, keep_background=True,
                  *, shared=False, **kwargs):
@@ -173,7 +224,7 @@ class ContrastLookupTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.nk = nk
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -185,6 +236,4 @@ class ContrastLookupTransform(NonFinalTransform):
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)
         new_mu = torch.rand(self.nk).to(x) * (vmax - vmin) + vmin
-        return self.LookupFinalTransform(
-            edges, new_mu, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        return self.Final(edges, new_mu, **self.get_prm()).make_final(x, max_depth-1)

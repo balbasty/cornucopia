@@ -19,11 +19,15 @@ __all__ = [
     'QuantileTransform',
     'MinMaxTransform',
 ]
+# stdlib
+import math
 
+# dependencies
+import interpol
 import torch
 from torch.nn.functional import interpolate
-import math
-import interpol
+
+# internals
 from .baseutils import prepare_output
 from .base import FinalTransform, NonFinalTransform
 from .special import RandomizedTransform, SequentialTransform

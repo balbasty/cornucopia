@@ -1,44 +1,84 @@
 __all__ = [
+    'ApplyArrayCoilTransform',
     'ArrayCoilTransform',
     'SumOfSquaresTransform',
+    'IntraScanMotionFinalTransform',
     'IntraScanMotionTransform',
     'SmallIntraScanMotionTransform',
 ]
-
-import torch
+# stdlib
 import math
 import random
-from .base import NonFinalTransform, FinalTransform
-from .baseutils import prepare_output, return_requires
+from typing import List, Optional, Union
+from math import inf
+
+# dependencies
+import torch
+from torch import Tensor
+
+# internals
+from .base import Transform, NonFinalTransform, FinalTransform
+from .baseutils import Returned, prepare_output, return_requires
 from .intensity import MulFieldTransform
 from .geometric import RandomAffineTransform
-from .random import Fixed
+from .random import Fixed, Sampler
 from .utils.warps import identity
 from .utils.smart_inplace import sqrt_, square_, abs_, mul_, exp_, sub_, add_
 from . import ctx
 
 
+class ApplyArrayCoilTransform(FinalTransform):
+    """Apply coil sensitivities to an image and combine across coils."""
+
+    def __init__(self, sens: Tensor, **kwargs) -> None:
+        """
+        Parameters
+        ----------
+        sens : (K, *spatial) tensor
+            Complex coil sensitivities
+
+        Other Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
+            Default is 'uncombined'.
+
+            - 'sos': Sum of square combined (magnitude) image
+            - 'uncombined': Uncombined (complex) coil images
+            - 'sens': Uncombined (complex) coil sensitivities
+            - 'netsens': Net (magnitude) coil sensitivity
+        """
+        super().__init__(**kwargs)
+        self.sens = sens
+
+    def xform(self, x: Tensor) -> Returned:
+        sens = self.sens.to(x.device)
+        uncombined = x * sens
+        netsens = sqrt_(square_(sens.abs()).sum(0))[None]
+        sos = sqrt_(square_(uncombined.abs()).sum(0))[None]
+        return prepare_output(
+            dict(input=x, sos=sos, output=uncombined,
+                    uncombined=uncombined, netsens=netsens, sens=sens),
+            self.returns)
+
+
 class ArrayCoilTransform(NonFinalTransform):
     """Generate and apply random coil sensitivities (real or complex)"""
 
-    class FinalArrayCoilTransform(FinalTransform):
+    Final = ApplyArrayCoilTransform
 
-        def __init__(self, sens, **kwargs):
-            super().__init__(**kwargs)
-            self.sens = sens
-
-        def xform(self, x):
-            sens = self.sens.to(x.device)
-            uncombined = x * sens
-            netsens = sqrt_(square_(sens.abs()).sum(0))[None]
-            sos = sqrt_(square_(uncombined.abs()).sum(0))[None]
-            return prepare_output(
-                dict(input=x, sos=sos, output=uncombined,
-                     uncombined=uncombined, netsens=netsens, sens=sens),
-                self.returns)
-
-    def __init__(self, ncoils=8, fwhm=0.5, diameter=0.8, jitter=0.01,
-                 unit='fov', shape=4, sos=True, *, shared=True, **kwargs):
+    def __init__(
+        self,
+        ncoils: int = 8,
+        fwhm: float = 0.5,
+        diameter: float = 0.8,
+        jitter: float = 0.01,
+        unit: str = 'fov',
+        shape: Union[int, List[int]] = 4,
+        sos: bool = True,
+        *,
+        shared=True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -53,7 +93,7 @@ class ArrayCoilTransform(NonFinalTransform):
             Amount of jitter off the ellipsoid
         unit : {'fov', 'vox'}
             Unit of `fwhm`, `diameter`, `jitter`
-        shape : int
+        shape : [list of] int
             Number of control points for the underlying smooth component.
 
         Other Parameters
@@ -78,7 +118,7 @@ class ArrayCoilTransform(NonFinalTransform):
         self.shape = shape
         self.sos = sos
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -119,7 +159,7 @@ class ArrayCoilTransform(NonFinalTransform):
                 mul_(magnitude[k], exp_bias)
 
         sens = mul_(exp_(1j * phase), magnitude)
-        return self.FinalArrayCoilTransform(
+        return self.Final(
             sens, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -127,114 +167,140 @@ class ArrayCoilTransform(NonFinalTransform):
 class SumOfSquaresTransform(FinalTransform):
     """Compute the sum-of-squares across coils/channels"""
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         return sqrt_(square_(abs_(x)).sum(0, keepdim=True))
+
+
+
+class IntraScanMotionFinalTransform(FinalTransform):
+    """Apply pre-computed intra-scan motion"""
+
+    def __init__(
+        self,
+        motion: FinalTransform,
+        patterns: Tensor,
+        sens: Optional[FinalTransform] = None,
+        axis: int = -1,
+        freq: bool = False,
+        **kwargs
+    ):
+        """
+        Parameters
+        ----------
+        motion : FinalTransform
+            A transform that applies the motion to an image
+        patterns : tensor
+            Binary tensor of shape (N, X) indicating which frequencies/slices
+            are acquired in each shot. N is the number of shots, X is the
+            number of frequencies/slices along the motion axis.
+        sens : FinalTransform
+            A transform that generates a set of complex sensitivity profiles.
+        axis : int
+            Axis along which shots are acquired (slice or phase-encode)
+        freq : bool
+            Motion happens across a phase-encode direction, which means
+            that the k-space is build from pieces with different object
+            position. This typically happens in "3D" acquisitions.
+            If False, motion happens along the slice direction ("2D"
+            acquisition).
+        """
+        super().__init__(**kwargs)
+        self.motion = motion
+        self.patterns = patterns
+        self.sens = sens
+        self.axis = axis
+        self.freq = freq
+
+    def xform(self, x):
+        motions = self.motion
+        patterns = self.patterns.to(x.device)
+
+        if self.sens:
+            assert len(x) == 1
+            with ctx.returns(self.sens, ['sens', 'netsens']):
+                sens, netsens = self.sens(x)
+            # sens = self.sens.to(x.device)
+            # netsens = sens.abs().square_().sum(0).sqrt_()[None]
+            y = x.new_empty([len(sens), *x.shape[1:]],
+                            dtype=torch.complex64)
+        else:
+            ydtype = torch.complex64 if self.freq else x.dtype
+            y = torch.empty_like(x, dtype=ydtype)
+            sens = netsens = None
+
+        x = x.movedim(self.axis, 1)
+        y = y.movedim(self.axis, 1)
+
+        matrix, flow = [], []
+        returned = return_requires(self.returns)
+        returns = dict(moved='output')
+        if 'matrix' in returned:
+            returns['matrix'] = 'matrix'
+        if 'flow' in returned:
+            returns['flow'] = 'flow'
+        for motion_trf, pattern in zip(motions, patterns):
+            with ctx.returns(motion_trf, returns):
+                moved = motion_trf(x)
+            matrix.append(moved.get('matrix', None))
+            flow.append(moved.get('flow', None))
+            moved = moved['moved']
+            if sens is not None:
+                moved = moved * sens
+            if self.freq:
+                moved = torch.fft.ifftshift(moved)
+                moved = torch.fft.fft(moved, dim=1)
+                moved = torch.fft.fftshift(moved)
+            # NOTE: In torch < 1.*:
+            #   >> y[:, pattern] = moved[:, pattern]
+            #   RuntimeError: index does not support automatic
+            #   differentiation for outputs with complex dtype.
+            # Use torch.where instead.
+            y = torch.where(pattern[None], y, moved)
+
+        if self.freq:
+            y = torch.fft.ifftshift(y)
+            y = torch.fft.ifft(y, dim=1)
+            y = torch.fft.fftshift(y)
+        y = y.movedim(1, self.axis)
+        x = x.movedim(1, self.axis)
+
+        sos = sqrt_(square_(y.abs()).sum(0, keepdim=True))
+
+        if 'matrix' in returned:
+            matrix = torch.stack(matrix)
+        else:
+            matrix = None
+        if 'flow' in returned:
+            flow = torch.stack(flow)
+        else:
+            flow = None
+
+        return prepare_output(
+            dict(input=x, sos=sos, output=sos, uncombined=y, sens=sens,
+                    netsens=netsens, pattern=patterns, flow=flow,
+                    matrix=matrix),
+            self.returns)
 
 
 class IntraScanMotionTransform(NonFinalTransform):
     """Model intra-scan motion"""
 
-    class FinalIntraScanMotionTransform(FinalTransform):
+    Final = IntraScanMotionFinalTransform
 
-        def __init__(self, motion, patterns, sens=None, axis=-1, freq=False,
-                     **kwargs):
-            """
-            Parameters
-            ----------
-            motion : FinalTransform
-            patterns : tensor
-            sens : FinalTransform
-            axis : int
-            """
-            super().__init__(**kwargs)
-            self.motion = motion
-            self.patterns = patterns
-            self.sens = sens
-            self.axis = axis
-            self.freq = freq
-
-        def xform(self, x):
-            motions = self.motion
-            patterns = self.patterns.to(x.device)
-
-            if self.sens:
-                assert len(x) == 1
-                with ctx.returns(self.sens, ['sens', 'netsens']):
-                    sens, netsens = self.sens(x)
-                # sens = self.sens.to(x.device)
-                # netsens = sens.abs().square_().sum(0).sqrt_()[None]
-                y = x.new_empty([len(sens), *x.shape[1:]],
-                                dtype=torch.complex64)
-            else:
-                ydtype = torch.complex64 if self.freq else x.dtype
-                y = torch.empty_like(x, dtype=ydtype)
-                sens = netsens = None
-
-            x = x.movedim(self.axis, 1)
-            y = y.movedim(self.axis, 1)
-
-            matrix, flow = [], []
-            returned = return_requires(self.returns)
-            returns = dict(moved='output')
-            if 'matrix' in returned:
-                returns['matrix'] = 'matrix'
-            if 'flow' in returned:
-                returns['flow'] = 'flow'
-            for motion_trf, pattern in zip(motions, patterns):
-                with ctx.returns(motion_trf, returns):
-                    moved = motion_trf(x)
-                matrix.append(moved.get('matrix', None))
-                flow.append(moved.get('flow', None))
-                moved = moved['moved']
-                if sens is not None:
-                    moved = moved * sens
-                if self.freq:
-                    moved = torch.fft.ifftshift(moved)
-                    moved = torch.fft.fft(moved, dim=1)
-                    moved = torch.fft.fftshift(moved)
-                # NOTE: In torch < 1.*:
-                #   >> y[:, pattern] = moved[:, pattern]
-                #   RuntimeError: index does not support automatic
-                #   differentiation for outputs with complex dtype.
-                # Use torch.where instead.
-                y = torch.where(pattern[None], y, moved)
-
-            if self.freq:
-                y = torch.fft.ifftshift(y)
-                y = torch.fft.ifft(y, dim=1)
-                y = torch.fft.fftshift(y)
-            y = y.movedim(1, self.axis)
-            x = x.movedim(1, self.axis)
-
-            sos = sqrt_(square_(y.abs()).sum(0, keepdim=True))
-
-            if 'matrix' in returned:
-                matrix = torch.stack(matrix)
-            else:
-                matrix = None
-            if 'flow' in returned:
-                flow = torch.stack(flow)
-            else:
-                flow = None
-
-            return prepare_output(
-                dict(input=x, sos=sos, output=sos, uncombined=y, sens=sens,
-                     netsens=netsens, pattern=patterns, flow=flow,
-                     matrix=matrix),
-                self.returns)
-
-    def __init__(self,
-                 shots=4,
-                 axis=-1,
-                 freq=True,
-                 pattern='sequential',
-                 translations=0.1,
-                 rotations=15,
-                 sos=True,
-                 coils=None,
-                 *,
-                 shared='channels',
-                 **kwargs):
+    def __init__(
+        self,
+        shots: int = 4,
+        axis: int = -1,
+        freq: bool = True,
+        pattern: Union[str, List[Tensor]] = 'sequential',
+        translations: Union[Sampler, float] = 0.1,
+        rotations: Union[Sampler, float] = 15,
+        sos: bool = True,
+        coils: Optional[Transform] = None,
+        *,
+        shared: Union[str, bool] = 'channels',
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -260,6 +326,8 @@ class IntraScanMotionTransform(NonFinalTransform):
             Sampler (or upper-bound) for random translations (in % of FOV)
         rotations : Sampler or float
             Sampler (or upper-bound) for random rotations (in deg)
+        sos : bool
+            Whether to return the sum-of-squares combined image across coils.
         coils : Transform
             A transform that generates a set of complex sensitivity profiles
 
@@ -291,7 +359,9 @@ class IntraScanMotionTransform(NonFinalTransform):
             translations=translations, rotations=rotations,
             zooms=Fixed(0), shears=Fixed(0), bound='reflection')
 
-    def get_pattern(self, n, device=None):
+    def get_pattern(
+        self, n: int, device: Optional[torch.device] = None
+    ) -> Tensor:
         shots = min(self.shots, n)
         pattern = []
         if self.pattern == 'sequential':
@@ -347,7 +417,7 @@ class IntraScanMotionTransform(NonFinalTransform):
         if self.coils:
             sens = self.coils.make_final(x)
 
-        return self.FinalIntraScanMotionTransform(
+        return self.Final(
             motion, pattern, sens, self.axis, self.freq, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -355,8 +425,15 @@ class IntraScanMotionTransform(NonFinalTransform):
 class SmallIntraScanMotionTransform(IntraScanMotionTransform):
     """Model intra-scan motion that happens once across k-space"""
 
-    def __init__(self, translations=0.05, rotations=5, axis=-1,
-                 *, shared='channels', **kwargs):
+    def __init__(
+        self,
+        translations: Union[Sampler, float] = 0.05,
+        rotations: Union[Sampler, float] = 5,
+        axis: int = -1,
+        *,
+        shared: Union[str, bool] = 'channels',
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -367,12 +444,17 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
             Sampler (or upper-bound) for random rotations (in deg)
         axis : int
             Axis along which shots are acquired (slice or phase-encode)
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+
+        Other Parameters
+        ----------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
         """
         super().__init__(translations=translations, rotations=rotations,
                          shared=shared, shots=2, axis=axis, **kwargs)
 
-    def get_pattern(self, n, device=None):
+    def get_pattern(
+        self, n: int, device: Optional[torch.device] = None
+    ) -> Tensor:
         k = random.randint(0, n-1)
         mask = torch.zeros(n, dtype=torch.bool, device=device)
         mask[:k] = 1

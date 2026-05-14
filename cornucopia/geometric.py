@@ -1,27 +1,160 @@
 __all__ = [
     'ElasticTransform',
+    'ApplyElasticTransform',
     'RandomElasticTransform',
     'AffineTransform',
+    'ApplyAffineTransform',
     'RandomAffineTransform',
     'AffineElasticTransform',
+    'ApplyAffineElasticTransform',
     'RandomAffineElasticTransform',
     'MakeAffinePair',
     'SlicewiseAffineTransform',
+    'ApplySlicewiseAffineTransform',
     'RandomSlicewiseAffineTransform',
 ]
-
-import torch
-from torch.nn.functional import interpolate
+# stdlib
 import math
 import random
+from math import inf
+from typing import Dict, Optional, Union, List
+
+# dependencies
+import torch
+from torch import Tensor
+from torch.nn.functional import interpolate
 import interpol
-from typing import Optional, Union, List
-from .base import NonFinalTransform, FinalTransform
-from .baseutils import prepare_output, return_requires
+
+# internals
+from .base import NonFinalTransform, FinalTransform, Transform
+from .baseutils import Returned, prepare_output, return_requires
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils import warps
 from .utils.py import ensure_list, cast_like, make_vector
 from .utils.smart_inplace import add_
+
+
+class ApplyElasticTransform(FinalTransform):
+    """Apply a (deterministic) elastic transform"""
+
+    def __init__(
+        self,
+        flow: Optional[Tensor] = None,
+        controls: Optional[Tensor] = None,
+        steps: int = 0,
+        order: int = 3,
+        bound: str = 'border',
+        zero_center: bool = False,
+        nearest_if_label: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        flow : (C, D, *spatial) tensor
+            Flow field
+            (if not provided, `control` must be provided)
+        control : (C, D, *shape) tensor
+            Spline control points
+            (if not provided, `flow` must be provided)
+        steps : int
+            Number of scaling and squaring steps
+        order : 1..7
+            Order of the splines that encode the smooth deformation.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode used for the deformed image.
+        zero_center : bool
+            Subtract its mean displacement to the flow field so that
+            it has an empirical mean of zero.
+        nearest_if_label : bool
+        """
+        super().__init__(**kwargs)
+        self.flow = flow
+        self.controls = controls
+        self.steps = steps
+        self.order = order
+        self.bound = bound
+        self.zero_center = zero_center
+        self.nearest_if_label = nearest_if_label
+        self.backend = dict(dtype=dtype, device=device)
+
+    def make_flow(
+        self, control: Tensor, fullshape: List[int]
+    ) -> Tensor:
+        """Upsample the control points to the final full size
+
+        Parameters
+        ----------
+        control : (C, D, *shape) tensor
+            Spline control points
+        fullshape : list[int]
+            Target shape
+
+        Returns
+        -------
+        flow : (C, D, *fullshape) tensor
+            Upampled flow field
+
+        """
+        if self.order == 1:
+            mode = ('trilinear' if len(fullshape) == 3 else
+                    'bilinear' if len(fullshape) == 2 else
+                    'linear')
+            flow = interpolate(
+                control[None], fullshape, mode=mode, align_corners=True
+            )[0]
+        else:
+            flow = interpol.resize(
+                control, shape=fullshape, interpolation=self.order,
+                prefilter=False
+            )
+        if self.steps:
+            flow = warps.exp_velocity(
+                flow.movedim(1, -1), self.steps
+            ).movedim(-1, 1)
+        if self.zero_center:
+            batch, ndim = flow.shape[:2]
+            mean_flow = flow.reshape([batch, ndim, -1]).mean(-1)
+            mean_flow = mean_flow.reshape([batch, ndim] + [1] * ndim)
+            flow -= mean_flow
+        return flow
+
+    def xform(self, x: Tensor) -> Returned:
+        """Deform the input tensor
+
+        Parameters
+        ----------
+        x : (C, *spatial) tensor
+            Input tensor
+
+        Returns
+        -------
+        out : [dict or list of] tensor
+            The tensors returned by this function depend on the
+            value of `self.returns`. See `ElasticTransform`.
+
+        """
+        x = x.to(**self.backend)
+        flow = cast_like(self.flow, x)
+        controls = cast_like(self.controls, x)
+        required = return_requires(self.returns)
+        if flow is None and ('flow' in required or 'output' in required):
+            flow = self.make_flow(controls, x.shape[1:])
+        y = None
+        if 'output' in required:
+            mode = 'bilinear'
+            if not x.dtype.is_floating_point and self.nearest_if_label:
+                mode = 'nearest'
+            y = warps.apply_flow(
+                x[:, None], flow.movedim(1, -1),
+                padding_mode=self.bound, mode=mode,
+            )[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, controls=controls),
+            self.returns
+        )
 
 
 class ElasticTransform(NonFinalTransform):
@@ -31,6 +164,8 @@ class ElasticTransform(NonFinalTransform):
     The number of control points is fixed but coefficients are
     randomly sampled from a uniform distribution.
     """
+
+    Final = ApplyElasticTransform
 
     def __init__(
         self,
@@ -47,7 +182,7 @@ class ElasticTransform(NonFinalTransform):
         device: Optional[Union[torch.device, str]] = None,
         shared: Union[bool, str] = True,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -111,7 +246,9 @@ class ElasticTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(self, x, max_depth=float('inf'), flow=True):
+    def make_final(
+        self, x: Tensor, max_depth: int = inf, flow: bool =  True
+    ) -> Transform:
         """
         Generate a deterministic transform with constant parameters
 
@@ -189,126 +326,6 @@ class ElasticTransform(NonFinalTransform):
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-        """Final (deterministic) elastic transform"""
-
-        def __init__(
-            self,
-            flow: Optional[torch.Tensor] = None,
-            controls: Optional[torch.Tensor] = None,
-            steps: int = 0,
-            order: int = 3,
-            bound: str = 'border',
-            zero_center: bool = False,
-            nearest_if_label: bool = True,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            **kwargs
-        ):
-            """
-            Parameters
-            ----------
-            flow : (C, D, *spatial) tensor
-                Flow field
-                (if not provided, `control` must be provided)
-            control : (C, D, *shape) tensor
-                Spline control points
-                (if not provided, `flow` must be provided)
-            steps : int
-                Number of scaling and squaring steps
-            order : 1..7
-                Order of the splines that encode the smooth deformation.
-            bound : {'zeros', 'border', 'reflection'}
-                Padding mode used for the deformed image.
-            zero_center : bool
-                Subtract its mean displacement to the flow field so that
-                it has an empirical mean of zero.
-            nearest_if_label : bool
-            """
-            super().__init__(**kwargs)
-            self.flow = flow
-            self.controls = controls
-            self.steps = steps
-            self.order = order
-            self.bound = bound
-            self.zero_center = zero_center
-            self.nearest_if_label = nearest_if_label
-            self.backend = dict(dtype=dtype, device=device)
-
-        def make_flow(self, control, fullshape):
-            """Upsample the control points to the final full size
-
-            Parameters
-            ----------
-            control : (C, D, *shape) tensor
-                Spline control points
-            fullshape : list[int]
-                Target shape
-
-            Returns
-            -------
-            flow : (C, D, *fullshape) tensor
-                Upampled flow field
-
-            """
-            if self.order == 1:
-                mode = ('trilinear' if len(fullshape) == 3 else
-                        'bilinear' if len(fullshape) == 2 else
-                        'linear')
-                flow = interpolate(
-                    control[None], fullshape, mode=mode, align_corners=True
-                )[0]
-            else:
-                flow = interpol.resize(
-                    control, shape=fullshape, interpolation=self.order,
-                    prefilter=False
-                )
-            if self.steps:
-                flow = warps.exp_velocity(
-                    flow.movedim(1, -1), self.steps
-                ).movedim(-1, 1)
-            if self.zero_center:
-                batch, ndim = flow.shape[:2]
-                mean_flow = flow.reshape([batch, ndim, -1]).mean(-1)
-                mean_flow = mean_flow.reshape([batch, ndim] + [1] * ndim)
-                flow -= mean_flow
-            return flow
-
-        def xform(self, x: torch.Tensor):
-            """Deform the input tensor
-
-            Parameters
-            ----------
-            x : (C, *spatial) tensor
-                Input tensor
-
-            Returns
-            -------
-            out : [dict or list of] tensor
-                The tensors returned by this function depend on the
-                value of `self.returns`. See `ElasticTransform`.
-
-            """
-            x = x.to(**self.backend)
-            flow = cast_like(self.flow, x)
-            controls = cast_like(self.controls, x)
-            required = return_requires(self.returns)
-            if flow is None and ('flow' in required or 'output' in required):
-                flow = self.make_flow(controls, x.shape[1:])
-            y = None
-            if 'output' in required:
-                mode = 'bilinear'
-                if not x.dtype.is_floating_point and self.nearest_if_label:
-                    mode = 'nearest'
-                y = warps.apply_flow(
-                    x[:, None], flow.movedim(1, -1),
-                    padding_mode=self.bound, mode=mode,
-                )[:, 0]
-            return prepare_output(
-                dict(input=x, output=y, flow=flow, controls=controls),
-                self.returns
-            )
-
 
 class RandomElasticTransform(NonFinalTransform):
     """
@@ -316,22 +333,22 @@ class RandomElasticTransform(NonFinalTransform):
     """
 
     def __init__(
-            self,
-            dmax: Union[Sampler, float, List[float]] = 0.1,
-            shape: Union[Sampler, int, List[int]] = 5,
-            unit: str = 'fov',
-            bound: str = 'border',
-            steps: int = 0,
-            order: int = 3,
-            zero_center: bool = False,
-            nearest_if_label: bool = False,
-            *,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            shared: Union[bool, str] = True,
-            shared_flow: Optional[Union[bool, str]] = None,
-            **kwargs
-    ):
+        self,
+        dmax: Union[Sampler, float, List[float]] = 0.1,
+        shape: Union[Sampler, int, List[int]] = 5,
+        unit: str = 'fov',
+        bound: str = 'border',
+        steps: int = 0,
+        order: int = 3,
+        zero_center: bool = False,
+        nearest_if_label: bool = False,
+        *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        shared: Union[bool, str] = True,
+        shared_flow: Optional[Union[bool, str]] = None,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -389,7 +406,7 @@ class RandomElasticTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -415,6 +432,60 @@ class RandomElasticTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+class ApplyAffineTransform(FinalTransform):
+    """Apply an affine transform encoded by an affine matrix"""
+
+    def __init__(
+        self,
+        flow: Optional[Tensor] = None,
+        matrix: Optional[Tensor] = None,
+        bound: str = 'border',
+        nearest_if_label: bool = False,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        flow : ([C], D, *spatial) tensor
+            Flow field
+        matrix : ([C], D+1, D+1) tensor
+            Matrix
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        nearest_if_label : bool
+        """
+        super().__init__(**kwargs)
+        self.flow = flow
+        self.matrix = matrix
+        self.bound = bound
+        self.nearest_if_label = nearest_if_label
+        self.backend = dict(dtype=dtype, device=device)
+
+    def make_flow(self, matrix: Tensor, shape: List[int]) -> Tensor:
+        return warps.affine_flow(matrix, shape).movedim(-1, 0)
+
+    def xform(self, x: Tensor) -> Returned:
+        x = x.to(**self.backend)
+        flow = cast_like(self.flow, x)
+        matrix = cast_like(self.matrix, x)
+        required = return_requires(self.returns)
+        if flow is None and ('flow' in required or 'output' in required):
+            flow = self.make_flow(matrix, x.shape[1:])
+        y = None
+        if 'output' in required:
+            mode = 'bilinear'
+            if not x.dtype.is_floating_point and self.nearest_if_label:
+                mode = 'nearest'
+            y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
+                                    padding_mode=self.bound, mode=mode)[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, matrix=matrix),
+            self.returns
+        )
+
+
 class AffineTransform(NonFinalTransform):
     """
     Apply an affine transform encoded by translations, rotations,
@@ -426,21 +497,23 @@ class AffineTransform(NonFinalTransform):
     (A is a matrix so the transforms are applied right to left)
     """
 
+    Final = ApplyAffineTransform
+
     def __init__(
-            self,
-            translations: Union[float, List[float]] = 0,
-            rotations: Union[float, List[float]] = 0,
-            shears: Union[float, List[float]] = 0,
-            zooms: Union[float, List[float]] = 0,
-            unit: str = 'fov',
-            bound: str = 'border',
-            nearest_if_label: bool = False,
-            *,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            shared: Union[bool, str] = True,
-            **kwargs
-    ):
+        self,
+        translations: Union[float, List[float]] = 0,
+        rotations: Union[float, List[float]] = 0,
+        shears: Union[float, List[float]] = 0,
+        zooms: Union[float, List[float]] = 0,
+        unit: str = 'fov',
+        bound: str = 'border',
+        nearest_if_label: bool = False,
+        *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        shared: Union[bool, str] = True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -499,7 +572,9 @@ class AffineTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(self, x, max_depth=float('inf'), flow=True):
+    def make_final(
+        self, x: Tensor, max_depth: int = inf, flow: bool = True
+    ) -> Transform:
         batch, *fullshape = x.shape
         ndim = len(fullshape)
         backend = dict(dtype=x.dtype, device=x.device)
@@ -576,59 +651,6 @@ class AffineTransform(NonFinalTransform):
             flow, A, self.bound, **self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-        """Apply an affine transform encoded by an affine matrix"""
-
-        def __init__(
-                self,
-                flow: Optional[torch.Tensor] = None,
-                matrix: Optional[torch.Tensor] = None,
-                bound: str = 'border',
-                nearest_if_label: bool = False,
-                dtype: Optional[torch.dtype] = None,
-                device: Optional[Union[torch.device, str]] = None,
-                **kwargs
-        ):
-            """
-            Parameters
-            ----------
-            flow : ([C], D, *spatial) tensor
-                Flow field
-            matrix : ([C], D+1, D+1) tensor
-                Matrix
-            bound : {'zeros', 'border', 'reflection'}
-                Padding mode
-            nearest_if_label : bool
-            """
-            super().__init__(**kwargs)
-            self.flow = flow
-            self.matrix = matrix
-            self.bound = bound
-            self.nearest_if_label = nearest_if_label
-            self.backend = dict(dtype=dtype, device=device)
-
-        def make_flow(self, matrix, shape):
-            return warps.affine_flow(matrix, shape).movedim(-1, 0)
-
-        def xform(self, x: torch.Tensor):
-            x = x.to(**self.backend)
-            flow = cast_like(self.flow, x)
-            matrix = cast_like(self.matrix, x)
-            required = return_requires(self.returns)
-            if flow is None and ('flow' in required or 'output' in required):
-                flow = self.make_flow(matrix, x.shape[1:])
-            y = None
-            if 'output' in required:
-                mode = 'bilinear'
-                if not x.dtype.is_floating_point and self.nearest_if_label:
-                    mode = 'nearest'
-                y = warps.apply_flow(x[:, None], flow.movedim(0, -1),
-                                     padding_mode=self.bound, mode=mode)[:, 0]
-            return prepare_output(
-                dict(input=x, output=y, flow=flow, matrix=matrix),
-                self.returns
-            )
-
 
 class RandomAffineTransform(NonFinalTransform):
     """
@@ -636,22 +658,22 @@ class RandomAffineTransform(NonFinalTransform):
     """
 
     def __init__(
-            self,
-            translations: Union[Sampler, float, List[float]] = 0.1,
-            rotations: Union[Sampler, float, List[float]] = 15,
-            shears: Union[Sampler, float, List[float]] = 0.012,
-            zooms: Union[Sampler, float, List[float]] = 0.15,
-            iso: bool = False,
-            unit: str = 'fov',
-            bound: str = 'border',
-            nearest_if_label: bool = False,
-            *,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            shared: Union[bool, str] = True,
-            shared_matrix: Optional[Union[bool, str]] = None,
-            **kwargs
-    ):
+        self,
+        translations: Union[Sampler, float, List[float]] = 0.1,
+        rotations: Union[Sampler, float, List[float]] = 15,
+        shears: Union[Sampler, float, List[float]] = 0.012,
+        zooms: Union[Sampler, float, List[float]] = 0.15,
+        iso: bool = False,
+        unit: str = 'fov',
+        bound: str = 'border',
+        nearest_if_label: bool = False,
+        *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        shared: Union[bool, str] = True,
+        shared_matrix: Optional[Union[bool, str]] = None,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -704,7 +726,7 @@ class RandomAffineTransform(NonFinalTransform):
         self.shared_matrix = shared_matrix
         self.backend = dict(dtype=dtype, device=device)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -736,10 +758,103 @@ class RandomAffineTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+
+class ApplyAffineElasticTransform(FinalTransform):
+    """Determinstic affine+elastic transform"""
+
+    def __init__(
+        self,
+        flow: Tensor,
+        controls: Tensor,
+        affine: Tensor,
+        bound: str = 'border',
+        nearest_if_label: bool = False,
+        backend: Optional[dict] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        flow : (C, D, *spatial) tensor
+            Flow field
+            (if not provided, `control` must be provided)
+        control : (C, D, *shape) tensor
+            Spline control points
+            (if not provided, `flow` must be provided)
+        affine : ([C], D+1, D+1) tensor
+            Affine matrix
+        bound : str
+            Padding mode
+        nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
+        """
+        super().__init__(**kwargs)
+        self.flow = flow
+        self.controls = controls
+        self.affine = affine
+        self.bound = bound
+        self.nearest_if_label = nearest_if_label
+        self.backend = backend
+
+    def xform(self, x: Tensor) -> Returned:
+        flow = self.flow.movedim(1, -1)
+        if self.backend:
+            # The transform also requests a change in device or data
+            # type. In case the input file is too large to hold in
+            # device memory, we first crop it to the smallest possible
+            # field-of-view that still allows the transformed image to
+            # be computed. Only then do we move the input tensor to
+            # device. This is generally useful in conjunction with
+            # the `patch` option.
+            ndim = self.flow.ndim - 2
+            _flow = flow.clone()
+            _flowvec = _flow.reshape([-1, ndim])
+            coord_min = _flowvec.min(dim=0).values
+            coord_max = _flowvec.max(dim=0).values
+            slicer = []
+            for d in range(ndim):
+                coord_min[d].sub_(1).floor_().clamp_(0, x.shape[1+d]-1)
+                coord_max[d].add_(1).ceil_().clamp_(0, x.shape[1+d]-1)
+                slicer += [slice(
+                    coord_min[d].long().cpu().item(),
+                    coord_max[d].long().cpu().item() + 1
+                )]
+            _flow -= coord_min
+            _x = x[(..., *slicer)]
+
+            # now ensure tensor and proper backend
+            _x = torch.as_tensor(_x, **self.backend)
+            _flow = cast_like(_flow, _x)
+            flow = cast_like(flow, _x)
+        else:
+            _x = x
+            flow = _flow = cast_like(flow, _x)
+
+        controls = cast_like(self.controls, _x)
+        affine = cast_like(self.affine, _x)
+        mode = "bilinear"
+        if not x.dtype.is_floating_point and self.nearest_if_label:
+            mode = "nearest"
+        y = warps.apply_flow(_x[:, None], _flow,
+                                padding_mode=self.bound, mode=mode,
+                                has_identity=True)[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow,
+                    controls=controls, matrix=affine),
+            self.returns)
+
+
 class AffineElasticTransform(NonFinalTransform):
     """
     Affine + Elastic [+ Patch] transform.
     """
+
+    Final = ApplyAffineElasticTransform
 
     def __init__(
         self,
@@ -761,7 +876,7 @@ class AffineElasticTransform(NonFinalTransform):
         device: Optional[Union[torch.device, str]] = None,
         shared: bool = True,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -830,7 +945,7 @@ class AffineElasticTransform(NonFinalTransform):
             nearest_if_label, shared=shared, **self.backend,
         )
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         """
 
         Parameters
@@ -926,82 +1041,6 @@ class AffineElasticTransform(NonFinalTransform):
             self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-        """Determinstic affine+elastic transform"""
-
-        def __init__(
-            self,
-            flow: torch.tensor,
-            controls: torch.tensor,
-            affine: torch.tensor,
-            bound: str = 'border',
-            nearest_if_label: bool = False,
-            backend: Optional[dict] = None,
-            **kwargs
-        ):
-            """
-            Parameters
-            ----------
-            flow : (C, D, *spatial) tensor
-            controls : (C, D, *spatial) tensor
-            affine : ([C], D+1, D+1) tensor
-            bound : str
-            """
-            super().__init__(**kwargs)
-            self.flow = flow
-            self.controls = controls
-            self.affine = affine
-            self.bound = bound
-            self.nearest_if_label = nearest_if_label
-            self.backend = backend
-
-        def xform(self, x):
-            flow = self.flow.movedim(1, -1)
-            if self.backend:
-                # The transform also requests a change in device or data
-                # type. In case the input file is too large to hold in
-                # device memory, we first crop it to the smallest possible
-                # field-of-view that still allows the transformed image to
-                # be computed. Only then do we move the input tensor to
-                # device. This is generally useful in conjunction with
-                # the `patch` option.
-                ndim = self.flow.ndim - 2
-                _flow = flow.clone()
-                _flowvec = _flow.reshape([-1, ndim])
-                coord_min = _flowvec.min(dim=0).values
-                coord_max = _flowvec.max(dim=0).values
-                slicer = []
-                for d in range(ndim):
-                    coord_min[d].sub_(1).floor_().clamp_(0, x.shape[1+d]-1)
-                    coord_max[d].add_(1).ceil_().clamp_(0, x.shape[1+d]-1)
-                    slicer += [slice(
-                        coord_min[d].long().cpu().item(),
-                        coord_max[d].long().cpu().item() + 1
-                    )]
-                _flow -= coord_min
-                _x = x[(..., *slicer)]
-
-                # now ensure tensor and proper backend
-                _x = torch.as_tensor(_x, **self.backend)
-                _flow = cast_like(_flow, _x)
-                flow = cast_like(flow, _x)
-            else:
-                _x = x
-                flow = _flow = cast_like(flow, _x)
-
-            controls = cast_like(self.controls, _x)
-            affine = cast_like(self.affine, _x)
-            mode = "bilinear"
-            if not x.dtype.is_floating_point and self.nearest_if_label:
-                mode = "nearest"
-            y = warps.apply_flow(_x[:, None], _flow,
-                                 padding_mode=self.bound, mode=mode,
-                                 has_identity=True)[:, 0]
-            return prepare_output(
-                dict(input=x, output=y, flow=flow,
-                     controls=controls, matrix=affine),
-                self.returns)
-
 
 class RandomAffineElasticTransform(NonFinalTransform):
     """
@@ -1030,7 +1069,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         shared: bool = True,
         shared_flow: bool = None,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -1097,7 +1136,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.nearest_if_label = nearest_if_label
         self.backend = dict(dtype=dtype, device=device)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1163,7 +1202,13 @@ class MakeAffinePair(NonFinalTransform):
     true_transform is a dictionary with keys 'flow' and 'affine'.
     """
 
-    def __init__(self, transform=None, *, returns=('left', 'right'), **kwargs):
+    def __init__(
+        self,
+        transform: Optional[RandomAffineTransform] = None,
+        *,
+        returns: Union[str, List[str], Dict[str, str]] = ('left', 'right'),
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -1185,7 +1230,7 @@ class MakeAffinePair(NonFinalTransform):
         super().__init__(shared=True, returns=returns, **kwargs)
         self.subtransform = transform or RandomAffineTransform()
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         left = self.subtransform.make_final(x)
@@ -1196,6 +1241,7 @@ class MakeAffinePair(NonFinalTransform):
 
     class Final(FinalTransform):
         """Deterministic affine pair transform"""
+
         def __init__(self, left, right, **kwargs):
             super().__init__(**kwargs)
             self.left = left
@@ -1213,15 +1259,142 @@ class MakeAffinePair(NonFinalTransform):
                 self.returns)
 
 
+class ApplySlicewiseAffineTransform(FinalTransform):
+    """Precomputed slicewise transform"""
+
+    def __init__(
+        self,
+        matrix: Tensor,
+        flow: Optional[Tensor] = None,
+        slice: int = -1,
+        spacing: int = 1,
+        subsample: int = 1,
+        bound: str = 'border',
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        matrix : (Nz, D+1, D+1) tensor
+            Affine matrices for each slice
+        flow : (D, *spatial) tensor, optional
+            Precomputed flow fields for each slice. If not provided, it
+            will be computed from the matrices.
+        slice : {0, 1, 2}
+            Slice direction
+        spacing : int
+            Spacing between thick slices (as a number of high-res voxels)
+        subsample : int
+            Additional isotropic subsampling
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode
+        """
+        super().__init__(**kwargs)
+        self.flow = flow
+        self.matrix = matrix
+        self.slice = slice
+        self.spacing = spacing
+        self.subsample = subsample
+        self.bound = bound
+
+    def make_flow(self, A: Tensor, shape: List[int]) -> Tensor:
+        ndim = len(shape)
+        z = self.slice - ndim if self.slice >= 0 else self.slice
+        oshape = list(shape)
+        oshape[z] = shape[z] // self.spacing
+        nb_slice = oshape[z]
+        shape[z] = nb_slice * self.spacing
+
+        slicer = [slice(None, None, self.subsample)] * ndim
+        slicer = (*slicer, slice(None))
+        id = warps.identity(shape, dtype=A.dtype, device=A.device)
+        id = id[slicer]
+        flow = id.unfold(
+            z-1,
+            self.spacing//self.subsample,
+            self.spacing//self.subsample
+        ).movedim(-1, 0)  # [spacing, *sshape, D]
+        flow = flow.movedim(-1, 0).movedim(z, -1).movedim(0, -1)
+        # ^ [spacing, *oshape, nb_slices, D]
+        flow = A[:, :-1, :-1].matmul(flow.unsqueeze(-1)).squeeze(-1)
+        flow += A[:, :-1, -1]
+        # flow = flow.movedim(-1, 0).movedim(-1, zindex).movedim(0, -1)
+        flow = flow.transpose(0, -1).flatten(-2).movedim(-1, z).movedim(0, -1)
+        # ^ [*oshape, D]
+        flow = (flow - id).multiply_(1 / self.subsample).movedim(-1, 0)
+        # ^ [D, *oshape]
+        return flow
+
+    def xform(self, x: Tensor) -> Tensor:
+        flow = cast_like(self.flow, x)
+        matrix = cast_like(self.matrix, x)
+
+        if flow is None:
+            flow = self.make_flow(matrix, list(x.shape[1:]))
+
+        # compute shape
+        fullshape = list(x.shape[1:])
+        ndim = len(fullshape)
+        zindex = self.slice - ndim if self.slice >= 0 else self.slice
+        oshape = list(fullshape)
+        oshape[zindex] = fullshape[zindex] // self.spacing
+        nb_slice = oshape[zindex]
+        fullshape[zindex] = nb_slice * self.spacing
+        nb_repeat = self.spacing//self.subsample
+
+        # compute sampling coordinates
+        slicer = [slice(None, None, self.subsample)] * ndim
+        slicer = (*slicer, slice(None))
+        id = warps.identity(
+            fullshape, dtype=flow.dtype, device=flow.device
+        )[slicer]
+        coord = (flow * self.subsample).movedim(0, -1) + id
+
+        # sample slices
+        y = warps.apply_flow(x[None], coord[None], has_identity=True,
+                                padding_mode=self.bound)[0]
+
+        if y.is_floating_point():
+            # not a label map -> apply PSF
+            kernel = torch.full(
+                [nb_repeat, 1],
+                1 / math.sqrt(nb_repeat),
+                dtype=y.dtype, device=y.device
+            )
+            y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
+            y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
+            y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
+
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, matrix=matrix),
+            self.returns
+        )
+
+
 class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
+    Final = ApplySlicewiseAffineTransform
+
     def __init__(
-        self, translations=0, rotations=0, shears=0, zooms=0,
-        bulk_translations=0, bulk_rotations=0, bulk_shears=0, bulk_zooms=0,
-        slice=-1, unit='fov', bound='border', spacing=1, subsample=1,
-        *, shared=True, **kwargs
-    ):
+        self,
+        translations: Union[float, List[float], List[List[float]]] = 0,
+        rotations: Union[float, List[float], List[List[float]]] = 0,
+        shears: Union[float, List[float], List[List[float]]] = 0,
+        zooms: Union[float, List[float], List[List[float]]] = 0,
+        bulk_translations: Union[float, List[float]] = 0,
+        bulk_rotations: Union[float, List[float]] = 0,
+        bulk_shears: Union[float, List[float]] = 0,
+        bulk_zooms: Union[float, List[float]] = 0,
+        slice: int = -1,
+        unit: str = 'fov',
+        bound: str = 'border',
+        spacing: int = 1,
+        subsample: int = 1,
+        *,
+        shared: bool = True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -1288,7 +1461,9 @@ class SlicewiseAffineTransform(NonFinalTransform):
         self.spacing = spacing
         self.subsample = subsample
 
-    def make_final(self, x, max_depth=float('inf'), flow=True):
+    def make_final(
+        self, x: Tensor, max_depth: int = inf, flow: bool = True
+    ) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -1433,64 +1608,9 @@ class SlicewiseAffineTransform(NonFinalTransform):
             flow = None
 
         return self.Final(
-            flow, A, self.slice, self.spacing, self.subsample, self.bound,
+            A, flow, self.slice, self.spacing, self.subsample, self.bound,
             **self.get_prm()
         ).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-        """Precomputed slicewise transform"""
-
-        def __init__(self, flow, matrix, slice=-1, spacing=1, subsample=1,
-                     bound='border', **kwargs):
-            super().__init__(**kwargs)
-            self.flow = flow
-            self.matrix = matrix
-            self.slice = slice
-            self.spacing = spacing
-            self.subsample = subsample
-            self.bound = bound
-
-        def xform(self, x):
-            flow = cast_like(self.flow, x)
-            matrix = cast_like(self.matrix, x)
-
-            # compute shape
-            fullshape = list(x.shape[1:])
-            ndim = len(fullshape)
-            zindex = self.slice - ndim if self.slice >= 0 else self.slice
-            oshape = list(fullshape)
-            oshape[zindex] = fullshape[zindex] // self.spacing
-            nb_slice = oshape[zindex]
-            fullshape[zindex] = nb_slice * self.spacing
-            nb_repeat = self.spacing//self.subsample
-
-            # compute sampling coordinates
-            slicer = [slice(None, None, self.subsample)] * ndim
-            slicer = (*slicer, slice(None))
-            id = warps.identity(
-                fullshape, dtype=flow.dtype, device=flow.device
-            )[slicer]
-            coord = (flow * self.subsample).movedim(0, -1) + id
-
-            # sample slices
-            y = warps.apply_flow(x[None], coord[None], has_identity=True,
-                                 padding_mode=self.bound)[0]
-
-            if y.is_floating_point():
-                # not a label map -> apply PSF
-                kernel = torch.full(
-                    [nb_repeat, 1],
-                    1 / math.sqrt(nb_repeat),
-                    dtype=y.dtype, device=y.device
-                )
-                y = y.movedim(zindex, -1).unfold(-1, nb_repeat, nb_repeat)
-                y = y.matmul(kernel).matmul(kernel.t())  # PSF + replicate
-                y = y.flatten(-2).movedim(-1, zindex)    # [C, *oshape]
-
-            return prepare_output(
-                dict(input=x, output=y, flow=flow, matrix=matrix),
-                self.returns
-            )
 
 
 class RandomSlicewiseAffineTransform(NonFinalTransform):
@@ -1500,10 +1620,10 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
 
     def __init__(
         self,
-        translations: Union[Sampler, float, List[float], torch.Tensor] = 0.1,
-        rotations: Union[Sampler, float, List[float], torch.Tensor] = 15,
-        shears: Union[Sampler, float, List[float], torch.Tensor] = 0,
-        zooms: Union[Sampler, float, List[float], torch.Tensor] = 0,
+        translations: Union[Sampler, float, List[float], Tensor] = 0.1,
+        rotations: Union[Sampler, float, List[float], Tensor] = 15,
+        shears: Union[Sampler, float, List[float], Tensor] = 0,
+        zooms: Union[Sampler, float, List[float], Tensor] = 0,
         bulk_translations: Union[Sampler, float, List[float]] = 0.05,
         bulk_rotations: Union[Sampler, float, List[float]] = 15,
         bulk_shears: Union[Sampler, float, List[float]] = 0,
@@ -1520,7 +1640,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         shared: Union[bool, str] = True,
         shared_matrix: Optional[Union[bool, str]] = None,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -1597,7 +1717,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         self.shots = shots
         self.shared_matrix = shared_matrix
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:

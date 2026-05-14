@@ -12,8 +12,18 @@ __all__ = [
     'Rot180Transform',
     'RandomRot90Transform',
 ]
+# stdlib
 import math
+from math import inf
+from numbers import Number
 from random import shuffle
+from typing import List, Optional, Union
+
+# dependencies
+from torch import Tensor
+
+# internals
+from .base import Transform
 from .base import FinalTransform, NonFinalTransform, PerChannelTransform
 from .utils.py import ensure_list
 from .utils.padding import pad
@@ -21,38 +31,46 @@ from .random import Uniform, RandKFrom, Sampler, RandInt, make_range
 
 
 class FlipTransform(FinalTransform):
-    """Flip one or more axes"""
+    """Flip one or more axes."""
 
-    def __init__(self, axis=None, **kwargs):
+    def __init__(
+        self, axis: Optional[Union[int, List[int]]] = None, **kwargs
+    ) -> None:
         """
         Parameters
         ----------
         axis : [list of] int
-            Axes to flip. By default, flip all axes.
+            Axes to flip. By default, flip all spatial axes.
         """
         super().__init__(**kwargs)
         self.axis = axis
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         axis = self.axis
         if axis is None:
             axis = list(range(1, x.ndim))
         axis = ensure_list(axis)
         return x.flip(axis)
 
-    def make_inverse(self):
+    def make_inverse(self) -> 'FlipTransform':
         return self
 
 
 class RandomFlipTransform(NonFinalTransform):
-    """Randomly flip one or more axes"""
+    """Randomly flip one or more axes."""
 
-    def __init__(self, axes=None, *, shared=True, **kwargs):
+    def __init__(
+        self,
+        axes: Union[Sampler, List[int], int] = None,
+        *,
+        shared: bool = True,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        axes : Sampler or [list of] int
-            Axes that can be flipped (default: all)
+        axes : Sampler | [list of] int
+            Axes that can be flipped (default: all spatial axes)
 
         Other Parameters
         ----------------
@@ -63,7 +81,7 @@ class RandomFlipTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -81,7 +99,9 @@ class RandomFlipTransform(NonFinalTransform):
 class PermuteAxesTransform(FinalTransform):
     """Permute axes"""
 
-    def __init__(self, permutation=None, **kwargs):
+    def __init__(
+        self, permutation: Optional[List[int]] = None, **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -92,14 +112,14 @@ class PermuteAxesTransform(FinalTransform):
         super().__init__(**kwargs)
         self.permutation = permutation
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         permutation = self.permutation
         if permutation is None:
             permutation = list(reversed(range(x.dim()-1)))
         permutation = [0] + [p+1 for p in permutation]
         return x.permute(permutation)
 
-    def make_inverse(self):
+    def make_inverse(self) -> 'PermuteAxesTransform':
         if self.permutation:
             i = range(len(self.permutation))
             iperm = [i[p] for p in self.permutation]
@@ -109,9 +129,15 @@ class PermuteAxesTransform(FinalTransform):
 
 
 class RandomPermuteAxesTransform(NonFinalTransform):
-    """Randomly permute axes"""
+    """Randomly permute axes."""
 
-    def __init__(self, axes=None, *, shared=True, **kwargs):
+    def __init__(
+        self,
+        axes: Optional[List[int]] =  None,
+        *,
+        shared: bool =True,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -126,7 +152,7 @@ class RandomPermuteAxesTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -142,19 +168,23 @@ class RandomPermuteAxesTransform(NonFinalTransform):
 
 
 class Rot90Transform(FinalTransform):
-    """
-    Apply a 90 (or 180) rotation along one or several axes
-    """
+    """Apply a 90 (or 180) rotation along one or several axes."""
 
-    def __init__(self, axis=0, negative=False, double=False, **kwargs):
+    def __init__(
+        self,
+        axis: Union[int, List[int]] = 0,
+        negative: Union[bool, List[bool]] = False,
+        double: Union[bool, List[bool]] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        axis : int or list[int]
+        axis : [list of] int
             Rotation axis (indexing does not account for the channel axis)
-        negative : bool or list[bool]
+        negative : [list of] bool
             Rotate by -90 deg instead of 90 deg
-        double : bool or list[bool]
+        double : [list of] bool
             Rotate be 180 instead of 90 (`negative` is then unused)
         """
         super().__init__(**kwargs)
@@ -162,7 +192,7 @@ class Rot90Transform(FinalTransform):
         self.negative = ensure_list(negative, len(self.axis))
         self.double = ensure_list(double, len(self.axis))
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         # this implementation is suboptimal. We should fuse all transpose
         # and all flips into a single "transpose + flip" operation so that
         # a single allocation happens. This will be fine for now.
@@ -190,28 +220,35 @@ class Rot90Transform(FinalTransform):
 class Rot180Transform(Rot90Transform):
     """Apply a 180 deg rotation along one or several axes"""
 
-    def __init__(self, axis=0, **kwargs):
+    def __init__(self, axis: Union[int, List[int]] = 0, **kwargs) -> None:
         """
         Parameters
         ----------
-        axis : int or list[int]
+        axis : [list of] int
             Rotation axis (indexing does not account for the channel axis)
         """
         super().__init__(axis, double=True, **kwargs)
 
 
 class RandomRot90Transform(NonFinalTransform):
-    """Random set of 90 transforms"""
+    """Random set of 90 transforms."""
 
-    def __init__(self, axes=None, max_rot=2, negative=True,
-                 *, shared=True, **kwargs):
+    def __init__(
+        self,
+        axes: Union[int, List[int]] = None,
+        max_rot: Union[int, Sampler] = 2,
+        negative=True,
+        *,
+        shared=True,
+        **kwargs
+     ) -> None:
         """
         Parameters
         ----------
-        axes : int or list[int]
+        axes : [list of] int
             Axes along which rotations can happen.
             If `None`, all axes.
-        max_rot : int or Sampler
+        max_rot : Sampler | int
             Maximum number of consecutive rotations.
         negative : bool
             Whether to authorize negative rotations.
@@ -255,9 +292,16 @@ class RandomRot90Transform(NonFinalTransform):
 
 
 class CropPadTransform(FinalTransform):
-    """Crop and/or pad a tensor"""
+    """Crop and/or pad a tensor."""
 
-    def __init__(self, crop, pad, bound='zero', value=0, **kwargs):
+    def __init__(
+        self,
+        crop: List[slice],
+        pad: List[int],
+        bound: Union[str, List[str]] = 'zero',
+        value: Number = 0,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -276,13 +320,13 @@ class CropPadTransform(FinalTransform):
         self.bound = bound
         self.value = value
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         crop = tuple([Ellipsis, *self.crop])
         x = x[crop]
         x = pad(x, self.pad, mode=self.bound, value=self.value)
         return x
 
-    def make_inverse(self):
+    def make_inverse(self) -> 'CropPadTransform':
         ipad = [slice(left, (-right) or None) for left, right in self.pad]
         icrop = [[s.start or 0, -s.stop if s.stop else 0] for s in self.crop]
         return CropPadTransform(
@@ -293,8 +337,15 @@ class CropPadTransform(FinalTransform):
 class PatchTransform(NonFinalTransform):
     """Extract a patch from the volume"""
 
-    def __init__(self, shape=64, center=0, bound='zero',
-                 *, shared='channels', **kwargs):
+    def __init__(
+        self,
+        shape: Union[int, List[int]] = 64,
+        center: Union[float, List[float]] = 0,
+        bound: Union[str, List[str]] = 'zero',
+        *,
+        shared: Union[str, bool] = 'channels',
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -302,12 +353,12 @@ class PatchTransform(NonFinalTransform):
             Patch shape
         center : [list of] float
             Patch center, in relative coordinates -1..1
-        bound : str
+        bound : [list of]str
             Boundary condition in case padding is needed
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensor', ''}
+        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
         """
         kwargs.setdefault('shared', shared)
         super().__init__(**kwargs)
@@ -315,7 +366,7 @@ class PatchTransform(NonFinalTransform):
         self.center = center
         self.bound = bound
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -347,19 +398,26 @@ class RandomPatchTransform(NonFinalTransform):
     input shape).
     """
 
-    def __init__(self, patch_size, bound='zero', *, shared=True, **kwargs):
+    def __init__(
+        self,
+        patch_size: Union[int, List[int]],
+        bound: Union[str, List[str]] = 'zero',
+        *,
+        shared: Union[str, bool] = 'channels',
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
         shape : [list of] int
             Patch shape
-        bound : str
+        bound : [list of] str
             Boundary condition in case padding is needed
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Extract the same patch from all channels and/or tensors
         """
         kwargs.setdefault('shared', shared)
@@ -383,7 +441,13 @@ class RandomPatchTransform(NonFinalTransform):
 class CropTransform(NonFinalTransform):
     """Crop a tensor by some amount"""
 
-    def __init__(self, cropping, unit='vox', side='both', **kwargs):
+    def __init__(
+        self,
+        cropping: Union[int, float, List[Union[int, float]]],
+        unit: str = 'vox',
+        side: str = 'both',
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -402,7 +466,7 @@ class CropTransform(NonFinalTransform):
         self.unit = unit
         self.side = side
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -430,8 +494,15 @@ class CropTransform(NonFinalTransform):
 class PadTransform(NonFinalTransform):
     """Pad a tensor by some amount"""
 
-    def __init__(self, padding, unit='vox', side='both', bound='zero', value=0,
-                 **kwargs):
+    def __init__(
+        self,
+        padding: Union[int, float, List[Union[int, float]]],
+        unit: str = 'vox',
+        side: str = 'both',
+        bound: str = 'zero',
+        value: Number = 0,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -456,7 +527,7 @@ class PadTransform(NonFinalTransform):
         self.bound = bound
         self.value = value
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -491,7 +562,12 @@ class PadTransform(NonFinalTransform):
 class PowerTwoTransform(NonFinalTransform):
     """Pad the volume such that the tensor shape can be divided by 2**x"""
 
-    def __init__(self, exponent=1, bound='zero', **kwargs):
+    def __init__(
+        self,
+        exponent: Union[int, List[int]] =1,
+        bound: Union[str, List[str]] = 'zero',
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -506,7 +582,7 @@ class PowerTwoTransform(NonFinalTransform):
         self.exponent = exponent
         self.bound = bound
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = x.shape[1:]
