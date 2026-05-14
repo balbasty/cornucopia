@@ -27,11 +27,6 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 - `nibabel`
 - `torch-interpol`
 - `torch-distmap`
-
-### Conda
-
-```sh
-conda install cornucopia -c balbasty -c pytorch -c conda-forge
 ```
 
 ### Pip (release)
@@ -56,7 +51,7 @@ Read the [documentation](https://cornucopia.readthedocs.io) and in particular:
 
 ## Other augmentation packages
 
-There are other great, and much more mature, augmentation packages 
+There are other great, and much more mature, augmentation packages
 out-there (although few run on the GPU). Here's a non-exhaustive list:
 - [MONAI](https://github.com/Project-MONAI/MONAI)
 - [TorchIO](https://github.com/fepegar/torchio)
