@@ -301,7 +301,7 @@ class RandomElasticTransform(NonFinalTransform):
     Next = ElasticTransform
     """The transform type returned by `make_final(..., max_depth=1)`."""
 
-    Final = ElasticTransform.Final
+    Final = ApplyElasticTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
@@ -648,7 +648,7 @@ class RandomAffineTransform(NonFinalTransform):
     Next = AffineTransform
     """The transform type returned by `make_final(..., max_depth=1)`."""
 
-    Final = AffineTransform.Final
+    Final = ApplyAffineTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
@@ -1054,7 +1054,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
     Next = AffineElasticTransform
     """The transform type returned by `make_final(..., max_depth=1)`."""
 
-    Final = AffineElasticTransform.Final
+    Final = ApplyAffineElasticTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
@@ -1648,7 +1648,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
     Next = SlicewiseAffineTransform
     """The transform type returned by `make_final(..., max_depth=1)`."""
 
-    Final = SlicewiseAffineTransform.Final
+    Final = ApplySlicewiseAffineTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
