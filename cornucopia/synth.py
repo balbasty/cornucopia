@@ -310,6 +310,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         synth_labels_maybe: Mapping[_LabelGrouping, float] = None,
         target_labels: Optional[_LabelGrouping] = None,
         order: Union[Sampler, int, bool] = 3,
+        geom: Union[str, bool] = True,
         translations: Union[Sampler, float, bool] = 0.1,
         rotation: Union[Sampler, float, bool] = 15,
         shears: Union[Sampler, float, bool] = 0.012,
@@ -367,30 +368,34 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        translations : float or Sampler or False
+        geom: {'affine', 'elastic', 'affine+elastic', ''} | bool
+            Which geometric transforms to apply.
+            `True` (default) corresponds to `affine+elastic`.
+            `False` corresponds to no geometric transform.
+        translations : Sampler | float | {False}
             Distribution from which random translations (in percentage of
             field-of-view) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
-        rotation : float or Sampler or False
+        rotation : Sampler | float | {False}
             Distribution from which random rotations (in degree) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
-        shears : float or Sampler or False
+        shears : Sampler | float | {False}
             Distribution from which random shears are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
-        zooms : float or Sampler or False
+        zooms : Sampler | float | {False}
             Distribution from which random zooms (about one) are sampled.
             If a `float`, sample from `Uniform(-value, value)`.
             The zoom effectively applied is 1 plus the sampled value
             (i.e., the zoom is sampled from `Uniform(1-value, 1+value)`).
-        elastic : float or Sampler or False
+        elastic : Sampler | float | {False}
             Distribution from which the maximum of the displacement magnitude
             (in proportion of the field-of-view) is sampled.
             If a `float`, sample from `Uniform(0, value)`.
-        elastic_nodes : int or Sampler
+        elastic_nodes : Sampler | int
             The sampled value controls the smoothness of the displacement
             field (smaller values yield smoother fields).
             If a `float`, sample from `RandInt(2, value)`.
-        elastic_steps : int or Sampler
+        elastic_steps : Sampler | int
             Number of scaling-and-squaring integration steps.
             Scaling-and-squaring ensure that the elastic field is
             diffeomorphic (one-to-one and onto).
@@ -401,33 +406,33 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        gmm_fwhm : float or Sampler or False
+        gmm_fwhm : Sampler | float | {False}
             In contrast with the SynthSeg paper, we perform an
             edge-preserving smoothing after intensities are sampled, in
             order to mimic texture. This parameter controls the width
             of the smoothing kernel.
             If a `float`, sample from `Uniform(0, value)`.
-        bias : int or Sampler or False
+        bias : Sampler | int | {False}
             The sampled value controls the smoothness of the intensity
             bias field (smaller values yield smoother fields).
             If a `float`, sample from `RandInt(2, value)`.
-        bias_strength : (0..1) or Sampler
+        bias_strength : Sampler | (0..1)
             The maximum magnitude of the bias field (about 1).
             If a `float`, sample from `Uniform(0, value)`.
             The minimum and maximum values of the bias field will be
             `1 - bias_strength` and `1 + bias_strength`.
-        gamma : float or Sampler or False
+        gamma : Sampler | float | {False}
             The Gamma transform squeezes intensities such that the contrast
             to noise ratio is decreased (positive values lead to less
             decreased contrast, positive values lead to increased contrast).
             If a `float`, sample the gamma exponent from `LogNormal(0, value)`.
-        motion_fwhm : float or Sampler or False
+        motion_fwhm : Sampler | float | {False}
             A blur can be perform to model the point spread function or
             motion-related smearing. The amount of smoothing is encoded by
             the full-width at half-maximum (FWHM) of the underlying
             Gaussian kernel.
             If a `float`, sample the FWHM from `Uniform(0, value)`.
-        resolution : float or Sampler or False
+        resolution : Sampler | float | {False}
             Thick-slice or isotropic low-resolution (LR) images are randomly
             applied. and their (through-slice or iso) resolution is
             controlled here. It is defined as a proportion of the
@@ -435,14 +440,14 @@ class SynthFromLabelTransform(NonFinalTransform):
             that the LR voxel size will be four times as large as the
             input voxel size)
             If a `float`, sampled form `Uniform(0, value)`.
-        snr : float or Sampler or False
+        snr : Sampler | float | {False}
             The amount of noise added is encoded by the signal-to-noise ratio
             (SNR) of the noisy image (larger sampled values yield less
             noisy images).
             If a `float`, the value is a lower bound for SNR (no image
             will have a poorer SNR than this). The noise variance is
             then sampled from `Uniform(0, 1/snr)`.
-        gfactor : int or Sampler or False
+        gfactor : Sampler | int | {False}
             The g-factor is a smooth field that locally scales the noise
             variance. The sampled value controls the smoothness of
             the g-factor field.
@@ -466,6 +471,12 @@ class SynthFromLabelTransform(NonFinalTransform):
         else:
             postproc = IdentityTransform()
         self.postproc_labels = postproc
+        if not geom:
+            elastic = translations = rotation = shears = zooms = 0
+        elif geom == 'affine':
+            elastic = 0
+        elif geom == 'elastic':
+            translations = rotation = shears = zooms = 0
         self.deform = RandomAffineElasticTransform(
             0 if elastic in (None, False) else elastic or 0,
             elastic_nodes,
