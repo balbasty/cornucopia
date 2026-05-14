@@ -125,7 +125,7 @@ class IntensityTransform(SequentialTransform):
     Setting any argument to `False` disables the corresponding transform
     entirely.
 
-    !!! reference
+    ??? reference
         Billot, B., Greve, D.N., Puonti, O., Thielscher, A., Van Leemput, K.,
         Fischl, B., Dalca, A.V. and Iglesias, J.E., 2023.
         [**SynthSeg: Segmentation of brain MRI scans of any contrast and resolution
@@ -281,7 +281,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         img, lab = synth(input)
         ```
 
-    !!! reference
+    ??? reference
         Billot, B., Greve, D.N., Puonti, O., Thielscher, A., Van Leemput, K.,
         Fischl, B., Dalca, A.V. and Iglesias, J.E., 2023.
         [**SynthSeg: Segmentation of brain MRI scans of any contrast and resolution
@@ -298,6 +298,9 @@ class SynthFromLabelTransform(NonFinalTransform):
               publisher = {Elsevier},
               url       = {https://www.sciencedirect.com/science/article/pii/S1361841523000506}
             }
+
+    !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                Added `geom` argument"
     """  # noqa: E501
 
     def __init__(
@@ -348,7 +351,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             List of labels to use for synthesis.
             If multiple labels are grouped in a sublist, they share the
             same intensity in the GMM. All labels not listed are assumed
-            background. For example, this option can be ued to ensure
+            background. For example, this option can be used to ensure
             that symmetric structures share the same intensity.
         synth_labels_maybe : dict[tuple of [tuple of] int, float]
             List of labels to sometimes use for synthesis, and their
