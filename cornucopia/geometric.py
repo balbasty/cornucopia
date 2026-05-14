@@ -69,6 +69,21 @@ class ApplyElasticTransform(FinalTransform):
             Subtract its mean displacement to the flow field so that
             it has an empirical mean of zero.
         nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
+
+        Other Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'controls': The control points of the displacement field
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -83,21 +98,6 @@ class ApplyElasticTransform(FinalTransform):
     def make_flow(
         self, control: Tensor, fullshape: List[int]
     ) -> Tensor:
-        """Upsample the control points to the final full size
-
-        Parameters
-        ----------
-        control : (C, D, *shape) tensor
-            Spline control points
-        fullshape : list[int]
-            Target shape
-
-        Returns
-        -------
-        flow : (C, D, *fullshape) tensor
-            Upampled flow field
-
-        """
         if self.order == 1:
             mode = ('trilinear' if len(fullshape) == 3 else
                     'bilinear' if len(fullshape) == 2 else
@@ -122,20 +122,6 @@ class ApplyElasticTransform(FinalTransform):
         return flow
 
     def xform(self, x: Tensor) -> Returned:
-        """Deform the input tensor
-
-        Parameters
-        ----------
-        x : (C, *spatial) tensor
-            Input tensor
-
-        Returns
-        -------
-        out : [dict or list of] tensor
-            The tensors returned by this function depend on the
-            value of `self.returns`. See `ElasticTransform`.
-
-        """
         x = x.to(**self.backend)
         flow = cast_like(self.flow, x)
         controls = cast_like(self.controls, x)
@@ -166,6 +152,7 @@ class ElasticTransform(NonFinalTransform):
     """
 
     Final = ApplyElasticTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -249,27 +236,6 @@ class ElasticTransform(NonFinalTransform):
     def make_final(
         self, x: Tensor, max_depth: int = inf, flow: bool =  True
     ) -> Transform:
-        """
-        Generate a deterministic transform with constant parameters
-
-        Parameters
-        ----------
-        x : (C, *spatial) tensor
-            Tensor to deform
-        max_depth : int
-            Maximum number of transforms to unroll
-        flow : bool
-            Precompute the upsampled flow field
-
-        Returns
-        -------
-        xform : ElasticTransform.Final
-            Final transform with parameters
-
-            - `flow : (C, D, *spatial) tensor`, the upsampled flow field
-            - `control : (C, D, *shape) tensor`, the spline control points
-
-        """
         if max_depth == 0:
             return self
         batch, *fullshape = x.shape
@@ -331,6 +297,12 @@ class RandomElasticTransform(NonFinalTransform):
     """
     Elastic Transform with random parameters.
     """
+
+    Next = ElasticTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = ElasticTransform.Final
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
         self,
@@ -455,6 +427,21 @@ class ApplyAffineTransform(FinalTransform):
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
         nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
+
+        Other Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'matrix': The affine matrix
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -498,6 +485,7 @@ class AffineTransform(NonFinalTransform):
     """
 
     Final = ApplyAffineTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -657,6 +645,12 @@ class RandomAffineTransform(NonFinalTransform):
     Affine Transform with random parameters.
     """
 
+    Next = AffineTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = AffineTransform.Final
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
     def __init__(
         self,
         translations: Union[Sampler, float, List[float]] = 0.1,
@@ -758,7 +752,6 @@ class RandomAffineTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
-
 class ApplyAffineElasticTransform(FinalTransform):
     """Determinstic affine+elastic transform"""
 
@@ -792,6 +785,16 @@ class ApplyAffineElasticTransform(FinalTransform):
             and an argmax output label map is computed on the fly).
             If `nearest_if_label=True`, the entire label map will be
             resampled at once using nearest-neighbour interpolation.
+
+        Other Parameters
+        ------------------
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
+
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'control': The control points of the nonlinear field
+            - 'matrix': The affine matrix
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -855,6 +858,7 @@ class AffineElasticTransform(NonFinalTransform):
     """
 
     Final = ApplyAffineElasticTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -1047,6 +1051,12 @@ class RandomAffineElasticTransform(NonFinalTransform):
     Random Affine + Elastic transform.
     """
 
+    Next = AffineElasticTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = AffineElasticTransform.Final
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
     def __init__(
         self,
         dmax: Union[Sampler, float, List[float]] = 0.1,
@@ -1112,6 +1122,13 @@ class RandomAffineElasticTransform(NonFinalTransform):
 
         Other Parameters
         ------------------
+        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
+
+            - 'input': The input image
+            - 'output': The deformed image
+            - 'flow': The displacement field
+            - 'control': The control points of the nonlinear field
+            - 'matrix': The affine matrix
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same hyperparameters to all images/channels
         shared_flow : {'channels', 'tensors', 'channels+tensors', '', None}
@@ -1288,6 +1305,15 @@ class ApplySlicewiseAffineTransform(FinalTransform):
             Additional isotropic subsampling
         bound : {'zeros', 'border', 'reflection'}
             Padding mode
+
+        Other Parameters
+        ----------------
+        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+
+            - 'input': First transformed image
+            - 'output': Second transformed image
+            - 'flow': Displacement field
+            - 'matrix': Stacked affine matrices (one per slice)
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -1375,6 +1401,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
     Final = ApplySlicewiseAffineTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -1617,6 +1644,12 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
     """
     Slicewise3DAffineTransform with random parameters.
     """
+
+    Next = SlicewiseAffineTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = SlicewiseAffineTransform.Final
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
         self,
