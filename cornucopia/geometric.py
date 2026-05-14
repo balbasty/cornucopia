@@ -27,25 +27,26 @@ from .utils.smart_inplace import add_
 class ElasticTransform(NonFinalTransform):
     """
     Elastic transform encoded by cubic splines.
+
     The number of control points is fixed but coefficients are
     randomly sampled from a uniform distribution.
     """
 
     def __init__(
-            self,
-            dmax: Union[float, List[float]] = 0.1,
-            unit: str = 'fov',
-            shape: Union[int, List[int]] = 5,
-            bound: str = 'border',
-            steps: int = 0,
-            order: int = 3,
-            zero_center: bool = False,
-            nearest_if_label: bool = True,
-            *,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            shared: Union[bool, str] = True,
-            **kwargs
+        self,
+        dmax: Union[float, List[float]] = 0.1,
+        unit: str = 'fov',
+        shape: Union[int, List[int]] = 5,
+        bound: str = 'border',
+        steps: int = 0,
+        order: int = 3,
+        zero_center: bool = False,
+        nearest_if_label: bool = True,
+        *,
+        dtype: Optional[torch.dtype] = None,
+        device: Optional[Union[torch.device, str]] = None,
+        shared: Union[bool, str] = True,
+        **kwargs
     ):
         """
 
@@ -192,17 +193,17 @@ class ElasticTransform(NonFinalTransform):
         """Final (deterministic) elastic transform"""
 
         def __init__(
-                self,
-                flow: Optional[torch.Tensor] = None,
-                controls: Optional[torch.Tensor] = None,
-                steps: int = 0,
-                order: int = 3,
-                bound: str = 'border',
-                zero_center: bool = False,
-                nearest_if_label: bool = True,
-                dtype: Optional[torch.dtype] = None,
-                device: Optional[Union[torch.device, str]] = None,
-                **kwargs
+            self,
+            flow: Optional[torch.Tensor] = None,
+            controls: Optional[torch.Tensor] = None,
+            steps: int = 0,
+            order: int = 3,
+            bound: str = 'border',
+            zero_center: bool = False,
+            nearest_if_label: bool = True,
+            dtype: Optional[torch.dtype] = None,
+            device: Optional[Union[torch.device, str]] = None,
+            **kwargs
         ):
             """
             Parameters
