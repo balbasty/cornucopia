@@ -1,15 +1,17 @@
+"""This module contains transforms that operate on image contrasts."""
 __all__ = [
     'ContrastMixtureTransform',
     'ContrastMixtureFinalTransform',
     'ContrastLookupTransform',
     'ContrastLookupFinalTransform'
 ]
-
 # stdlib
 from math import inf
+
 # dependencies
 import torch
 from torch import Tensor
+
 # internals
 from .base import NonFinalTransform, FinalTransform, Transform
 from .special import PerChannelTransform
@@ -137,7 +139,7 @@ class ContrastMixtureTransform(NonFinalTransform):
             return self
         z, mu0, sigma0, _ = fit_gmm(x, self.nk)
         mu, sigma = self._make_parameters(mu0, sigma0)
-        return self.Final(
+        return self.Next(
             z, mu0, sigma0, mu, sigma, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -238,4 +240,6 @@ class ContrastLookupTransform(NonFinalTransform):
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)
         new_mu = torch.rand(self.nk).to(x) * (vmax - vmin) + vmin
-        return self.Final(edges, new_mu, **self.get_prm()).make_final(x, max_depth-1)
+        return self.Next(
+            edges, new_mu, **self.get_prm()
+        ).make_final(x, max_depth-1)

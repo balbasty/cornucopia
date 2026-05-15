@@ -2,7 +2,6 @@
 This module contains transforms that implement physics-based forward
 models of MR image formation.
 """
-
 __all__ = [
     'RandomSusceptibilityMixtureTransform',
     'SusceptibilityToFieldmapTransform',
@@ -10,31 +9,40 @@ __all__ = [
     'OptimalShimTransform',
     'RandomShimTransform',
     'HertzToPhaseTransform',
+    'HertzToVoxelShiftTransform',
+    'ApplyB0DistortionTransform',
+    'B0DistortionTransform',
+    'RandomB0DistortionTransform',
     'GradientEchoTransform',
+    'ReturnGradientEchoParameters',
+    'GMMGradientEchoTransform',
     'RandomGMMGradientEchoTransform',
 ]
 
 # stdlib
 import math
-from typing import Union, Sequence, Optional
+from math import inf
+from collections import namedtuple
 
-from numpy import ndim
-
-# external
+# dependencies
 import torch
 import interpol
+import typing_extensions as tx
+from torch import Tensor
 
 # internal
 from .base import FinalTransform, NonFinalTransform, Transform
-from .baseutils import prepare_output, return_requires, returns_find, returns_update
-from .labels import GaussianMixtureTransform
+from .baseutils import Returned, prepare_output, return_requires, returns_find, returns_update
+from .labels import GaussianMixtureFinalTransform, GaussianMixtureTransform
 from .intensity import (
-    RandomMulFieldTransform, AddValueTransform, MulValueTransform
+    RandomMulFieldTransform, AddValueTransform, MulValueTransform,
+    ReturnValueTransform
 )
 from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import cast_like, ensure_list, make_vector
 from .utils.smart_inplace import exp_, div_
 from .utils import b0
+from . import typing as cct
 
 
 class RandomSusceptibilityMixtureTransform(NonFinalTransform):
@@ -45,41 +53,46 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
     air), in ppm.
     """
 
+    Next = GaussianMixtureTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = GaussianMixtureFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
     def __init__(
         self,
-        mu_tissue: Union[Sampler, float] = Uniform(9, 10),
-        sigma_tissue: Union[Sampler, float] = 0.01,
-        mu_bone: Union[Sampler, float] = Uniform(12, 13),
-        sigma_bone: Union[Sampler, float] = 0.1,
-        fwhm: Union[Sampler, float] = 2,
-        label_air: Union[Sequence[int], int] = 0,
-        label_bone: Optional[Union[Sequence[int], int]] = None,
-        dtype: Optional[torch.dtype] = None,
+        mu_tissue: cct.SamplerOrBound[float] = Uniform(9, 10),
+        sigma_tissue: cct.SamplerOrBound[float] = 0.01,
+        mu_bone: cct.SamplerOrBound[float] = Uniform(12, 13),
+        sigma_bone: cct.SamplerOrBound[float] = 0.1,
+        fwhm: cct.SamplerOrBound[float] = 2,
+        label_air: cct.ScalarOrSequence[int] = 0,
+        label_bone: tx.Optional[cct.ScalarOrSequence[int]] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         *,
-        shared: str = 'channels',
+        shared: cct.SharedType = 'channels',
         **kwargs
     ) -> None:
         """
-
         Parameters
         ----------
-        mu_tissue : float or Sampler
+        mu_tissue : Sampler | float
             Distribution of negative susceptibility offsets (in ppm)
             of soft tissues with respect to air.
             Will be negated (air susceptibility is larger than all tissues).
             If float: upper bound.
-        sigma_tissue : float or Sampler
+        sigma_tissue : Sampler | float
             Standard deviation of susceptibility offsets, within class.
             If float: uper bound.
-        mu_bone : float or Sampler
+        mu_bone : Sampler | float
             Distribution of negative susceptibility offsets (in ppm)
             of hard tissues with respect to air.
             Will be negated (air susceptibility is larger than all tissues).
             If float: upper bound.
-        sigma_bone: float or Sampler
+        sigma_bone: Sampler | float
             Standard deviation of susceptibility offsets, within class.
             If float: upper bound.
-        fwhm : Sampler or [list of] float
+        fwhm : Sampler | [list of] float
             Sampling function for smoothing width.
             If float: upper bound.
         label_air : [list of] int
@@ -97,7 +110,7 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         self.label_bone = label_bone
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -174,7 +187,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
 
     def __init__(
         self,
-        axis: Union[int, Sequence[float]] = -1,
+        axis: tx.Union[int, tx.Sequence[float]] = -1,
         field_strength: float = 3,
         larmor: float = 42.576E6,
         s0: float = 0.4,
@@ -222,7 +235,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         self.mask_air = mask_air
         self.voxel_size = voxel_size
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         axis = 1 + ((x.ndim - 1 + self.axis) if self.axis < 0 else self.axis)
         field = b0.chi_to_fieldmap(x, zaxis=axis, ndim=x.ndim-1,
                                    s0=self.s0, s1=self.s1, vx=self.voxel_size)
@@ -238,31 +251,31 @@ class ShimTransform(FinalTransform):
 
     def __init__(
         self,
-        linear: Optional[Sequence[float]] = None,
-        quadratic: Optional[Sequence[float]] = None,
-        isocenter: Optional[Sequence[float]] = None,
+        linear: tx.Optional[cct.VectorLike] = None,
+        quadratic: tx.Optional[cct.VectorLike] = None,
+        isocenter: tx.Optional[cct.VectorLike] = None,
         **kwargs
     ):
         """
         Parameters
         ----------
-        linear : (3 or 1) tensor or list of float
+        linear : (3|1,) tensor | [list of] float
             Linear components (3D: [XY, XZ, YX], 2D: [XY])
-        quadratic : (2 or 1) tensor or list of float
+        quadratic : (2|1,) tensor | [list of] float
             Quadratic components (3D: [XXYY, XXZZ], 2D: [XXYY])
-        isocenter : (3 or 2) tensor or list of float
+        isocenter : (3|2,) tensor | [list of] float
             Coordinates of the isocenter, in voxels
 
         Other Parameters
         ------------------
-        returns : [list or dict of] {'input', 'output', 'shim'}
+        returns : [(list | dict) of] {'input', 'output', 'shim'}
         """
         super().__init__(**kwargs)
         self.linear = linear
         self.quadratic = quadratic
         self.isocenter = isocenter
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         ndim = x.ndim - 1
         order = 1 if self.quadratic is None else 2
         nb_lin = 3 if ndim == 3 else 1
@@ -298,8 +311,17 @@ class OptimalShimTransform(NonFinalTransform):
     input field map
     """
 
-    def __init__(self, max_order=2, lam_abs=1, lam_grad=10, mask=True,
-                 **kwargs):
+    Next = Final = AddValueTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        max_order: int = 2,
+        lam_abs: float = 1,
+        lam_grad: float = 10,
+        mask: bool = True,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -323,7 +345,7 @@ class OptimalShimTransform(NonFinalTransform):
         self.lam_grad = lam_grad
         self.mask = mask
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -345,25 +367,38 @@ class RandomShimTransform(NonFinalTransform):
     by spherical harmonics.
     """
 
-    def __init__(self, coefficients=5, max_order=2, shared=False, **kwargs):
+    Next = ShimTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = AddValueTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        coefficients: cct.SamplerOrBound[int] = 5,
+        max_order: cct.SamplerOrBound[int] = 2,
+        *,
+        shared: cct.SharedType = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        coefficients : int or Sampler
+        coefficients : Sampler | int
             Sampler for spherical harmonics coefficients (or upper bound)
-        max_order : int or Sampler
+        max_order : Sampler | int
             Sampler for spherical harmonics order (or upper bound)
 
         Other Parameters
         ------------------
         returns : [list or dict of] {'input', 'output', 'shim'}
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
         """
         super().__init__(shared=shared, **kwargs)
         self.coefficients = Uniform.make(make_range(0, coefficients))
         self.max_order = RandInt.make(make_range(1, max_order))
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         ndim = x.ndim - 1
         batch = len(x)
         if 'channels' in self.shared:
@@ -400,7 +435,7 @@ class RandomShimTransform(NonFinalTransform):
 class HertzToPhaseTransform(FinalTransform):
     """Converts a ΔB0 field (in Hz) into a Phase shift field Δφ (in rad)"""
 
-    def __init__(self, te=0, **kwargs):
+    def __init__(self, te: float = 0, **kwargs) -> None:
         """
 
         Parameters
@@ -412,14 +447,14 @@ class HertzToPhaseTransform(FinalTransform):
         super().__init__(**kwargs)
         self.te = te
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         return (2 * math.pi * self.te) * x
 
 
 class HertzToVoxelShiftTransform(FinalTransform):
     """Converts a ΔB0 field (in Hz) into a voxel shift field Δv"""
 
-    def __init__(self, bandwidth=140, **kwargs):
+    def __init__(self, bandwidth: float = 140, **kwargs) -> None:
         """
 
         Parameters
@@ -431,8 +466,170 @@ class HertzToVoxelShiftTransform(FinalTransform):
         super().__init__(**kwargs)
         self.bandwidth = bandwidth
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         return x / self.bandwidth
+
+
+
+class ApplyB0DistortionTransform(FinalTransform):
+    """Final (deterministic) elastic transform"""
+
+    def __init__(
+        self,
+        flow: tx.Optional[Tensor] = None,
+        vdm: tx.Optional[Tensor] = None,
+        controls: tx.Optional[Tensor] = None,
+        order: int = 3,
+        bound: cct.TorchBound = 'border',
+        nearest_if_label: bool = True,
+        axis: tx.Union[int, tx.Sequence[float]] = -1,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        flow : (C, D, *spatial) tensor
+            Flow field (in voxels)
+            (if not provided, `vdm` of `control` must be provided)
+        vdm : (C, *spatial) tensor
+            Voxel displacement field
+            (if not provided, `control` must be provided)
+        control : (C, *shape) tensor
+            Spline control points
+            (if not provided, `vdm` must be provided)
+        steps : int
+            Number of scaling and squaring steps
+        order : 1..7
+            Order of the splines that encode the smooth deformation.
+        bound : {'zeros', 'border', 'reflection'}
+            Padding mode used for the deformed image.
+        zero_center : bool
+            Subtract its mean displacement to the flow field so that
+            it has an empirical mean of zero.
+        nearest_if_label : bool
+        """
+        super().__init__(**kwargs)
+        self.flow = flow
+        self.vdm = vdm
+        self.controls = controls
+        self.order = order
+        self.bound = bound
+        self.nearest_if_label = nearest_if_label
+        self.axis = axis
+        self.backend = dict(dtype=dtype, device=device)
+
+    @classmethod
+    def _make_vdm(
+        cls, shape: tx.Sequence[int], controls: Tensor, order: int
+    ) -> Tensor:
+        return interpol.resize(
+            controls, shape=shape, interpolation=order,
+            prefilter=False
+        )
+
+    def make_vdm(
+        self,
+        shape: tx.Sequence[int],
+        controls: tx.Optional[Tensor] = None
+    ) -> Tensor:
+        """Upsample the control points to the final full size
+
+        Parameters
+        ----------
+        shape : list[int]
+            Target shape
+        controls : (C, *shape) tensor, default=`self.controls`
+            Spline control points
+
+        Returns
+        -------
+        vdm : (C, *fullshape) tensor
+            Upampled voxel displacement field
+
+        """
+        if controls is None:
+            controls = self.controls
+        return self._make_vdm(shape, controls, self.order)
+
+    @classmethod
+    def _make_flow(cls, vdm: Tensor, axis: cct.VectorLike) -> Tensor:
+        ndim = len(vdm.shape) - 1
+        if isinstance(axis, int):
+            axis_index = axis
+            axis = [0] * ndim
+            axis[axis_index] = 1
+        axis = make_vector(axis, ndim, dtype=vdm.dtype, device=vdm.device)
+        flow = vdm[..., None] * axis        # (C, *spatial, D)
+        return torch.movedim(flow, -1, 1)   # (C, D, *spatial)
+
+    def make_flow(self, vdm: Tensor) -> Tensor:
+        """Make a flow field from the voxel displacement map"""
+        return self._make_flow(vdm, self.axis)
+
+    def xform(self, x: Tensor) -> Returned:
+        """Deform the input tensor
+
+        Parameters
+        ----------
+        x : (C, *spatial) tensor
+            Input tensor
+
+        Returns
+        -------
+        out : [dict or list of] tensor
+            The tensors returned by this function depend on the
+            value of `self.returns`. See `ElasticTransform`.
+
+        """
+        x = x.to(**self.backend)
+
+        def _get_controls():
+            if self.controls is not None:
+                return cast_like(self.controls, x)
+            raise ValueError('Controls requested but not stored.')
+
+        def _get_vdm(controls=None):
+            if self.vdm is not None:
+                return cast_like(self.vdm, x)
+            if controls is None:
+                controls = _get_controls()
+            return self.make_vdm(controls, x.shape[1:])
+
+        def _get_flow(vdm=None, controls=None):
+            if self.flow is not None:
+                return cast_like(self.flow, x)
+            if vdm is None:
+                vdm = _get_vdm(controls)
+            return self.make_flow(vdm)
+
+        flow, vdm, controls = self.flow, self.vdm, self.controls
+        required = return_requires(self.returns)
+
+        if required.intersection({'controls'}):
+            controls = _get_controls()
+        if required.intersection({'vdm'}):
+            vdm = _get_vdm(controls)
+        if required.intersection({'flow', 'output'}):
+            flow = _get_flow(vdm, controls)
+
+        y = None
+        if 'output' in required:
+            interpolation_order = 1
+            if not x.dtype.is_floating_point and self.nearest_if_label:
+                interpolation_order = 0
+            y = interpol.pull(
+                x[:, None], flow,
+                bound=self.bound,
+                interpolation=interpolation_order,
+                extrapolate=True,
+                prefilter=True,
+            )[:, 0]
+        return prepare_output(
+            dict(input=x, output=y, flow=flow, vdm=vdm, controls=controls),
+            self.returns
+        )
 
 
 class B0DistortionTransform(NonFinalTransform):
@@ -445,21 +642,24 @@ class B0DistortionTransform(NonFinalTransform):
     For a more realistic model, see `RealisticB0DistortionTransform`.
     """
 
+    Final = Next = ApplyB0DistortionTransform
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
-        dmax: Union[float, Sequence[float]] = 0.1,
-        unit: str = 'fov',
-        shape: Union[int, Sequence[int]] = 5,
-        bound: str = 'circular',
+        dmax: cct.ScalarOrSequence[float] = 0.1,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        shape: cct.ScalarOrSequence[int] = 5,
+        bound: cct.TorchBound = 'circular',
         order: int = 3,
         nearest_if_label: bool = True,
-        axis: Union[int, Sequence[float]] = -1,
+        axis: tx.Union[int, tx.Sequence[float]] = -1,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -481,7 +681,7 @@ class B0DistortionTransform(NonFinalTransform):
             and an argmax output label map is computed on the fly).
             If `nearest_if_label=True`, the entire label map will be
             resampled at once using nearest-neighbour interpolation.
-        axis : int or sequence[float]
+        axis : int | sequence[float]
             If int, the distortion is applied along this dimension.
             If sequence of floats, it is a unit vector that encodes the
             direction of the distortion in the voxel coordinate system.
@@ -495,7 +695,7 @@ class B0DistortionTransform(NonFinalTransform):
             - 'flow': The flow field
             - 'vdm': The voxel displacement map (VDM)
             - 'controls': The control points of the VDM
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Apply same transform to all images/channels
         """
         super().__init__(shared=shared, **kwargs)
@@ -521,7 +721,10 @@ class B0DistortionTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(self, x, max_depth=float('inf'), vdm=True, flow=True):
+    def make_final(
+        self, x: Tensor, /, max_depth: int = inf,
+        *, vdm: bool = True, flow: bool = True
+    ) -> Transform:
         """
         Generate a deterministic transform with constant parameters
 
@@ -571,192 +774,46 @@ class B0DistortionTransform(NonFinalTransform):
             else:
                 controls[:, d].mul_(dmax[d])
         if vdm or flow:
-            vdm = self.Final._make_vdm(controls, fullshape, self.order)
+            vdm = self.Next._make_vdm(fullshape, controls, self.order)
         else:
             vdm = None
         if flow:
-            flow = self.Final._make_flow(vdm, self.axis)
+            flow = self.Next._make_flow(vdm, self.axis)
         else:
             flow = None
-        return self.Final(
+        return self.Next(
             flow, vdm, controls,
             self.order, self.bound, self.nearest_if_label, self.axis,
             **self.backend,
             **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-        """Final (deterministic) elastic transform"""
-
-        def __init__(
-            self,
-            flow: Optional[torch.Tensor] = None,
-            vdm: Optional[torch.Tensor] = None,
-            controls: Optional[torch.Tensor] = None,
-            order: int = 3,
-            bound: str = 'border',
-            nearest_if_label: bool = True,
-            axis: Union[int, Sequence[float]] = -1,
-            dtype: Optional[torch.dtype] = None,
-            device: Optional[Union[torch.device, str]] = None,
-            **kwargs
-        ):
-            """
-            Parameters
-            ----------
-            flow : (C, D, *spatial) tensor
-                Flow field (in voxels)
-                (if not provided, `vdm` of `control` must be provided)
-            vdm : (C, *spatial) tensor
-                Voxel displacement field
-                (if not provided, `control` must be provided)
-            control : (C, *shape) tensor
-                Spline control points
-                (if not provided, `vdm` must be provided)
-            steps : int
-                Number of scaling and squaring steps
-            order : 1..7
-                Order of the splines that encode the smooth deformation.
-            bound : {'zeros', 'border', 'reflection'}
-                Padding mode used for the deformed image.
-            zero_center : bool
-                Subtract its mean displacement to the flow field so that
-                it has an empirical mean of zero.
-            nearest_if_label : bool
-            """
-            super().__init__(**kwargs)
-            self.flow = flow
-            self.vdm = vdm
-            self.controls = controls
-            self.order = order
-            self.bound = bound
-            self.nearest_if_label = nearest_if_label
-            self.axis = axis
-            self.backend = dict(dtype=dtype, device=device)
-
-        @classmethod
-        def _make_vdm(cls, control, fullshape, order):
-            return interpol.resize(
-                control, shape=fullshape, interpolation=order,
-                prefilter=False
-            )
-
-        def make_vdm(self, control, fullshape):
-            """Upsample the control points to the final full size
-
-            Parameters
-            ----------
-            control : (C, *shape) tensor
-                Spline control points
-            fullshape : list[int]
-                Target shape
-
-            Returns
-            -------
-            vdm : (C, *fullshape) tensor
-                Upampled voxel displacement field
-
-            """
-            return self._make_vdm(control, fullshape, self.order)
-
-        @classmethod
-        def _make_flow(cls, vdm, axis):
-            ndim = len(vdm.shape) - 1
-            if isinstance(axis, int):
-                axis_index = axis
-                axis = [0] * ndim
-                axis[axis_index] = 1
-            axis = make_vector(axis, ndim, dtype=vdm.dtype, device=vdm.device)
-            flow = vdm[..., None] * axis        # (C, *spatial, D)
-            return torch.movedim(flow, -1, 1)   # (C, D, *spatial)
-
-        def make_flow(self, vdm):
-            """Make a flow field from the voxel displacement map"""
-            return self._make_flow(vdm, self.axis)
-
-        def xform(self, x: torch.Tensor):
-            """Deform the input tensor
-
-            Parameters
-            ----------
-            x : (C, *spatial) tensor
-                Input tensor
-
-            Returns
-            -------
-            out : [dict or list of] tensor
-                The tensors returned by this function depend on the
-                value of `self.returns`. See `ElasticTransform`.
-
-            """
-            x = x.to(**self.backend)
-
-            def _get_controls():
-                if self.controls is not None:
-                    return cast_like(self.controls, x)
-                raise ValueError('Controls requested but not stored.')
-
-            def _get_vdm(controls=None):
-                if self.vdm is not None:
-                    return cast_like(self.vdm, x)
-                if controls is None:
-                    controls = _get_controls()
-                return self.make_vdm(controls, x.shape[1:])
-
-            def _get_flow(vdm=None, controls=None):
-                if self.flow is not None:
-                    return cast_like(self.flow, x)
-                if vdm is None:
-                    vdm = _get_vdm(controls)
-                return self.make_flow(vdm)
-
-            flow, vdm, controls = self.flow, self.vdm, self.controls
-            required = return_requires(self.returns)
-
-            if required.intersection({'controls'}):
-                controls = _get_controls()
-            if required.intersection({'vdm'}):
-                vdm = _get_vdm(controls)
-            if required.intersection({'flow', 'output'}):
-                flow = _get_flow(vdm, controls)
-
-            y = None
-            if 'output' in required:
-                interpolation_order = 1
-                if not x.dtype.is_floating_point and self.nearest_if_label:
-                    interpolation_order = 0
-                y = interpol.pull(
-                    x[:, None], flow,
-                    bound=self.bound,
-                    interpolation=interpolation_order,
-                    extrapolate=True,
-                    prefilter=True,
-                )[:, 0]
-            return prepare_output(
-                dict(input=x, output=y, flow=flow, vdm=vdm, controls=controls),
-                self.returns
-            )
-
 
 class RandomB0DistortionTransform(FinalTransform):
     """Randomized elastic distortion along a single dimension."""
 
+    Next = B0DistortionTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = ApplyB0DistortionTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
     def __init__(
         self,
-        dmax: Union[Sampler, float, Sequence[float]] = 0.1,
-        shape: Union[Sampler, int, Sequence[int]] = 5,
-        unit: str = 'fov',
-        bound: str = 'circular',
+        dmax: cct.SamplerOrBound[float] = 0.1,
+        shape: cct.SamplerOrBound[int] = 5,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'circular',
         order: int = 3,
         nearest_if_label: bool = True,
-        axis: Union[Sampler, int, Sequence[float], None] = None,
+        axis: tx.Union[Sampler, int, tx.Sequence[float], None] = None,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
-        shared_vdm: Union[bool, str, None] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
+        shared_vdm: tx.Optional[cct.SharedType] = None,
         **kwargs
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -792,9 +849,9 @@ class RandomB0DistortionTransform(FinalTransform):
             - 'flow': The flow field
             - 'vdm': The voxel displacement map (VDM)
             - 'controls': The control points of the VDM
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Apply same transform to all images/channels
-        shared_vdm : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_vdm : {'channels', 'tensors', 'channels+tensors', '', None} | bool
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
@@ -814,7 +871,7 @@ class RandomB0DistortionTransform(FinalTransform):
             self.backend["device"] = device
 
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -844,9 +901,20 @@ class RandomB0DistortionTransform(FinalTransform):
 class GradientEchoTransform(FinalTransform):
     """Spoiled Gradient Echo forward model"""
 
-    def __init__(self, tr=25e-3, te=7e-3, alpha=20,
-                 pd=None, t1=None, t2=None, b1=1, mt=0,
-                 **kwargs):
+    Parameters = namedtuple('Parameters', ['PD', 'T1', 'T2', 'MT', 'B1'])
+
+    def __init__(
+        self,
+        tr: float = 25e-3,
+        te: float = 7e-3,
+        alpha: float = 20,
+        pd: float | None = None,
+        t1: float | None = None,
+        t2: float | None = None,
+        b1: float | None = 1,
+        mt: float | None = 0,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -857,19 +925,19 @@ class GradientEchoTransform(FinalTransform):
             Echo time, in sec
         alpha : float
             Nominal flip angle, in degree
-        pd : float, optional
+        pd : float | None
             Proton density (PD).
             If None, the first input channel is PD.
-        t1 : float, optional
+        t1 : float | None
             Longitudinal relaxation time (T1), in sec.
             If None, the second input channel is T1.
-        t2 : float, optional
+        t2 : float | None
             Apparent transverse relaxation time (T2*), in sec.
             If None, the third input channel is T2*.
-        b1 : float, optional
+        b1 : float | None
             Transmit efficiency (B1+). `1` means 100% efficiency.
             If None, the fourth input channel is B1+.
-        mt : float, optional
+        mt : float | None
             Magnetization transfer saturation (MTsat).
             If None, the fifth input channel is MTsat.
 
@@ -884,7 +952,10 @@ class GradientEchoTransform(FinalTransform):
         self.b1 = b1
         self.mt = mt
 
-    def get_parameters(self, x):
+    def get_parameters(
+        self, x: Tensor
+    ) -> Parameters:
+        """Assign each input channel to the appropriate parameter."""
         if self.pd is None:
             pd, x = x[:1], x[1:]
         else:
@@ -906,9 +977,9 @@ class GradientEchoTransform(FinalTransform):
         else:
             b1 = self.b1
 
-        return pd, t1, t2, mt, b1
+        return self.Parameters(pd, t1, t2, mt, b1)
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         """
         Parameters
         ----------
@@ -942,37 +1013,102 @@ class GradientEchoTransform(FinalTransform):
             self.returns)
 
 
+class ReturnGradientEchoParameters(ReturnValueTransform):
+    """Store parameter maps"""
+
+    def __init__(self, param, **kwargs):
+        super().__init__(param, **kwargs, value_name='param')
+
+    def xform(self, x: Tensor) -> Tensor:
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+        return self.param.to(x.device, dtype)
+
+
+class GMMGradientEchoTransform(FinalTransform):
+    """Apply GRE forward model to parameters, then mask"""
+
+    def __init__(
+        self,
+        prm: ReturnGradientEchoParameters,
+        fwd: GradientEchoTransform,
+        mask: tx.Optional[Transform] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        prm : ReturnGradientEchoParameters
+            Transform that returns the parameter maps required by `fwd`
+        fwd : GradientEchoTransform
+            Forward model that generates the GRE image from the parameters
+        mask : Transform, optional
+            Transform that applies a mask to the output of `fwd`.
+        """
+        super().__init__(**kwargs)
+        self.prm = prm
+        self.fwd = fwd
+        self.mask = mask
+
+    def xform(self, x: Tensor) -> Returned:
+        y = self.prm(x)
+        y = self.fwd(y)
+        if self.mask is not None:
+            out = returns_find('output', y, self.fwd.returns)
+            y = returns_update(self.mask(out), 'output', y, self.fwd.returns)
+        return y
+
+
 class RandomGMMGradientEchoTransform(NonFinalTransform):
     """
     Generate a Spoiled Gradient Echo image from synthetic PD/T1/T2 maps.
     """
 
-    def __init__(self, tr=50e-3, te=50e-3, alpha=90,
-                 pd=1, t1=10, t2=100, mt=0.1,
-                 b1=RandomMulFieldTransform(vmax=1.5),
-                 sigma=0.2, fwhm=2, **kwargs):
+    Final = Next = GMMGradientEchoTransform
+    """The transform type returned by `make_final`."""
+
+    Parameters = namedtuple(
+        'Parameters',
+        ['tr', 'te', 'alpha', 'pd', 't1', 't2', 'mt', 'b1', 'sigma', 'fwhm']
+    )
+
+    def __init__(
+        self,
+        tr: cct.SamplerOrBound[float] = 50e-3,
+        te: cct.SamplerOrBound[float] = 50e-3,
+        alpha: cct.SamplerOrBound[float] = 90,
+        pd: cct.SamplerOrBound[float] = 1,
+        t1: cct.SamplerOrBound[float] = 10,
+        t2: cct.SamplerOrBound[float] = 100,
+        mt: cct.SamplerOrBound[float] = 0.1,
+        b1: Transform = RandomMulFieldTransform(vmax=1.5),
+        sigma: cct.SamplerOrBound[float] = 0.2,
+        fwhm: cct.SamplerOrBound[float] = 2,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        tr : Sampler or float
+        tr : Sampler | float
             Random sampler for repetition time, or upper bound
-        te : Sampler or float
+        te : Sampler | float
             Random sampler for echo time, or upper bound
-        alpha : Sampler or float
+        alpha : Sampler | float
             Random sampler for nominal flip angle, or upper bound
-        pd : Sampler or float
+        pd : Sampler | float
             Random sampler for proton density, or upper bound
-        t1 : Sampler or float
+        t1 : Sampler | float
             Random sampler for longitudinal relaxation, or upper bound
-        t2 : Sampler or float
+        t2 : Sampler | float
             Random sampler for apparent transverse relaxation, or upper bound
-        mt : Sampler or float
+        mt : Sampler | float
             Random sampler for magnetization transfer saturation, or upper bound
         b1 : Transform
             A transformation that samples a smooth multiplicative field
-        sigma : Sampler or float
+        sigma : Sampler | float
             Random sampler for intra-class standard deviation (in percent), or upper bound
-        fwhm : Sampler or float
+        fwhm : Sampler | float
             Random sampler for intra-class smoothing (in voxels), or upper bound
         """  # noqa: E501
         super().__init__(**kwargs)
@@ -987,7 +1123,8 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         self.fwhm = Uniform.make(make_range(0, fwhm))
         self.b1 = b1
 
-    def get_parameters(self, x):
+    def get_parameters(self, x: Tensor) -> Parameters:
+        """Sample each parameter."""
         dtype = (x.dtype if x.dtype.is_floating_point
                  else torch.get_default_dtype())
         backend = dict(dtype=dtype, device=x.device)
@@ -1028,9 +1165,10 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
                 b1 = b1()
         else:
             b1 = 1
-        return tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm
 
-    def make_final(self, x, max_depth=float('inf')):
+        return self.Parameters(tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm)
+
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         n = len(x) if x.dtype.is_floating_point else x.max() + 1
@@ -1081,37 +1219,9 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
 
         # GRE forward mode
         mask = (1 - x[0]) if x.dtype.is_floating_point else (x != 0)
-        return self.Final(
-            self.GREParameters(y),
+        return self.Next(
+            ReturnGradientEchoParameters(y),
             GradientEchoTransform(tr, te, alpha, b1=None, mt=None,
                                   **self.get_prm()),
             MulValueTransform(mask),
-        )
-
-    class GREParameters(FinalTransform):
-        """Store parameter maps"""
-        def __init__(self, param, **kwargs):
-            super().__init__(**kwargs)
-            self.param = param
-
-        def xform(self, x):
-            dtype = x.dtype
-            if not dtype.is_floating_point:
-                dtype = torch.get_default_dtype()
-            return self.param.to(x.device, dtype)
-
-    class Final(FinalTransform):
-        """Apply GRE forward model to parameters, then mask"""
-        def __init__(self, prm, fwd, mask, **kwargs):
-            super().__init__(**kwargs)
-            self.prm = prm
-            self.fwd = fwd
-            self.mask = mask
-
-        def xform(self, x):
-            y = self.prm(x)
-            y = self.fwd(y)
-
-            out = returns_find('output', y, self.fwd.returns)
-            y = returns_update(self.mask(out), 'output', y, self.fwd.returns)
-            return y
+        ).make_final(x, max_depth-1)

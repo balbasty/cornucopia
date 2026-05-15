@@ -1,45 +1,68 @@
+"""This module contains transforms that inject noise into an image."""
 __all__ = [
+    'GaussianNoiseFinalTransform',
     'GaussianNoiseTransform',
     'RandomGaussianNoiseTransform',
+    'ChiNoiseFinalTransform',
     'ChiNoiseTransform',
     'RandomChiNoiseTransform',
+    'GFactorFinalTransform',
+    'GFactorTransform',
+    'GammaNoiseFinalTransform',
     'GammaNoiseTransform',
     'RandomGammaNoiseTransform',
-    'GFactorTransform',
 ]
-
-import torch
+# stdlib
 import math
+from math import inf
+
+# dependencies
+import torch
+import typing_extensions as tx
+from torch import Tensor
+
+# internals
 from .baseutils import prepare_output
-from .base import FinalTransform, NonFinalTransform, PerChannelTransform
+from .base import FinalTransform, NonFinalTransform, PerChannelTransform, Transform
 from .special import RandomizedTransform
 from .intensity import MulFieldTransform, AddValueTransform, MulValueTransform
 from .random import Uniform, RandInt, Fixed, make_range
 from .utils.smart_inplace import mul_, add_, sqrt_
+from . import typing as cct
 from . import ctx
 
 
+def _parentof(child):
+
+    def decorator(parent):
+        child.Previous = parent
+        return parent
+
+    return decorator
+
+
+
 class GaussianNoiseFinalTransform(AddValueTransform):
+    """Precomputed Gaussian noise transform"""
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value: Tensor, **kwargs) -> None:
         super().__init__(value, value_name='noise', **kwargs)
-        self.Parent = GaussianNoiseTransform
-
-    @property
-    def noise(self):
-        return self.value
-
-    @noise.setter
-    def noise(self, value):
-        self.value = value
 
 
+@_parentof(GaussianNoiseFinalTransform)
 class GaussianNoiseTransform(NonFinalTransform):
     """Additive Gaussian noise"""
 
-    Final = GaussianNoiseFinalTransform
+    Final = Next = GaussianNoiseFinalTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, sigma=0.1, *, shared=False, **kwargs):
+    def __init__(
+        self,
+        sigma: float = 0.1,
+        *,
+        shared: cct.SharedType = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -50,13 +73,13 @@ class GaussianNoiseTransform(NonFinalTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Add the exact same nosie to all channels/images
         """
         super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = list(x.shape)
@@ -67,7 +90,7 @@ class GaussianNoiseTransform(NonFinalTransform):
             dtype = torch.get_default_dtype()
         noise = torch.randn(shape, dtype=dtype, device=x.device)
         noise = mul_(noise, self.sigma)
-        return self.Final(
+        return self.Next(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -75,12 +98,24 @@ class GaussianNoiseTransform(NonFinalTransform):
 class RandomGaussianNoiseTransform(RandomizedTransform):
     """Additive Gaussian noise with random standard deviation"""
 
-    def __init__(self, sigma=0.1,
-                 *, shared=False, shared_noise=None, **kwargs):
+    Next = GaussianNoiseTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = GaussianNoiseFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        sigma: cct.SamplerOrBound[float] = 0.1,
+        *,
+        shared: cct.SharedType=False,
+        shared_noise: tx.Optional[cct.SharedType] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        sigma : Sampler or float
+        sigma : Sampler | float
             Distribution from which to sample the standard deviation.
             If a `float`, sample from `Uniform(0, value)`.
             To use a fixed value, pass `Fixed(value)`.
@@ -89,7 +124,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
         ----------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Use the same sd for all channels/tensors
         shared_noise : {'channels', 'tensors', 'channels+tensors', '', None}
             Use the exact same noise for all channels/tensors
@@ -99,7 +134,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
                          shared=shared, **kwargs)
         self.shared_noise = shared_noise
 
-    def get_prm(self):
+    def get_prm(self) -> dict:
         prm = super().get_prm()
         prm['shared'] = (
             self.shared if self.shared_noise is None else
@@ -110,10 +145,9 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
 
 class ChiNoiseFinalTransform(FinalTransform):
 
-    def __init__(self, noise, **kwargs):
+    def __init__(self, noise: Tensor, **kwargs) -> None:
         super().__init__(**kwargs)
         self.noise = noise
-        self.Parent = ChiNoiseTransform
 
     def xform(self, x):
         noise = self.noise.to(x)
@@ -124,15 +158,24 @@ class ChiNoiseFinalTransform(FinalTransform):
         )
 
 
+@_parentof(ChiNoiseFinalTransform)
 class ChiNoiseTransform(NonFinalTransform):
     """Additive Noncentral Chi noise
 
     (Rician is a special case with nb_channels = 2)
     """
 
-    Final = ChiNoiseFinalTransform
+    Final = Next = ChiNoiseFinalTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, sigma=0.1, nb_channels=2, *, shared=False, **kwargs):
+    def __init__(
+        self,
+        sigma: float = 0.1,
+        nb_channels: int = 2,
+        *,
+        shared: cct.SharedType = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -145,14 +188,14 @@ class ChiNoiseTransform(NonFinalTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Add the exact same values to all channels/images
         """
         super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
         self.nb_channels = nb_channels
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -174,7 +217,7 @@ class ChiNoiseTransform(NonFinalTransform):
         sigma = self.sigma / math.sqrt(df - mu*mu)
         noise = mul_(noise, sigma)
 
-        return self.Final(
+        return self.Next(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -182,17 +225,28 @@ class ChiNoiseTransform(NonFinalTransform):
 class RandomChiNoiseTransform(RandomizedTransform):
     """Additive Chi noise with random standard deviation and channels"""
 
-    def __init__(self, sigma=0.1, nb_channels=8,
-                 *, shared=False, shared_noise=None, **kwargs):
-        """
+    Next = ChiNoiseTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
 
+    Final = ChiNoiseFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        sigma: cct.SamplerOrBound[float] = 0.1,
+        nb_channels: cct.SamplerOrBound[int] = 8,
+        *, shared: cct.SharedType = False,
+        shared_noise: tx.Optional[cct.SharedType] = None,
+        **kwargs
+    ) -> None:
+        """
         Parameters
         ----------
-        sigma : Sampler or float
+        sigma : Sampler | float
             Distribution from which to sample the standard deviation.
             If a `float`, sample from `Uniform(0, value)`.
             To use a fixed value, pass `Fixed(value)`.
-        nb_channels : Sampler or int
+        nb_channels : Sampler | int
             Distribution from which to sample the standard deviation.
             If a `int`, sample from `RandInt(1, value)`.
             To use a fixed value, pass `Fixed(value)`.
@@ -201,9 +255,9 @@ class RandomChiNoiseTransform(RandomizedTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensors to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Use the same sd for all channels/tensors
-        shared_noise : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_noise : {'channels', 'tensors', 'channels+tensors', '', None} | bool | None
             Use the exact same noise for all channels/tensors
         """
         super().__init__(
@@ -215,7 +269,7 @@ class RandomChiNoiseTransform(RandomizedTransform):
         )
         self.shared_noise = shared_noise
 
-    def get_prm(self):
+    def get_prm(self) -> dict:
         prm = super().get_prm()
         prm['shared'] = (
             self.shared if self.shared_noise is None else
@@ -225,18 +279,29 @@ class RandomChiNoiseTransform(RandomizedTransform):
 
 
 class GFactorFinalTransform(NonFinalTransform):
+    """Multiplicative noise with precomputed noise and g-factor"""
 
-    def __init__(self, noisetrf, gfactor, **kwargs):
+    def __init__(
+        self, noisetrf: Transform, gfactor: Transform, **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        noisetrf : Transform
+            A transform that applies additive noise
+        gfactor : Transform
+            A transform that takes the noise as input and outputs a
+            g-factor field
+        """
         super().__init__(**kwargs)
         self.noisetrf = noisetrf
         self.gfactor = gfactor
-        self.Parent = GFactorTransform
 
     @property
-    def is_final(self):
+    def is_final(self) -> bool:
         return self.noisetrf.is_final and self.gfactor.is_final
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0 or self.is_final:
             return self
         return type(self)(
@@ -244,7 +309,7 @@ class GFactorFinalTransform(NonFinalTransform):
             self.gfactor.make_final(x, max_depth-1),
         ).make_final(x, max_depth-1)
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         noisetrf = self.noisetrf.make_final(x)
         with ctx.returns(noisetrf, 'noise'):
             noise = noisetrf(x)
@@ -262,14 +327,24 @@ class GFactorFinalTransform(NonFinalTransform):
         )
 
 
+@_parentof(GFactorFinalTransform)
 class GFactorTransform(NonFinalTransform):
 
-    Final = GFactorFinalTransform
+    Final = Next = GFactorFinalTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, noise, shape=5, vmin=0.5, vmax=1.5, order=3,
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        noise: Transform,
+        shape: int = 5,
+        vmin: float = 0.5,
+        vmax: float = 1.5,
+        order: int = 3,
+        *,
+        shared: cct.SharedType = False,
+        **kwargs
+    ) -> None:
         """
-
         Parameters
         ----------
         noise : Transform
@@ -287,7 +362,7 @@ class GFactorTransform(NonFinalTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'gfactor', 'noise', 'scalednoise'}
             Which tensors to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Use the same field for all channels/tensors
         """  # noqa: 501
         super().__init__(shared=shared, **kwargs)
@@ -299,7 +374,7 @@ class GFactorTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        return self.Final(
+        return self.Next(
             self.noise.make_final(x, max_depth-1),
             self.gfactor.make_final(x, max_depth-1),
             **self.get_prm(),
@@ -307,25 +382,27 @@ class GFactorTransform(NonFinalTransform):
 
 
 class GammaNoiseFinalTransform(MulValueTransform):
+    """Multiplicative noise with precomputed noise"""
+
     def __init__(self, value, **kwargs):
         super().__init__(value, value_name='noise', **kwargs)
-        self.Parent = GammaNoiseTransform
-
-    @property
-    def noise(self):
-        return self.value
-
-    @noise.setter
-    def noise(self, value):
-        self.value = value
 
 
+@_parentof(GammaNoiseFinalTransform)
 class GammaNoiseTransform(NonFinalTransform):
     """Multiplicative Gamma noise"""
 
-    Final = GammaNoiseFinalTransform
+    Final = Next = GammaNoiseFinalTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, sigma=0.1, mean=1, *, shared=False, **kwargs):
+    def __init__(
+        self,
+        sigma: float = 0.1,
+        mean: float = 1,
+        *,
+        shared: cct.SharedType = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -345,7 +422,7 @@ class GammaNoiseTransform(NonFinalTransform):
         self.mean = mean
         self.sigma = sigma
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = list(x.shape)
@@ -358,7 +435,7 @@ class GammaNoiseTransform(NonFinalTransform):
         beta = torch.as_tensor(beta, dtype=x.dtype, device=x.device)
         noise = torch.distributions.Gamma(alpha, beta).rsample(shape)
         # ^ rsample() allows backprop, whereas sample() does not
-        return self.Final(
+        return self.Next(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -366,8 +443,21 @@ class GammaNoiseTransform(NonFinalTransform):
 class RandomGammaNoiseTransform(RandomizedTransform):
     """Multiplicative Gamma noise with random standard deviation and mean"""
 
-    def __init__(self, sigma=0.1, mean=Fixed(1),
-                 *, shared=False, shared_noise=None, **kwargs):
+    Next = GammaNoiseTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = GammaNoiseFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        sigma: cct.SamplerOrBound[float] = 0.1,
+        mean: cct.SamplerOrBound[float] = Fixed(1.0),
+        *,
+        shared: cct.SharedType = False,
+        shared_noise: tx.Optional[cct.SharedType] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -395,7 +485,7 @@ class RandomGammaNoiseTransform(RandomizedTransform):
                          shared=shared, **kwargs)
         self.shared_noise = shared_noise
 
-    def get_prm(self):
+    def get_prm(self) -> dict:
         prm = super().get_prm()
         prm['shared'] = (
             self.shared if self.shared_noise is None else

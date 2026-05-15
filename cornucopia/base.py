@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Dict, Iterator, List, Optional, Union
 from math import inf
 
-# external
+# dependencies
 import torch
 from torch import nn
 from torch import Tensor

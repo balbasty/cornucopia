@@ -1,3 +1,4 @@
+"""This module contains transforms that load data from disk."""
 __all__ = ['ToTensorTransform', 'LoadTransform']
 # stdlib
 import os.path

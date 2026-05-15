@@ -1,3 +1,4 @@
+"""This module contains geometric transformations."""
 __all__ = [
     'ElasticTransform',
     'ApplyElasticTransform',
@@ -8,6 +9,7 @@ __all__ = [
     'AffineElasticTransform',
     'ApplyAffineElasticTransform',
     'RandomAffineElasticTransform',
+    'ApplyAffinePair',
     'MakeAffinePair',
     'SlicewiseAffineTransform',
     'ApplySlicewiseAffineTransform',
@@ -302,7 +304,7 @@ class ElasticTransform(NonFinalTransform):
                 flow -= mean_flow
         else:
             flow = None
-        return self.Final(
+        return self.Next(
             flow, controls,
             self.steps, self.order, self.bound, self.zero_center,
             self.nearest_if_label,
@@ -522,7 +524,7 @@ class AffineTransform(NonFinalTransform):
     (A is a matrix so the transforms are applied right to left)
     """
 
-    Final = ApplyAffineTransform
+    Final = Next = ApplyAffineTransform
     """The transform type returned by `make_final`."""
 
     def __init__(
@@ -673,7 +675,7 @@ class AffineTransform(NonFinalTransform):
             flow = warps.affine_flow(A, fullshape).movedim(-1, 0)
         else:
             flow = None
-        return self.Final(
+        return self.Next(
             flow, A, self.bound, **self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -895,7 +897,7 @@ class AffineElasticTransform(NonFinalTransform):
     Affine + Elastic [+ Patch] transform.
     """
 
-    Final = ApplyAffineElasticTransform
+    Final = Next = ApplyAffineElasticTransform
     """The transform type returned by `make_final`."""
 
     def __init__(
@@ -1078,7 +1080,7 @@ class AffineElasticTransform(NonFinalTransform):
                     flow.movedim(-1, 0)
                 )
 
-        return self.Final(
+        return self.Next(
             flow, controls, A, self.elastic.bound, self.nearest_if_label,
             self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -1248,6 +1250,45 @@ class RandomAffineElasticTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+class ApplyAffinePair(FinalTransform):
+    """Deterministic affine pair transform"""
+
+    def __init__(self, left: Transform, right: Transform, **kwargs) -> None:
+        """
+        Parameters
+        ----------
+        left : Transform
+            The first transform to apply to the input image
+        right : Transform
+            The second transform to apply to the input image
+
+        Other Parameters
+        ------------------
+        returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
+
+            - 'input': Input image
+            - 'left': First transformed image
+            - 'right': Second transformed image
+            - 'flow': Displacement field that warps right to left
+            - 'matrix': Affine matrix that warps right to left
+                        (i.e., maps left coordinates to right coordinates)
+        """
+        super().__init__(**kwargs)
+        self.left = left
+        self.right = right
+
+    def xform(self, x: Tensor) -> Returned:
+        x1 = self.left(x)
+        x2 = self.right(x)
+        mat1, mat2 = self.left.matrix, self.right.matrix
+        mat1, mat2 = cast_like(mat1, x), cast_like(mat2, x)
+        mat12 = mat2.inverse() @ mat1
+        flow12 = warps.affine_flow(mat12, x.shape[1:]).movedim(-1, 0)
+        return prepare_output(
+            dict(input=x, left=x1, right=x2, flow=flow12, matrix=mat12),
+            self.returns)
+
+
 class MakeAffinePair(NonFinalTransform):
     """
     Generate a pair made of the same image transformed in two different ways.
@@ -1257,6 +1298,9 @@ class MakeAffinePair(NonFinalTransform):
     true_transform is a dictionary with keys 'flow' and 'affine'.
     """
 
+    Final = Next = ApplyAffinePair
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
         transform: Optional[RandomAffineTransform] = None,
@@ -1265,7 +1309,6 @@ class MakeAffinePair(NonFinalTransform):
         **kwargs
     ) -> None:
         """
-
         Parameters
         ----------
         transform : RandomAffineTransform, default=`RandomAffineTransform()`
@@ -1290,28 +1333,9 @@ class MakeAffinePair(NonFinalTransform):
             return self
         left = self.subtransform.make_final(x)
         right = self.subtransform.make_final(x)
-        return self.Final(
+        return self.Next(
             left, right, **self.get_prm()
         ).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-        """Deterministic affine pair transform"""
-
-        def __init__(self, left, right, **kwargs):
-            super().__init__(**kwargs)
-            self.left = left
-            self.right = right
-
-        def xform(self, x):
-            x1 = self.left(x)
-            x2 = self.right(x)
-            mat1, mat2 = self.left.matrix, self.right.matrix
-            mat1, mat2 = cast_like(mat1, x), cast_like(mat2, x)
-            mat12 = mat2.inverse() @ mat1
-            flow12 = warps.affine_flow(mat12, x.shape[1:]).movedim(-1, 0)
-            return prepare_output(
-                dict(input=x, left=x1, right=x2, flow=flow12, matrix=mat12),
-                self.returns)
 
 
 class ApplySlicewiseAffineTransform(FinalTransform):
@@ -1458,7 +1482,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
 class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
-    Final = ApplySlicewiseAffineTransform
+    Final = Next = ApplySlicewiseAffineTransform
     """The transform type returned by `make_final`."""
 
     def __init__(
@@ -1692,7 +1716,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
         else:
             flow = None
 
-        return self.Final(
+        return self.Next(
             A, flow, self.slice, self.spacing, self.subsample, self.bound,
             **self.get_prm()
         ).make_final(x, max_depth-1)

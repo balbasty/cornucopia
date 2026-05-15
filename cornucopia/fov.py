@@ -1,3 +1,7 @@
+"""
+This module contains transforms that operate on the field of view (FOV)
+of the image.
+"""
 __all__ = [
     'FlipTransform',
     'RandomFlipTransform',

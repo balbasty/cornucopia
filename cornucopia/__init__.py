@@ -34,6 +34,7 @@ image pairs with a random affine deformation between them::
 from . import random                        # noqa: F401
 from . import ctx                           # noqa: F401
 from . import base                          # noqa: F401
+from . import baseutils                     # noqa: F401
 from . import special                       # noqa: F401
 from . import contrast                      # noqa: F401
 from . import geometric                     # noqa: F401
@@ -46,6 +47,7 @@ from . import noise                         # noqa: F401
 from . import psf                           # noqa: F401
 from . import qmri                          # noqa: F401
 from . import synth                         # noqa: F401
+from . import typing                        # noqa: F401
 from . import utils                         # noqa: F401
 
 from .random import *                       # noqa: F401,F403

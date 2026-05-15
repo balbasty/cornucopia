@@ -1,3 +1,4 @@
+"""This module contains transforms that operate in k-space (Fourier space)."""
 __all__ = [
     'ApplyArrayCoilTransform',
     'ArrayCoilTransform',
@@ -39,7 +40,7 @@ class ApplyArrayCoilTransform(FinalTransform):
 
         Other Parameters
         ------------------
-        returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
+        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
             Default is 'uncombined'.
 
             - 'sos': Sum of square combined (magnitude) image
@@ -99,7 +100,7 @@ class ArrayCoilTransform(NonFinalTransform):
 
         Other Parameters
         ------------------
-        returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
+        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
             Default is 'uncombined'.
 
             - 'sos': Sum of square combined (magnitude) image
@@ -107,7 +108,7 @@ class ArrayCoilTransform(NonFinalTransform):
             - 'sens': Uncombined (complex) coil sensitivities
             - 'netsens': Net (magnitude) coil sensitivity
 
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Whether to share the sensitivities across channels/tensors
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
@@ -160,7 +161,7 @@ class ArrayCoilTransform(NonFinalTransform):
                 mul_(magnitude[k], exp_bias)
 
         sens = mul_(exp_(1j * phase), magnitude)
-        return self.Final(
+        return self.Next(
             sens, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -335,7 +336,7 @@ class IntraScanMotionTransform(NonFinalTransform):
 
         Other Parameters
         ------------------
-        returns : [list or dict of] {'input', 'sos', 'uncombined', 'sens', 'netsens', 'flow', 'matrix', 'pattern'}
+        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens', 'flow', 'matrix', 'pattern'}
             Default is 'sos'
 
             - 'sos': Sum of square combined (magnitude) image `(C, X, Y, Z)`
@@ -346,7 +347,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             - 'matrix': Rigid matrix in each shot `(N, 4, 4)`
             - 'pattern': Frequencies acquired in each shot `(N, X)`
 
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Whether to share the parameters across channels/tensors
 
         """  # noqa: E501

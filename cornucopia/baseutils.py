@@ -1,7 +1,7 @@
 # stdlib
 from collections.abc import Mapping, Sequence
 
-# external
+# dependencies
 import torch
 
 # internal

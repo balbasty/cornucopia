@@ -1,3 +1,4 @@
+"""This module contains transforms that operate on image intensities."""
 __all__ = [
     'AddValueTransform',
     'MulValueTransform',
@@ -14,6 +15,7 @@ __all__ = [
     'RandomMulTransform',
     'RandomAddTransform',
     'RandomAddMulTransform',
+    'GammaFinalTransform',
     'GammaTransform',
     'RandomGammaTransform',
     'ZTransform',
@@ -78,6 +80,16 @@ class OpConstTransform(FinalTransform):
         self.value = value
         self.op = op or self._op
         self.value_name = value_name
+
+    def __getattr__(self, name: str) -> _NumberOrTensor:
+        if name == self.__dict__.get("value_name"):
+            return self.__dict__.get("value")
+        return super().__getattr__(name)
+
+    def __setattr__(self, name: str, value: _NumberOrTensor) -> None:
+        if name == self.__dict__.get("value_name"):
+            name = 'value'
+        super().__setattr__(name, value)
 
     def xform(self, x: Tensor) -> Returned:
         value = self.value
@@ -170,6 +182,16 @@ class ReturnValueTransform(FinalTransform):
         self.value = value
         self.value_name = value_name
         self.dtype = dtype
+
+    def __getattr__(self, name: str) -> _NumberOrTensor:
+        if name == self.__dict__.get("value_name"):
+            return self.__dict__.get("value")
+        return super().__getattr__(name)
+
+    def __setattr__(self, name: str, value: _NumberOrTensor) -> None:
+        if name == self.__dict__.get("value_name"):
+            name = 'value'
+        super().__setattr__(name, value)
 
     def xform(self, x: Tensor) -> Returned:
         dtype = self.dtype or x.dtype
@@ -597,7 +619,7 @@ class BaseFieldTransform(NonFinalTransform):
 
         b = add_(mul_(b, self.vmax-self.vmin), self.vmin)
 
-        return self.Final(
+        return self.Next(
             b, value_name=self.value_name, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -1003,7 +1025,7 @@ class GammaTransform(NonFinalTransform):
                 vmax = vmax.max()
         else:
             vmax = self.vmax
-        return self.Final(
+        return self.Next(
             self.gamma, vmin, vmax, **self.get_prm()
         ).make_final(max_depth-1)
 

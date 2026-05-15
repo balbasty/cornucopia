@@ -14,8 +14,12 @@ __all__ = [
     'SplitChannels',
     'CatChannels',
 ]
+# dependencies
 import torch
-from torch import nn
+import typing_extensions as tx
+from torch import Tensor, nn
+
+# internals
 from .base import (
     Transform,
     IdentityTransform,
@@ -50,7 +54,7 @@ class BatchedTransform(nn.Module):
         ```
     """
 
-    def __init__(self, transform):
+    def __init__(self, transform: Transform) -> None:
         """
         Parameters
         ----------
@@ -112,19 +116,13 @@ class BatchedTransform(nn.Module):
         batch = pack(batch)
         return batch
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        return False
-
 
 class SplitChannels(Transform):
     """Unbind tensors across first dimension (without collapsing it)"""
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(shared='channels')
 
-    def transform_tensor(self, x):
+    def transform_tensor(self, x: Tensor) -> tx.Sequence[Tensor]:
         return x.chunk(len(x))
 
 
@@ -134,7 +132,7 @@ class CatChannels(Transform):
     Assumes that the nested-most level in the structure is the one to
     concatenate.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(shared='channels')
 
     def forward(self, *args, **kwargs):

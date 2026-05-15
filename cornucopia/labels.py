@@ -1,17 +1,23 @@
+"""This module contains transforms that operate on label maps."""
 __all__ = [
+    'OneHotFinalTransform',
     'OneHotTransform',
     'ArgMaxTransform',
+    'RelabelFinalTransform',
     'RelabelTransform',
+    'GaussianMixtureFinalTransform',
     'GaussianMixtureTransform',
     'RandomGaussianMixtureTransform',
     'SmoothLabelMap',
     'RandomSmoothLabelMap',
     'ErodeLabelTransform',
-    'RandomErodeLabelTransform',
     'DilateLabelTransform',
+    'RandomErodeLabelTransform',
     'RandomDilateLabelTransform',
+    'SmoothMorphoLabelFinalTransform',
     'SmoothMorphoLabelTransform',
     'RandomSmoothMorphoLabelTransform',
+    'SmoothShallowLabelFinalTransform',
     'SmoothShallowLabelTransform',
     'RandomSmoothShallowLabelTransform',
     'BernoulliTransform',
@@ -1142,7 +1148,7 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
-        return self.Final(
+        return self.Next(
             AddFieldTransform(self.shape, shared=self.shared), self.labels,
             self.min_radius, self.max_radius, self.method, **self.get_prm()
         ).make_final(x, max_depth-1)

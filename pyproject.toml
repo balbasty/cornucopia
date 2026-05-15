@@ -20,6 +20,7 @@ dependencies = [
     "nibabel",
     "torch-interpol >= 0.3",
     "torch-distmap",
+    "typing_extensions",
 ]
 
 [project.urls]

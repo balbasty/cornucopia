@@ -1,83 +1,98 @@
-"""SynthShape generator
+"""
+SynthShape generator
 
-References
-----------
-1.  Billot, B., Greve, D., Van Leemput, K., Fischl, B., Iglesias, J.E.
-    and Dalca, A.V., 2020.
-    [**A learning strategy for contrast-agnostic MRI segmentation.**](http://proceedings.mlr.press/v121/billot20a/billot20a.pdf)
-    In _Proceedings of the Third Conference on Medical Imaging with Deep Learning_,
-    PMLR 121, pp. 75-93.
+??? reference
+    1.  Billot, B., Greve, D., Van Leemput, K., Fischl, B., Iglesias, J.E.
+        and Dalca, A.V., 2020.
+        [**A learning strategy for contrast-agnostic MRI segmentation.**](http://proceedings.mlr.press/v121/billot20a/billot20a.pdf)
+        In _Proceedings of the Third Conference on Medical Imaging with Deep Learning_,
+        PMLR 121, pp. 75-93.
 
-        @inproceedings{billot2020learning,
-            title       = {A Learning Strategy for Contrast-agnostic MRI Segmentation},
-            author      = {Billot, Benjamin and Greve, Douglas N. and Van Leemput, Koen and Fischl, Bruce and Iglesias, Juan Eugenio and Dalca, Adrian},
-            booktitle   = {Proceedings of the Third Conference on Medical Imaging with Deep Learning},
-            pages       = {75--93},
-            year        = {2020},
-            editor      = {Arbel, Tal and Ben Ayed, Ismail and de Bruijne, Marleen and Descoteaux, Maxime and Lombaert, Herve and Pal, Christopher},
-            volume      = {121},
-            series      = {Proceedings of Machine Learning Research},
-            month       = {06--08 Jul},
-            publisher   = {PMLR},
-            pdf         = {http://proceedings.mlr.press/v121/billot20a/billot20a.pdf},
-            url         = {https://proceedings.mlr.press/v121/billot20a.html}
-        }
+            @inproceedings{billot2020learning,
+                title       = {A Learning Strategy for Contrast-agnostic MRI Segmentation},
+                author      = {Billot, Benjamin and Greve, Douglas N. and Van Leemput, Koen and Fischl, Bruce and Iglesias, Juan Eugenio and Dalca, Adrian},
+                booktitle   = {Proceedings of the Third Conference on Medical Imaging with Deep Learning},
+                pages       = {75--93},
+                year        = {2020},
+                editor      = {Arbel, Tal and Ben Ayed, Ismail and de Bruijne, Marleen and Descoteaux, Maxime and Lombaert, Herve and Pal, Christopher},
+                volume      = {121},
+                series      = {Proceedings of Machine Learning Research},
+                month       = {06--08 Jul},
+                publisher   = {PMLR},
+                pdf         = {http://proceedings.mlr.press/v121/billot20a/billot20a.pdf},
+                url         = {https://proceedings.mlr.press/v121/billot20a.html}
+            }
 
-2.  Billot, B., Robinson, E., Dalca, A.V. and Iglesias, J.E., 2020.
-    [**Partial volume segmentation of brain MRI scans of any resolution and contrast.**](https://arxiv.org/abs/2004.10221)
-    In _Medical Image Computing and Computer Assisted Intervention-MICCAI 2020:
-    23rd International Conference_, Lima, Peru, October 4-8, 2020,
-    Proceedings, Part VII 23 (pp. 177-187). Springer International Publishing.
+    2.  Billot, B., Robinson, E., Dalca, A.V. and Iglesias, J.E., 2020.
+        [**Partial volume segmentation of brain MRI scans of any resolution and contrast.**](https://arxiv.org/abs/2004.10221)
+        In _Medical Image Computing and Computer Assisted Intervention-MICCAI 2020:
+        23rd International Conference_, Lima, Peru, October 4-8, 2020,
+        Proceedings, Part VII 23 (pp. 177-187). Springer International Publishing.
 
-        @inproceedings{billot2020partial,
-          title         = {Partial volume segmentation of brain MRI scans of any resolution and contrast},
-          author        = {Billot, Benjamin and Robinson, Eleanor and Dalca, Adrian V and Iglesias, Juan Eugenio},
-          booktitle     = {Medical Image Computing and Computer Assisted Intervention--MICCAI 2020: 23rd International Conference, Lima, Peru, October 4--8, 2020, Proceedings, Part VII 23},
-          pages         = {177--187},
-          year          = {2020},
-          organization  = {Springer},
-          url           = {https://arxiv.org/abs/2004.10221}
-        }
+            @inproceedings{billot2020partial,
+            title         = {Partial volume segmentation of brain MRI scans of any resolution and contrast},
+            author        = {Billot, Benjamin and Robinson, Eleanor and Dalca, Adrian V and Iglesias, Juan Eugenio},
+            booktitle     = {Medical Image Computing and Computer Assisted Intervention--MICCAI 2020: 23rd International Conference, Lima, Peru, October 4--8, 2020, Proceedings, Part VII 23},
+            pages         = {177--187},
+            year          = {2020},
+            organization  = {Springer},
+            url           = {https://arxiv.org/abs/2004.10221}
+            }
 
-3.  Hoffmann, M., Billot, B., Greve, D.N., Iglesias, J.E., Fischl, B.
-    and Dalca, A.V., 2021.
-    [**SynthMorph: learning contrast-invariant registration without acquired images.**](https://arxiv.org/pdf/2004.10282)
-    _IEEE transactions on medical imaging_, 41(3), pp.543-558.
+    3.  Hoffmann, M., Billot, B., Greve, D.N., Iglesias, J.E., Fischl, B.
+        and Dalca, A.V., 2021.
+        [**SynthMorph: learning contrast-invariant registration without acquired images.**](https://arxiv.org/pdf/2004.10282)
+        _IEEE transactions on medical imaging_, 41(3), pp.543-558.
 
-        @article{hoffmann2021synthmorph,
-          title     = {SynthMorph: learning contrast-invariant registration without acquired images},
-          author    = {Hoffmann, Malte and Billot, Benjamin and Greve, Douglas N and Iglesias, Juan Eugenio and Fischl, Bruce and Dalca, Adrian V},
-          journal   = {IEEE transactions on medical imaging},
-          volume    = {41},
-          number    = {3},
-          pages     = {543--558},
-          year      = {2021},
-          publisher = {IEEE},
-          url       = {https://arxiv.org/pdf/2004.10282}
-        }
+            @article{hoffmann2021synthmorph,
+            title     = {SynthMorph: learning contrast-invariant registration without acquired images},
+            author    = {Hoffmann, Malte and Billot, Benjamin and Greve, Douglas N and Iglesias, Juan Eugenio and Fischl, Bruce and Dalca, Adrian V},
+            journal   = {IEEE transactions on medical imaging},
+            volume    = {41},
+            number    = {3},
+            pages     = {543--558},
+            year      = {2021},
+            publisher = {IEEE},
+            url       = {https://arxiv.org/pdf/2004.10282}
+            }
 
-4.  Billot, B., Greve, D.N., Puonti, O., Thielscher, A., Van Leemput, K.,
-    Fischl, B., Dalca, A.V. and Iglesias, J.E., 2023.
-    [**SynthSeg: Segmentation of brain MRI scans of any contrast and resolution
-    without retraining.**](https://www.sciencedirect.com/science/article/pii/S1361841523000506)
-    _Medical image analysis_, 86, p.102789.
+    4.  Billot, B., Greve, D.N., Puonti, O., Thielscher, A., Van Leemput, K.,
+        Fischl, B., Dalca, A.V. and Iglesias, J.E., 2023.
+        [**SynthSeg: Segmentation of brain MRI scans of any contrast and resolution
+        without retraining.**](https://www.sciencedirect.com/science/article/pii/S1361841523000506)
+        _Medical image analysis_, 86, p.102789.
 
-        @article{billot2023synthseg,
-          title     = {SynthSeg: Segmentation of brain MRI scans of any contrast and resolution without retraining},
-          author    = {Billot, Benjamin and Greve, Douglas N and Puonti, Oula and Thielscher, Axel and Van Leemput, Koen and Fischl, Bruce and Dalca, Adrian V and Iglesias, Juan Eugenio and others},
-          journal   = {Medical image analysis},
-          volume    = {86},
-          pages     = {102789},
-          year      = {2023},
-          publisher = {Elsevier},
-          url       = {https://www.sciencedirect.com/science/article/pii/S1361841523000506}
-        }
+            @article{billot2023synthseg,
+            title     = {SynthSeg: Segmentation of brain MRI scans of any contrast and resolution without retraining},
+            author    = {Billot, Benjamin and Greve, Douglas N and Puonti, Oula and Thielscher, Axel and Van Leemput, Koen and Fischl, Bruce and Dalca, Adrian V and Iglesias, Juan Eugenio and others},
+            journal   = {Medical image analysis},
+            volume    = {86},
+            pages     = {102789},
+            year      = {2023},
+            publisher = {Elsevier},
+            url       = {https://www.sciencedirect.com/science/article/pii/S1361841523000506}
+            }
 
 """  # noqa: E501
-__all__ = ['SynthFromLabelTransform', 'IntensityTransform']
+__all__ = [
+    'SynthFromLabelTransform',
+    'ApplySynthFromLabelTransform',
+    'IntensityTransform'
+]
 
-from .baseutils import Kwargs, prepare_output
-from .base import FinalTransform, NonFinalTransform
+# stdlib
+import random as pyrandom
+from numbers import Number
+from math import inf
+
+# dependencies
+import torch
+import typing_extensions as tx
+from torch import Tensor
+
+# internals
+from .baseutils import Kwargs, Returned, prepare_output
+from .base import Transform, FinalTransform, NonFinalTransform
 from .special import (
     SequentialTransform,
     RandomizedTransform,
@@ -106,10 +121,7 @@ from .noise import (
 from .geometric import RandomAffineElasticTransform
 from .random import Sampler, Uniform, RandInt, LogNormal
 from .io import LoadTransform
-from numbers import Number
-from typing import Optional, Union, List, Tuple, Mapping
-import random as pyrandom
-import torch
+from . import typing as cct
 
 
 class IntensityTransform(SequentialTransform):
@@ -146,14 +158,14 @@ class IntensityTransform(SequentialTransform):
 
     def __init__(
         self,
-        bias: Union[Sampler, int, bool] = 7,
-        bias_strength: Union[Sampler, float, bool] = 0.5,
-        gamma: Union[Sampler, float, bool] = 0.6,
-        motion_fwhm: Union[Sampler, float, bool] = 3,
-        resolution: Union[Sampler, float, bool] = 8,
-        snr: Union[Sampler, float, bool] = 10,
-        gfactor: Union[Sampler, int, bool] = 5,
-        order: Union[Sampler, int, bool] = 3,
+        bias: cct.SamplerOrBoundOrBool[int] = 7,
+        bias_strength: cct.SamplerOrBoundOrBool[float] = 0.5,
+        gamma: cct.SamplerOrBoundOrBool[float] = 0.6,
+        motion_fwhm: cct.SamplerOrBoundOrBool[float] = 3,
+        resolution: cct.SamplerOrBoundOrBool[float] = 8,
+        snr: cct.SamplerOrBoundOrBool[float] = 10,
+        gfactor: cct.SamplerOrBoundOrBool[int] = 5,
+        order: cct.SamplerOrBoundOrBool[int] = 3,
         **kwargs
     ):
         """
@@ -260,7 +272,149 @@ class IntensityTransform(SequentialTransform):
         super().__init__(steps, **kwargs)
 
 
-_LabelGrouping = Union[Tuple[int, ...], Tuple[Tuple[int, ...], ...]]
+# typing
+_LabelGrouping = tx.Union[
+    tx.Tuple[int, ...],
+    tx.Tuple[tx.Tuple[int, ...], ...]
+]
+_GeomStr = tx.Literal['affine', 'elastic', 'affine+elastic', '']
+_Geom = tx.Union[_GeomStr, bool]
+
+
+class ApplySynthFromLabelTransform(FinalTransform):
+    """
+    Apply the sequence of tranformations that synthesizes an image from
+    a label map.
+    """
+
+    def __init__(
+        self,
+        gmm: Transform,
+        deform: tx.Optional[Transform] = None,
+        intensity: tx.Optional[Transform] = None,
+        load: tx.Optional[Transform] = None,
+        preproc: tx.Optional[Transform] = None,
+        postproc: tx.Optional[Transform] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        gmm : Transform
+            The Gaussian mixture model (GMM) transform that generates
+            an image from a label map.
+        deform : Transform | None
+            The deformation transform that deforms the label map before
+            generation.
+        intensity : Transform | None
+            The intensity transform that augments the generated image.
+        load : Transform | None
+            The transform that loads the input label map from disk.
+        preproc : Transform | None
+            The transform that preprocesses the labels.
+            Only labels returned by `preproc` are used for generation.
+        postproc : Transform | None
+            The transform that postprocesses the labels.
+            Only labels returned by `postproc` are used as targets.
+
+        Other Parameters
+        ----------------
+        returns : [(list | dict) of] {'input', 'deformed', 'generators', 'target', 'label', 'image', 'output'}
+            Tensors to return
+
+            - `'input'`: the input label map (after loading, if `load` is provided)
+            - `'deformed'`: the deformed label map (after `deform`, if provided)
+            - `'generators'`: the generator maps (after `preproc`, if provided)
+            - `'target'`, `'label'`: the target label map (after `postproc`, if provided)
+            - `'image'`, `'output'`: the generated image (after `intensity`, if provided)
+
+        """  # noqa: E501
+        super().__init__(**kwargs)
+        self.load = load or IdentityTransform()
+        self.preproc = preproc or IdentityTransform()
+        self.postproc = postproc or IdentityTransform()
+        self.deform = deform or IdentityTransform()
+        self.intensity = intensity or IdentityTransform()
+        self.gmm = gmm or IdentityTransform()
+
+    @property
+    def is_final(self) -> bool:
+        return (
+            self.load.is_final and
+            self.preproc.is_final and
+            self.postproc.is_final and
+            self.deform.is_final and
+            self.intensity.is_final and
+            self.gmm.is_final
+        )
+
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+        if max_depth == 0 or self.is_final:
+            return self
+
+        layers = dict(
+            load=self.load,
+            preproc=self.preproc,
+            postproc=self.postproc,
+            deform=self.deform,
+            intensity=self.intensity,
+            gmm=self.gmm,
+        )
+
+        while not layers['load'].is_final and max_depth > 0:
+            layers['load'] = layers['load'].make_final(x, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        lab = layers['load'](x)
+        while not layers['deform'].is_final and max_depth > 0:
+            layers['deform'] = layers['deform'].make_final(lab, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        dfm = layers['deform'](lab)
+        while not layers['preproc'].is_final and max_depth > 0:
+            layers['preproc'] = layers['preproc'].make_final(dfm, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        gen = layers['preproc'](dfm)
+        while not layers['gmm'].is_final and max_depth > 0:
+            layers['gmm'] = layers['gmm'].make_final(gen, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        img = layers['gmm'](gen)
+        while not layers['intensity'].is_final and max_depth > 0:
+            layers['intensity'] = layers['intensity'].make_final(img, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        while not layers['postproc'].is_final and max_depth > 0:
+            layers['postproc'] = layers['postproc'].make_final(dfm, max_depth)
+            max_depth -= 1
+        if max_depth == 0:
+            return type(self)(**layers, **self.get_prm())
+
+        return type(self)(**layers, **self.get_prm()).make_final(x, max_depth-1)
+
+    def xform(self, lab: Tensor) -> Returned:
+        lab = self.load(lab)
+        dfm = self.deform(lab)
+        gen = self.preproc(dfm)
+        img = self.gmm(gen)
+        img = self.intensity(img)
+        tgt = self.postproc(dfm)
+        return prepare_output(
+            dict(input=lab, deformed=dfm, generators=gen,
+                    target=tgt, label=tgt, image=img, output=img),
+            self.returns,
+        )
 
 
 class SynthFromLabelTransform(NonFinalTransform):
@@ -303,38 +457,41 @@ class SynthFromLabelTransform(NonFinalTransform):
                 Added `geom` argument"
     """  # noqa: E501
 
+    Final = Next = ApplySynthFromLabelTransform
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
         *,
-        patch: Optional[Union[int, List[int]]] = None,
+        patch: tx.Optional[cct.ScalarOrSequence[int]] = None,
         from_disk: bool = False,
         one_hot: bool = False,
-        synth_labels: Optional[_LabelGrouping] = None,
-        synth_labels_maybe: Mapping[_LabelGrouping, float] = None,
-        target_labels: Optional[_LabelGrouping] = None,
-        order: Union[Sampler, int, bool] = 3,
-        geom: Union[str, bool] = True,
-        translations: Union[Sampler, float, bool] = 0.1,
-        rotation: Union[Sampler, float, bool] = 15,
-        shears: Union[Sampler, float, bool] = 0.012,
-        zooms: Union[Sampler, float, bool] = 0.15,
-        elastic: Union[Sampler, float, bool] = 0.05,
-        elastic_nodes: Union[Sampler, int] = 10,
-        elastic_steps: Union[Sampler, int] = 0,
-        bound: str = 'border',
-        gmm_fwhm: Union[Sampler, float, bool] = 10,
-        bias: Union[Sampler, int, bool] = 7,
-        bias_strength: Union[Sampler, float] = 0.5,
-        gamma: Union[Sampler, float, bool] = 0.6,
-        motion_fwhm: Union[Sampler, float, bool] = 3,
-        resolution: Union[Sampler, float, bool] = 8,
-        snr: Union[Sampler, float, bool] = 10,
-        gfactor: Union[Sampler, int, bool] = 5,
+        synth_labels: tx.Optional[_LabelGrouping] = None,
+        synth_labels_maybe: tx.Mapping[_LabelGrouping, float] = None,
+        target_labels: tx.Optional[_LabelGrouping] = None,
+        order: cct.SamplerOrBoundOrBool[int] = 3,
+        geom: _Geom = True,
+        translations: cct.SamplerOrBoundOrBool[float] = 0.1,
+        rotation: cct.SamplerOrBoundOrBool[float] = 15,
+        shears: cct.SamplerOrBoundOrBool[float] = 0.012,
+        zooms: cct.SamplerOrBoundOrBool[float] = 0.15,
+        elastic: cct.SamplerOrBoundOrBool[float] = 0.05,
+        elastic_nodes: cct.SamplerOrBound[int] = 10,
+        elastic_steps: cct.SamplerOrBound[int] = 0,
+        bound: cct.TorchBound = 'border',
+        gmm_fwhm: cct.SamplerOrBoundOrBool[float] = 10,
+        bias: cct.SamplerOrBoundOrBool[int] = 7,
+        bias_strength: cct.SamplerOrBound[float] = 0.5,
+        gamma: cct.SamplerOrBoundOrBool[float] = 0.6,
+        motion_fwhm: cct.SamplerOrBoundOrBool[float] = 3,
+        resolution: cct.SamplerOrBoundOrBool[float] = 8,
+        snr: cct.SamplerOrBoundOrBool[float] = 10,
+        gfactor: cct.SamplerOrBoundOrBool[int] = 5,
         sample_in_background: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        returns=Kwargs(image='image', label='label')
-    ):
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        returns: tx.Union[cct.ReturnsType] = Kwargs(image='image', label='label')
+    ) -> None:
         """
 
         Parameters
@@ -371,7 +528,7 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        geom: bool | {'affine', 'elastic', 'affine+elastic', ''}
+        geom: {'affine', 'elastic', 'affine+elastic', ''} | bool
             Which geometric transforms to apply.
             `True` (default) corresponds to `affine+elastic`.
             `False` corresponds to no geometric transform.
@@ -458,7 +615,18 @@ class SynthFromLabelTransform(NonFinalTransform):
         sample_in_background : bool
             If True, sample a Gaussian in the background class.
             Otherwise, keep it zeros.
-        """
+
+        Other Parameters
+        ----------------
+        returns : [(list | dict) of] {'input', 'deformed', 'generators', 'target', 'label', 'image', 'output'}
+            Tensors to return
+
+            - `'input'`: the input label map (after loading, if `load` is provided)
+            - `'deformed'`: the deformed label map (after `deform`, if provided)
+            - `'generators'`: the generator maps (after `preproc`, if provided)
+            - `'target'`, `'label'`: the target label map (after `postproc`, if provided)
+            - `'image'`, `'output'`: the generated image (after `intensity`, if provided)
+        """  # noqa: E501
         super().__init__(shared=False, returns=returns)
         self.load = (
             LoadTransform(dtype='long') if from_disk else IdentityTransform()
@@ -510,7 +678,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             order=order,
         )
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -528,7 +696,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         else:
             preproc = IdentityTransform()
 
-        return self.Final(
+        return self.Next(
             self.gmm,
             self.deform,
             self.intensity,
@@ -537,94 +705,3 @@ class SynthFromLabelTransform(NonFinalTransform):
             self.postproc_labels,
             **self.get_prm(),
         ).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-
-        def __init__(self, gmm, deform=None, intensity=None,
-                     load=None, preproc=None, postproc=None, **kwargs):
-            super().__init__(**kwargs)
-            self.load = load or IdentityTransform()
-            self.preproc = preproc or IdentityTransform()
-            self.postproc = postproc or IdentityTransform()
-            self.deform = deform or IdentityTransform()
-            self.intensity = intensity or IdentityTransform()
-            self.gmm = gmm or IdentityTransform()
-
-        @property
-        def is_final(self):
-            return (
-                self.load.is_final and
-                self.preproc.is_final and
-                self.postproc.is_final and
-                self.deform.is_final and
-                self.intensity.is_final and
-                self.gmm.is_final
-            )
-
-        def make_final(self, x, max_depth=float('inf')):
-            if max_depth == 0 or self.is_final:
-                return self
-
-            layers = dict(
-                load=self.load,
-                preproc=self.preproc,
-                postproc=self.postproc,
-                deform=self.deform,
-                intensity=self.intensity,
-                gmm=self.gmm,
-            )
-
-            while not layers['load'].is_final and max_depth > 0:
-                layers['load'] = layers['load'].make_final(x, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            lab = layers['load'](x)
-            while not layers['deform'].is_final and max_depth > 0:
-                layers['deform'] = layers['deform'].make_final(lab, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            dfm = layers['deform'](lab)
-            while not layers['preproc'].is_final and max_depth > 0:
-                layers['preproc'] = layers['preproc'].make_final(dfm, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            gen = layers['preproc'](dfm)
-            while not layers['gmm'].is_final and max_depth > 0:
-                layers['gmm'] = layers['gmm'].make_final(gen, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            img = layers['gmm'](gen)
-            while not layers['intensity'].is_final and max_depth > 0:
-                layers['intensity'] = layers['intensity'].make_final(img, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            while not layers['postproc'].is_final and max_depth > 0:
-                layers['postproc'] = layers['postproc'].make_final(dfm, max_depth)
-                max_depth -= 1
-            if max_depth == 0:
-                return type(self)(**layers, **self.get_prm())
-
-            return type(self)(**layers, **self.get_prm()).make_final(x, max_depth-1)
-
-        def xform(self, lab):
-            lab = self.load(lab)
-            dfm = self.deform(lab)
-            gen = self.preproc(dfm)
-            img = self.gmm(gen)
-            img = self.intensity(img)
-            tgt = self.postproc(dfm)
-            return prepare_output(
-                dict(input=lab, deformed=dfm, generators=gen,
-                     target=tgt, label=tgt, image=img, output=img),
-                self.returns,
-            )
