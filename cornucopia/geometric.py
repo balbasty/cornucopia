@@ -19,47 +19,77 @@ __all__ = [
 import math
 import random
 from math import inf
-from typing import Dict, Optional, Union, List
 
 # dependencies
 import torch
+import interpol
+import typing_extensions as tx
 from torch import Tensor
 from torch.nn.functional import interpolate
-import interpol
 
 # internals
 from .base import NonFinalTransform, FinalTransform, Transform
-from .baseutils import Returned, prepare_output, return_requires
+from .baseutils import Arguments, NoArguments, Returned
+from .baseutils import nested_get, prepare_output, return_requires
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils import warps
 from .utils.py import ensure_list, cast_like, make_vector
 from .utils.smart_inplace import add_
+from . import typing as cct
 
 
 class ApplyElasticTransform(FinalTransform):
-    """Apply a (deterministic) elastic transform"""
+    """Apply a (deterministic) elastic transform.
+
+    **See also:**
+    [`ElasticTransform`][cornucopia.geometric.ElasticTransform],
+    [`RandomElasticTransform`][cornucopia.geometric.RandomElasticTransform]
+
+    !!! example
+        A transform can be used to obtain a flow field, instead of
+        an output image, by specifying the `returns` argument.
+        This flow field can then be applied to another image using the
+        `ApplyElasticTransform` transform.
+
+        ```python
+        f = ElasticTransform(returns="flow")(x)
+        y = ApplyElasticTransform(flow=f)(x)
+        ```
+
+        It is also possible to specify that the flow field should be
+        read from one of the input arguments at call time, instead of
+        being passed at instantiation time:
+
+        ```python
+        f = ElasticTransform(returns="flow")(x)
+        y = ApplyElasticTransform(flow="flow", consume="flow")(x, flow=f)
+        ```
+
+    """
 
     def __init__(
         self,
-        flow: Optional[Tensor] = None,
-        controls: Optional[Tensor] = None,
+        flow: tx.Union[Tensor, str, None] = None,
+        controls: tx.Union[Tensor, str, None] = None,
         steps: int = 0,
         order: int = 3,
         bound: str = 'border',
         zero_center: bool = False,
         nearest_if_label: bool = True,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
         **kwargs
     ) -> None:
         """
         Parameters
         ----------
-        flow : (C, D, *spatial) tensor
-            Flow field
-            (if not provided, `control` must be provided)
-        control : (C, D, *shape) tensor
+        flow : (C, D, *spatial) tensor | (list | dict)[str | int] | None
+            Flow field.
+            If not a tensor, it must be a (nested) input key.
+            (if not provided, `controls` must be provided)
+        controls : (C, D, *shape) tensor | (list | dict)[str | int] | None
             Spline control points
+            If not a tensor, it must be a (nested) input key.
             (if not provided, `flow` must be provided)
         steps : int
             Number of scaling and squaring steps
@@ -98,7 +128,7 @@ class ApplyElasticTransform(FinalTransform):
         self.backend = dict(dtype=dtype, device=device)
 
     def make_flow(
-        self, shape: List[int], control: Optional[Tensor] = None,
+        self, shape: tx.Sequence[int], controls: tx.Optional[Tensor] = None,
     ) -> Tensor:
         """Make a flow field from its spline control points.
 
@@ -106,9 +136,9 @@ class ApplyElasticTransform(FinalTransform):
         ----------
         shape : list of int
             Shape of the output flow field
-        control : (C, D, *spatial) tensor, optional
+        controls : (C, D, *spatial) tensor, optional
             Spline control points
-            (if not provided, `self.control` will be used)
+            (if not provided, `self.controls` will be used)
 
         Returns
         -------
@@ -116,18 +146,18 @@ class ApplyElasticTransform(FinalTransform):
             The flow field
 
         """
-        if control is None:
-            control = self.control
+        if controls is None:
+            controls = self.controls
         if self.order == 1:
             mode = ('trilinear' if len(shape) == 3 else
                     'bilinear' if len(shape) == 2 else
                     'linear')
             flow = interpolate(
-                control[None], shape, mode=mode, align_corners=True
+                controls[None], shape, mode=mode, align_corners=True
             )[0]
         else:
             flow = interpol.resize(
-                control, shape=shape, interpolation=self.order,
+                controls, shape=shape, interpolation=self.order,
                 prefilter=False
             )
         if self.steps:
@@ -141,10 +171,19 @@ class ApplyElasticTransform(FinalTransform):
             flow -= mean_flow
         return flow
 
-    def xform(self, x: Tensor) -> Returned:
+    def xform(
+        self, x: Tensor, /, *, args: Arguments = NoArguments()
+    ) -> Returned:
+        # Get flow and controls from input or from `self`
+        flow, controls = self.flow, self.controls
+        if not torch.is_tensor(flow) and flow is not None:
+            flow = nested_get(args, flow)
+        if not torch.is_tensor(controls) and controls is not None:
+            controls = nested_get(args, controls)
+
         x = x.to(**self.backend)
-        flow = cast_like(self.flow, x)
-        controls = cast_like(self.controls, x)
+        flow = cast_like(flow, x)
+        controls = cast_like(controls, x)
         required = return_requires(self.returns)
         if flow is None and ('flow' in required or 'output' in required):
             flow = self.make_flow(x.shape[1:], controls)
@@ -169,6 +208,10 @@ class ElasticTransform(NonFinalTransform):
 
     The number of control points is fixed but coefficients are
     randomly sampled from a uniform distribution.
+
+    **See also:**
+    [`ElasticTransform`][cornucopia.geometric.ApplyElasticTransform],
+    [`RandomElasticTransform`][cornucopia.geometric.RandomElasticTransform]
     """
 
     Final = Next = ApplyElasticTransform
@@ -176,18 +219,18 @@ class ElasticTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax: Union[float, List[float]] = 0.1,
+        dmax: cct.ScalarOrSequence[float] = 0.1,
         unit: str = 'fov',
-        shape: Union[int, List[int]] = 5,
+        shape: cct.ScalarOrSequence[int] = 5,
         bound: str = 'border',
         steps: int = 0,
         order: int = 3,
         zero_center: bool = False,
         nearest_if_label: bool = True,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
         **kwargs
     ) -> None:
         """
@@ -316,6 +359,26 @@ class ElasticTransform(NonFinalTransform):
 class RandomElasticTransform(NonFinalTransform):
     """
     Elastic Transform with random parameters.
+
+    **See also:**
+    [`ElasticTransform`][cornucopia.geometric.ElasticTransform],
+    [`RandomElasticTransform`][cornucopia.geometric.ApplyElasticTransform]
+
+    !!! example
+        ```python
+        # Apply the same transform to two images (default)
+        xform = RandomElasticTransform(dmax=0.2, shape=10)
+        x, y = xform(x, y)
+
+        # Apply one transform per image (but shared across channels)
+        xform = RandomElasticTransform(dmax=0.2, shape=10, shared='channels')
+        x, y = xform(x, y)
+
+        # Sample a set of transforms, and apply them
+        xform = RandomElasticTransform(dmax=0.2, shape=10)
+        a, b, c = [xform.make_final() for _ in range(3)]
+        x, y, z = a(x), b(y), c(z)
+        ```
     """
 
     Next = ElasticTransform
@@ -326,8 +389,8 @@ class RandomElasticTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax: Union[Sampler, float, List[float]] = 0.1,
-        shape: Union[Sampler, int, List[int]] = 5,
+        dmax: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0.1,
+        shape: tx.Union[Sampler, cct.ScalarOrSequence[int]] = 5,
         unit: str = 'fov',
         bound: str = 'border',
         steps: int = 0,
@@ -335,10 +398,10 @@ class RandomElasticTransform(NonFinalTransform):
         zero_center: bool = False,
         nearest_if_label: bool = False,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
-        shared_flow: Optional[Union[bool, str]] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
+        shared_flow: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
         """
@@ -429,12 +492,12 @@ class ApplyAffineTransform(FinalTransform):
 
     def __init__(
         self,
-        flow: Optional[Tensor] = None,
-        matrix: Optional[Tensor] = None,
+        flow: tx.Optional[Tensor] = None,
+        matrix: tx.Optional[Tensor] = None,
         bound: str = 'border',
         nearest_if_label: bool = False,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
         **kwargs
     ) -> None:
         """
@@ -471,7 +534,7 @@ class ApplyAffineTransform(FinalTransform):
         self.backend = dict(dtype=dtype, device=device)
 
     def make_flow(
-        self, shape: List[int], matrix: Optional[Tensor] = None
+        self, shape: tx.Sequence[int], matrix: tx.Optional[Tensor] = None
     ) -> Tensor:
         """Make a flow field from an affine matrix.
 
@@ -529,17 +592,17 @@ class AffineTransform(NonFinalTransform):
 
     def __init__(
         self,
-        translations: Union[float, List[float]] = 0,
-        rotations: Union[float, List[float]] = 0,
-        shears: Union[float, List[float]] = 0,
-        zooms: Union[float, List[float]] = 0,
-        unit: str = 'fov',
-        bound: str = 'border',
+        translations: cct.ScalarOrSequence[float] = 0,
+        rotations: cct.ScalarOrSequence[float] = 0,
+        shears: cct.ScalarOrSequence[float] = 0,
+        zooms: cct.ScalarOrSequence[float] = 0,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
         nearest_if_label: bool = False,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
         **kwargs
     ) -> None:
         """
@@ -693,19 +756,19 @@ class RandomAffineTransform(NonFinalTransform):
 
     def __init__(
         self,
-        translations: Union[Sampler, float, List[float]] = 0.1,
-        rotations: Union[Sampler, float, List[float]] = 15,
-        shears: Union[Sampler, float, List[float]] = 0.012,
-        zooms: Union[Sampler, float, List[float]] = 0.15,
+        translations: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0.1,
+        rotations: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 15,
+        shears: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0.012,
+        zooms: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0.15,
         iso: bool = False,
-        unit: str = 'fov',
-        bound: str = 'border',
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
         nearest_if_label: bool = False,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: Union[bool, str] = True,
-        shared_matrix: Optional[Union[bool, str]] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
+        shared_matrix: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
         """
@@ -802,7 +865,7 @@ class ApplyAffineElasticTransform(FinalTransform):
         affine: Tensor,
         bound: str = 'border',
         nearest_if_label: bool = False,
-        backend: Optional[dict] = None,
+        backend: tx.Optional[dict] = None,
         **kwargs
     ) -> None:
         """
@@ -810,8 +873,8 @@ class ApplyAffineElasticTransform(FinalTransform):
         ----------
         flow : (C, D, *spatial) tensor
             Flow field
-            (if not provided, `control` must be provided)
-        control : (C, D, *shape) tensor
+            (if not provided, `controls` must be provided)
+        controls : (C, D, *shape) tensor
             Spline control points
             (if not provided, `flow` must be provided)
         affine : ([C], D+1, D+1) tensor
@@ -833,7 +896,7 @@ class ApplyAffineElasticTransform(FinalTransform):
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
-            - 'control': The control points of the nonlinear field
+            - 'controls': The control points of the nonlinear field
             - 'matrix': The affine matrix
         """
         super().__init__(**kwargs)
@@ -902,23 +965,23 @@ class AffineElasticTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax: Union[float, List[float]] = 0.1,
-        shape: Union[int, List[int]] = 5,
+        dmax: cct.ScalarOrSequence[float] = 0.1,
+        shape: cct.ScalarOrSequence[int] = 5,
         steps: int = 0,
-        translations: Union[float, List[float]] = 0,
-        rotations: Union[float, List[float]] = 0,
-        shears: Union[float, List[float]] = 0,
-        zooms: Union[float, List[float]] = 0,
-        unit: str = 'fov',
-        bound: str = 'border',
-        patch: Optional[Union[int, List[int]]] = None,
+        translations: cct.ScalarOrSequence[float] = 0,
+        rotations: cct.ScalarOrSequence[float] = 0,
+        shears: cct.ScalarOrSequence[float] = 0,
+        zooms: cct.ScalarOrSequence[float] = 0,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
+        patch: tx.Optional[cct.ScalarOrSequence[int]] = None,
         order: int = 3,
         zero_center: bool = False,
         nearest_if_label: bool = False,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: bool = True,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
         **kwargs
     ) -> None:
         """
@@ -966,7 +1029,7 @@ class AffineElasticTransform(NonFinalTransform):
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
-            - 'control': The control points of the nonlinear field
+            - 'controls': The control points of the nonlinear field
             - 'matrix': The affine matrix
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same transform to all images/channels
@@ -1099,25 +1162,25 @@ class RandomAffineElasticTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax: Union[Sampler, float, List[float]] = 0.1,
-        shape: Union[Sampler, int, List[int]] = 5,
+        dmax: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0.1,
+        shape: tx.Union[Sampler, cct.ScalarOrSequence[int]] = 5,
         steps: int = 0,
-        translations: Union[Sampler, float, List[float]] = 0,
-        rotations: Union[Sampler, float, List[float]] = 0,
-        shears: Union[Sampler, float, List[float]] = 0,
-        zooms: Union[Sampler, float, List[float]] = 0,
+        translations: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0,
+        rotations: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0,
+        shears: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0,
+        zooms: tx.Union[Sampler, cct.ScalarOrSequence[float]] = 0,
         iso: bool = False,
-        unit: str = 'fov',
-        bound: str = 'border',
-        patch: Optional[Union[int, List[int]]] = None,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
+        patch: tx.Optional[cct.ScalarOrSequence[int]] = None,
         order: int = 3,
         zero_center: bool = False,
         nearest_if_label: bool = False,
         *,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-        shared: bool = True,
-        shared_flow: bool = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        shared: cct.SharedType = True,
+        shared_flow: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
         """
@@ -1167,7 +1230,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
             - 'input': The input image
             - 'output': The deformed image
             - 'flow': The displacement field
-            - 'control': The control points of the nonlinear field
+            - 'controls': The control points of the nonlinear field
             - 'matrix': The affine matrix
         shared : {'channels', 'tensors', 'channels+tensors', ''}
             Apply same hyperparameters to all images/channels
@@ -1303,9 +1366,9 @@ class MakeAffinePair(NonFinalTransform):
 
     def __init__(
         self,
-        transform: Optional[RandomAffineTransform] = None,
+        transform: tx.Optional[RandomAffineTransform] = None,
         *,
-        returns: Union[str, List[str], Dict[str, str]] = ('left', 'right'),
+        returns: cct.ReturnsType = ('left', 'right'),
         **kwargs
     ) -> None:
         """
@@ -1344,7 +1407,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
     def __init__(
         self,
         matrix: Tensor,
-        flow: Optional[Tensor] = None,
+        flow: tx.Optional[Tensor] = None,
         slice: int = -1,
         spacing: int = 1,
         subsample: int = 1,
@@ -1386,7 +1449,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
         self.bound = bound
 
     def make_flow(
-        self, shape: List[int], matrix: Optional[Tensor] = None
+        self, shape: tx.Sequence[int], matrix: tx.Optional[Tensor] = None
     ) -> Tensor:
         """
         Compute the flow field for a given shape and matrix.
@@ -1485,23 +1548,26 @@ class SlicewiseAffineTransform(NonFinalTransform):
     Final = Next = ApplySlicewiseAffineTransform
     """The transform type returned by `make_final`."""
 
+    _PerSliceParams = tx.Union[float, tx.Sequence[float], tx.Sequence[tx.Sequence[float]]]
+    _BulkParams = tx.Union[float, tx.Sequence[float]]
+
     def __init__(
         self,
-        translations: Union[float, List[float], List[List[float]]] = 0,
-        rotations: Union[float, List[float], List[List[float]]] = 0,
-        shears: Union[float, List[float], List[List[float]]] = 0,
-        zooms: Union[float, List[float], List[List[float]]] = 0,
-        bulk_translations: Union[float, List[float]] = 0,
-        bulk_rotations: Union[float, List[float]] = 0,
-        bulk_shears: Union[float, List[float]] = 0,
-        bulk_zooms: Union[float, List[float]] = 0,
+        translations: _PerSliceParams = 0,
+        rotations: _PerSliceParams = 0,
+        shears: _PerSliceParams = 0,
+        zooms: _PerSliceParams = 0,
+        bulk_translations: _BulkParams = 0,
+        bulk_rotations: _BulkParams = 0,
+        bulk_shears: _BulkParams = 0,
+        bulk_zooms: _BulkParams = 0,
         slice: int = -1,
-        unit: str = 'fov',
-        bound: str = 'border',
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
         spacing: int = 1,
         subsample: int = 1,
         *,
-        shared: bool = True,
+        shared: cct.SharedType = True,
         **kwargs
     ) -> None:
         """
@@ -1733,27 +1799,30 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
     Final = ApplySlicewiseAffineTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
+    _PerSliceSampler = tx.Union[Sampler, float, tx.Sequence[float], Tensor]
+    _BulkSampler = tx.Union[Sampler, float, tx.Sequence[float]]
+
     def __init__(
         self,
-        translations: Union[Sampler, float, List[float], Tensor] = 0.1,
-        rotations: Union[Sampler, float, List[float], Tensor] = 15,
-        shears: Union[Sampler, float, List[float], Tensor] = 0,
-        zooms: Union[Sampler, float, List[float], Tensor] = 0,
-        bulk_translations: Union[Sampler, float, List[float]] = 0.05,
-        bulk_rotations: Union[Sampler, float, List[float]] = 15,
-        bulk_shears: Union[Sampler, float, List[float]] = 0,
-        bulk_zooms: Union[Sampler, float, List[float]] = 0,
+        translations: _PerSliceSampler = 0.1,
+        rotations: _PerSliceSampler = 15,
+        shears: _PerSliceSampler = 0,
+        zooms: _PerSliceSampler = 0,
+        bulk_translations: _BulkSampler = 0.05,
+        bulk_rotations: _BulkSampler = 15,
+        bulk_shears: _BulkSampler = 0,
+        bulk_zooms: _BulkSampler = 0,
         iso: bool = False,
-        slice: Optional[Union[Sampler, int]] = -1,
-        spacing: Union[Sampler, int] = 1,
-        subsample: Union[Sampler, int] = 1,
-        shots: Union[Sampler, int] = 2,
-        nodes: Union[Sampler, int] = 8,
-        unit: str = 'fov',
-        bound: str = 'border',
+        slice: tx.Optional[cct.SamplerOrBound[int]] = -1,
+        spacing: cct.SamplerOrBound[int] = 1,
+        subsample: cct.SamplerOrBound[int] = 1,
+        shots: cct.SamplerOrBound[int] = 2,
+        nodes: cct.SamplerOrBound[int] = 8,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        bound: cct.TorchBound = 'border',
         *,
-        shared: Union[bool, str] = True,
-        shared_matrix: Optional[Union[bool, str]] = None,
+        shared: cct.SharedType = True,
+        shared_matrix: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
         """

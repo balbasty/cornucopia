@@ -34,6 +34,7 @@ class Transform(nn.Module, ABC):
         prefix: Union[bool, str] = True,
         include: Union[str, List[str], None] = None,
         exclude: Union[str, List[str], None] = None,
+        consume: Union[str, List[str], None] = None,
     ):
         """
         Parameters
@@ -55,6 +56,12 @@ class Transform(nn.Module, ABC):
         exclude : str or list[str], optional
             List of keys to which the transform should not apply.
             Default: none.
+        consume : str or list[str], optional
+            List of keys to remove from the output after applying the
+            transform. Default: none.
+
+            !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+                Added in `v0.5`"
         """
         super().__init__()
         self.returns = returns
@@ -62,6 +69,7 @@ class Transform(nn.Module, ABC):
         self.prefix = prefix
         self.include = ensure_list(include) if include is not None else None
         self.exclude = ensure_list(exclude or tuple())
+        self.consume = ensure_list(consume or tuple())
 
     @property
     def is_final(self) -> bool:
@@ -76,6 +84,7 @@ class Transform(nn.Module, ABC):
             prefix=self.prefix,
             include=self.include,
             exclude=self.exclude,
+            consume=self.consume
         )
 
     def __enter__(self) -> "Transform":
@@ -124,7 +133,7 @@ class Transform(nn.Module, ABC):
 
         Parameters
         ----------
-        x : [nested list or dict of] tensor
+        *a, **k : [nested list or dict of] tensor
             Input tensors, with shape `(C, *shape)`
 
         Returns
@@ -162,6 +171,10 @@ class Transform(nn.Module, ABC):
         @property
         def exclude(self) -> Optional[List[str]]:
             return self.prm.get('exclude')
+
+        @property
+        def consume(self) -> Optional[List[str]]:
+            return self.prm.get('consume')
 
         @property
         def append(self) -> bool:
@@ -291,7 +304,11 @@ class Transform(nn.Module, ABC):
 
             # Initialise output dictionary with input keys and values
             # that *will not* be transformed so that they are preserved.
-            y = {key: value for key, value in x.items() if key not in valid_keys}
+            y = {
+                key: value
+                for key, value in x.items()
+                if key not in valid_keys and key not in self.consume
+            }
 
             # For each input item, apply the transform and save its outputs
             for key, value in x.items():
@@ -437,7 +454,7 @@ class Transform(nn.Module, ABC):
 
         Parameters
         ----------
-        x : [nested list or dict of] tensor
+        *a, **k : [nested list or dict of] tensor
             Input tensors, with shape `(C, *shape)`
 
         Returns
@@ -568,7 +585,7 @@ class NonFinalTransform(SharedMixin, Transform):
 
     Parameters
     ----------
-    shared : {'channels', 'tensors', 'channels+tensor', ''}
+    shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
 
         - 'channel': the same transform is applied to all channels
             in a tensor, but different transforms are used in different
@@ -614,7 +631,7 @@ class SequentialTransform(SharedMixin, Transform):
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensor', ''}
+        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
 
             - 'channel': the same sequence is applied to all channels
                 in a tensor, but different transforms are used in different
@@ -794,7 +811,7 @@ class MaybeTransform(SharedMixin, Transform):
             A transform to randomly apply
         prob : float
             Probability to apply the transform
-        shared : {'channels', 'tensors', 'channels+tensor', ''}
+        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
             Roll the dice once for all input tensors
         """
         super().__init__(**kwargs)
@@ -871,7 +888,7 @@ class SwitchTransform(SharedMixin, Transform):
             A list of transforms to sample from
         prob : list[float]
             Probability of applying each transform
-        shared : {'channels', 'tensors', 'channels+tensor', ''}
+        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
             Roll the dice once for all input tensors
         """
         super().__init__(**kwargs)
@@ -966,7 +983,7 @@ class IncludeKeysTransform(Transform):
 
     !!! example "Use as a context manager (alias)"
         ```python
-        from cornucopia import context as ctx
+        from cornucopia import ctx
         with ctx.include(xform, "image") as newxform:
             image, label = newxform(image=image, label=label)
         ```
@@ -989,10 +1006,10 @@ class IncludeKeysTransform(Transform):
             Include the union of what was already included and `keys`
         """
         super().__init__()
-        if keys and not isinstance(keys, (list, tuple)):
-            keys = [keys]
+        if keys is not None:
+            keys = ensure_list(keys)
         self.transform = transform
-        self.keys = list(keys) if keys else keys
+        self.keys = keys
         self.union = union
 
     def forward(self, *a, **k) -> Returned:
@@ -1061,7 +1078,7 @@ class ExcludeKeysTransform(Transform):
 
     !!! example "Use as a context manager (alias)"
         ```python
-        from cornucopia import context as ctx
+        from cornucopia import ctx
         with ctx.exclude(xform, "image") as newxform:
             image, label = newxform(image=image, label=label)
         ```
@@ -1084,10 +1101,10 @@ class ExcludeKeysTransform(Transform):
             Exclude the union of what was already excluded and `keys`
         """
         super().__init__()
-        if keys and not isinstance(keys, (list, tuple)):
-            keys = [keys]
+        if keys is not None:
+            keys = ensure_list(keys)
         self.transform = transform
-        self.keys = list(keys) if keys else keys
+        self.keys = keys
         self.union = union
 
     def forward(self, *a, **k) -> Returned:
@@ -1128,6 +1145,104 @@ class ExcludeKeysTransform(Transform):
         delattr(self, 'exclude')
 
 
+class ConsumeKeysTransform(Transform):
+    """
+    Context manager for keys to consume.
+    Can also be used as a transform.
+
+    !!! example "Use as a transform"
+        ```python
+        from cornucopia import ConsumeKeysTransform
+        newxform = ConsumeKeysTransform(xform, "image)
+        label = newxform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager `with as`"
+        ```python
+        from cornucopia import ConsumeKeysTransform
+        with ConsumeKeysTransform(xform, "image") as newxform:
+            label = newxform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager `with`"
+        ```python
+        from cornucopia import ConsumeKeysTransform
+        with ConsumeKeysTransform(xform, "image"):
+            label = xform(image=image, label=label)
+        ```
+
+    !!! example "Use as a context manager (alias)"
+        ```python
+        from cornucopia import ctx
+        with ctx.consume(xform, "image") as newxform:
+            label = newxform(image=image, label=label)
+        ```
+
+    !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+        Added in `v0.5`"
+    """
+
+    def __init__(
+        self,
+        transform: Transform,
+        keys: Union[List[str], str],
+        union: bool = True
+    ) -> None:
+        """
+        Parameters
+        ----------
+        transform : Transform
+            Transform to apply
+        keys : [sequence of] str
+            Keys to include
+        union : bool
+            Consume the union of what was already consumed and `keys`
+        """
+        super().__init__()
+        if keys is not None:
+            keys = ensure_list(keys)
+        self.transform = transform
+        self.keys = keys
+        self.union = union
+
+    def forward(self, *a, **k) -> Returned:
+        with self as transform:
+            return transform.forward(*a, **k)
+
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = float('inf'),
+        args: Arguments = NoArguments()
+    ) -> Transform:
+        if max_depth == 0:
+            return self
+        with self as trf:
+            final_trf = trf.safe_make_final(x, max_depth, args=args)
+            with ConsumeKeysTransform(final_trf) as final_final_trf:
+                return final_final_trf
+
+    def make_inverse(self) -> Transform:
+        with self as trf:
+            inv_trf = trf.make_inverse()
+            with ConsumeKeysTransform(inv_trf) as final_inv_trf:
+                return final_inv_trf
+
+    def __enter__(self) -> Transform:
+        self.consume = self.transform.consume
+        self.transform.consume = self.keys
+        if self.union and self.consume:
+            if self.transform.consume is not None:
+                self.transform.consume = \
+                    self.transform.consume + self.consume
+            else:
+                self.transform.consume = self.consume
+        return self.transform
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.transform.consume = self.consume
+        delattr(self, 'consume')
+
+
 class SharedTransform(SharedMixin, Transform):
     """
     Context manager for sharing transforms across channels / tensors.
@@ -1135,7 +1250,7 @@ class SharedTransform(SharedMixin, Transform):
 
     !!! example "Use as a context manager (alias)"
         ```python
-        from cornucopia import context as ctx
+        from cornucopia import ctx
         with ctx.shared(xform, "channels") as newxform:
             image = newxform(image)
         ```
@@ -1192,7 +1307,7 @@ class ReturningTransform(Transform):
 
     !!! example "Use as a context manager (alias)"
         ```python
-        from cornucopia import context as ctx
+        from cornucopia import ctx
         with ctx.returns(xform, "channels") as newxform:
             image = newxform(image)
         ```
@@ -1417,7 +1532,7 @@ class RandomizedTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Share random parameters across tensors and/or channels
         """
         super().__init__(shared=shared, **kwargs)

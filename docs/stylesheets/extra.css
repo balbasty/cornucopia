@@ -1,3 +1,94 @@
+/* addedin */
+.md-typeset .admonition.addedin,
+.md-typeset details.addedin
+{
+    background-color: rgba(68, 204, 17, 0.1);;
+}
+[dir=ltr] .md-typeset .addedin > .admonition-title,
+[dir=ltr] .md-typeset .addedin > summary
+{
+    /* padding-left: .8rem;
+    padding-right: .8rem; */
+    padding-left: 0;
+    padding-right: 0;
+}
+[dir=rtl] .md-typeset .addedin > .admonition-title,
+[dir=rtl] .md-typeset .addedin > summary
+{
+    /* padding-left: .8rem;
+    padding-right: .8rem; */
+    padding-left: 0;
+    padding-right: 0;
+}
+.md-typeset .addedin > .admonition-title:before,
+.md-typeset .addedin > summary:before
+{
+    background-color: rgb(68, 204, 17);
+    width:  0;
+    height: 0;
+    inset-inline-start: 0;
+    content: none;
+    -webkit-mask-image: none;
+            mask-image: none;
+    padding-inline: 0.75rem 0.75rem;
+}
+.md-typeset .addedin > .admonition-title:after,
+.md-typeset .addedin > summary:after
+{
+    color: rgb(68, 204, 17);
+}
+.md-typeset .addedin > .admonition-title img,
+.md-typeset .addedin > summary img
+{
+    vertical-align: middle
+}
+
+/* changedin */
+.md-typeset .admonition.changedin,
+.md-typeset details.changedin
+{
+    background-color: rgba(223, 179, 23, 0.1);;
+}
+[dir=ltr] .md-typeset .changedin > .admonition-title,
+[dir=ltr] .md-typeset .changedin > summary
+{
+    /* padding-left: .8rem;
+    padding-right: .8rem; */
+    padding-left: 0;
+    padding-right: 0;
+}
+[dir=rtl] .md-typeset .changedin > .admonition-title,
+[dir=rtl] .md-typeset .changedin > summary
+{
+    /* padding-left: .8rem;
+    padding-right: .8rem; */
+    padding-left: 0;
+    padding-right: 0;
+}
+.md-typeset .changedin > .admonition-title:before,
+.md-typeset .changedin > summary:before
+{
+    background-color: rgb(223, 179, 23);
+    width:  0;
+    height: 0;
+    inset-inline-start: 0;
+    content: none;
+    -webkit-mask-image: none;
+            mask-image: none;
+    padding-inline: 0.75rem 0.75rem;
+}
+.md-typeset .changedin > .admonition-title:after,
+.md-typeset .changedin > summary:after
+{
+    color: rgb(223, 179, 23);
+}
+.md-typeset .changedin > .admonition-title img,
+.md-typeset .changedin > summary img
+{
+    vertical-align: middle
+}
+
+/*
 .md-typeset .admonition.addedin,
 .md-typeset details.addedin
 {
@@ -60,4 +151,4 @@
     content: none;
     -webkit-mask-image: none;
             mask-image: none;
-}
+} */

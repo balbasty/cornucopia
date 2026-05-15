@@ -1,6 +1,7 @@
 __all__ = [
     'include',
     'exclude',
+    'consume',
     'batch',
     'shared',
     'returns',
@@ -12,6 +13,7 @@ __all__ = [
 from .special import (
     IncludeKeysTransform as include,
     ExcludeKeysTransform as exclude,
+    ConsumeKeysTransform as consume,
     SharedTransform as shared,
     ReturningTransform as returns,
     MaybeTransform as maybe,

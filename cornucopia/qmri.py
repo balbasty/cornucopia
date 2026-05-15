@@ -32,7 +32,7 @@ from torch import Tensor
 
 # internal
 from .base import FinalTransform, NonFinalTransform, Transform
-from .baseutils import Returned, prepare_output, return_requires, returns_find, returns_update
+from .baseutils import Arguments, NoArguments, Returned, nested_get, prepare_output, return_requires, returns_find, returns_update
 from .labels import GaussianMixtureFinalTransform, GaussianMixtureTransform
 from .intensity import (
     RandomMulFieldTransform, AddValueTransform, MulValueTransform,
@@ -476,13 +476,14 @@ class ApplyB0DistortionTransform(FinalTransform):
 
     def __init__(
         self,
-        flow: tx.Optional[Tensor] = None,
-        vdm: tx.Optional[Tensor] = None,
-        controls: tx.Optional[Tensor] = None,
+        flow: tx.Union[Tensor, str, None] = None,
+        vdm: tx.Union[Tensor, str, None] = None,
+        controls: tx.Union[Tensor, str, None] = None,
         order: int = 3,
         bound: cct.TorchBound = 'border',
         nearest_if_label: bool = True,
         axis: tx.Union[int, tx.Sequence[float]] = -1,
+        *,
         dtype: tx.Optional[torch.dtype] = None,
         device: tx.Optional[cct.TorchDevice] = None,
         **kwargs
@@ -492,23 +493,28 @@ class ApplyB0DistortionTransform(FinalTransform):
         ----------
         flow : (C, D, *spatial) tensor
             Flow field (in voxels)
-            (if not provided, `vdm` of `control` must be provided)
+            (if not provided, `vdm` of `controls` must be provided)
         vdm : (C, *spatial) tensor
             Voxel displacement field
-            (if not provided, `control` must be provided)
-        control : (C, *shape) tensor
+            (if not provided, `controls` must be provided)
+        controls : (C, *shape) tensor
             Spline control points
             (if not provided, `vdm` must be provided)
-        steps : int
-            Number of scaling and squaring steps
         order : 1..7
             Order of the splines that encode the smooth deformation.
         bound : {'zeros', 'border', 'reflection'}
             Padding mode used for the deformed image.
-        zero_center : bool
-            Subtract its mean displacement to the flow field so that
-            it has an empirical mean of zero.
         nearest_if_label : bool
+            By default, if a tensor has an integer data type, it
+            is deformed using label-specific resampling (each unique
+            label is extracted and resampled using linear interpolation,
+            and an argmax output label map is computed on the fly).
+            If `nearest_if_label=True`, the entire label map will be
+            resampled at once using nearest-neighbour interpolation.
+        axis : int | sequence[float]
+            If int, the distortion is applied along this dimension.
+            If sequence of floats, it is a unit vector that encodes the
+            direction of the distortion in the voxel coordinate system.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -568,7 +574,9 @@ class ApplyB0DistortionTransform(FinalTransform):
         """Make a flow field from the voxel displacement map"""
         return self._make_flow(vdm, self.axis)
 
-    def xform(self, x: Tensor) -> Returned:
+    def xform(
+        self, x: Tensor, /, *, args: Arguments = NoArguments()
+    ) -> Returned:
         """Deform the input tensor
 
         Parameters
@@ -585,26 +593,34 @@ class ApplyB0DistortionTransform(FinalTransform):
         """
         x = x.to(**self.backend)
 
+        # Get flow/vdm/controls tensors from `self` or `args`
+        controls, vdm, flow = self.controls, self.vdm, self.flow
+        if controls is not None and not torch.is_tensor(controls):
+            controls = nested_get(args, controls)
+        if vdm is not None and not torch.is_tensor(vdm):
+            vdm = nested_get(args, vdm)
+        if flow is not None and not torch.is_tensor(flow):
+            flow = nested_get(args, flow)
+
         def _get_controls():
-            if self.controls is not None:
-                return cast_like(self.controls, x)
+            if controls is not None:
+                return cast_like(controls, x)
             raise ValueError('Controls requested but not stored.')
 
         def _get_vdm(controls=None):
-            if self.vdm is not None:
-                return cast_like(self.vdm, x)
+            if vdm is not None:
+                return cast_like(vdm, x)
             if controls is None:
                 controls = _get_controls()
             return self.make_vdm(controls, x.shape[1:])
 
         def _get_flow(vdm=None, controls=None):
-            if self.flow is not None:
-                return cast_like(self.flow, x)
+            if flow is not None:
+                return cast_like(flow, x)
             if vdm is None:
                 vdm = _get_vdm(controls)
             return self.make_flow(vdm)
 
-        flow, vdm, controls = self.flow, self.vdm, self.controls
         required = return_requires(self.returns)
 
         if required.intersection({'controls'}):
@@ -784,8 +800,7 @@ class B0DistortionTransform(NonFinalTransform):
         return self.Next(
             flow, vdm, controls,
             self.order, self.bound, self.nearest_if_label, self.axis,
-            **self.backend,
-            **self.get_prm()
+            **self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 

@@ -432,7 +432,7 @@ class RandomPatchTransform(NonFinalTransform):
 
         Parameters
         ----------
-        shape : [list of] int
+        patch_size : [list of] int
             Patch shape
         bound : [list of] str
             Boundary condition in case padding is needed

@@ -132,7 +132,7 @@ class IntensityTransform(SequentialTransform):
 
     It is also possible to directly provide the probability distribution
     from which to sample the parametes. In this case, it **must** be a
-    `cc.random.Sampler` instance.
+    [cornucopia.random.Sampler][] instance.
 
     Setting any argument to `False` disables the corresponding transform
     entirely.
@@ -175,7 +175,7 @@ class IntensityTransform(SequentialTransform):
             The sampled value controls the smoothness of the intensity
             bias field (smaller values yield smoother fields).
             If an `int`, sample from `RandInt(2, value)`.
-        bias_strength : Sampler | (0..1)
+        bias_strength : Sampler | float in (0..1)
             The maximum magnitude of the bias field (about 1).
             If a `float`, sample from `Uniform(0, value)`.
             The minimum and maximum values of the bias field will be
@@ -453,8 +453,6 @@ class SynthFromLabelTransform(NonFinalTransform):
               url       = {https://www.sciencedirect.com/science/article/pii/S1361841523000506}
             }
 
-    !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
-                Added `geom` argument"
     """  # noqa: E501
 
     Final = Next = ApplySynthFromLabelTransform
@@ -528,10 +526,13 @@ class SynthFromLabelTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        geom: {'affine', 'elastic', 'affine+elastic', ''} | bool
+        geom : {'affine', 'elastic', 'affine+elastic', ''} | bool
             Which geometric transforms to apply.
             `True` (default) corresponds to `affine+elastic`.
             `False` corresponds to no geometric transform.
+
+            !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+                Added `geom` argument."
         translations : Sampler | float | {False}
             Distribution from which random translations (in percentage of
             field-of-view) are sampled.

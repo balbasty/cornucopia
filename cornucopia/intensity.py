@@ -1201,7 +1201,9 @@ class MinMaxTransform(NonFinalTransform):
     Final = Next = AddMulTransform
     """The transform type returned by `make_final`."""
 
-    def __init__(self, vmin: float = 0, vmax: float = 1, **kwargs) -> None:
+    def __init__(
+        self, vmin: float = 0, vmax: float = 1, clip: bool = False, **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -1216,6 +1218,7 @@ class MinMaxTransform(NonFinalTransform):
         super().__init__(**kwargs)
         self.vmin = vmin
         self.vmax = vmax
+        self.clip = clip
 
     def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
@@ -1238,6 +1241,12 @@ class MinMaxTransform(NonFinalTransform):
         slope = (self.vmax - self.vmin) / (pmax - pmin)
         offset = self.vmin - pmin * slope
 
-        return AddMulTransform(
-            slope, offset, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        if self.clip:
+            return SequentialTransform([
+                AddMulTransform(slope, offset, **self.get_prm()),
+                ClipTransform(self.vmin, self.vmax, **self.get_prm())
+            ]).make_final(x, max_depth-1)
+        else:
+            return AddMulTransform(
+                slope, offset, **self.get_prm()
+            ).make_final(x, max_depth-1)

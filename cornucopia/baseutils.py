@@ -1,4 +1,5 @@
 # stdlib
+from collections import abc
 from collections.abc import Mapping, Sequence
 
 # dependencies
@@ -187,6 +188,26 @@ def flatstruct(x):
             return nested
 
     return _flatten(x)
+
+
+def nested_get(nested, *keys, default=None):
+    """Get value from a nested structure of dicts/lists/tuples"""
+    if not keys:
+        return nested
+    if isinstance(nested, abc.Mapping):
+        if keys[0] in nested:
+            return nested_get(nested[keys[0]], *keys[1:], default=default)
+        else:
+            return default
+    elif isinstance(nested, abc.Sequence) and not isinstance(nested, str):
+        if isinstance(keys[0], int) and 0 <= keys[0] < len(nested):
+            return nested_get(nested[keys[0]], *keys[1:], default=default)
+        else:
+            return default
+    else:
+        raise TypeError(
+            f'Cannot get key {keys[0]} from object of type {type(nested)}'
+        )
 
 
 class Arguments:
