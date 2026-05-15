@@ -28,7 +28,7 @@ Issues = "https://github.com/balbasty/cornucopia/issues"
 
 [build-system]
 requires = [
-    "setuptools >= 77.0",
+    "setuptools >= 59.0",
     "wheel",
     "versioningit >= 1.0",
 ]
