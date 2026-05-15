@@ -17,6 +17,7 @@ Transforms are simply Pytorch modules that expect tensors with a channel but
 no batch dimension (e.g., `[C, X, Y, Z]`).
 To make this clear, the name of (almost) all transforms implemented has the
 suffix `Transform`. For example, here's how to add random noise to an image:
+
 ```python
 # Load an MRI and ensure that it is reshaped as [C, X, Y, Z]
 img = cc.LoadTransform(dtype='float32')('path/to/mri.nii.gz')
@@ -27,29 +28,45 @@ img = cc.GaussianNoiseTransform()(img)
 
 Sometimes, the exact same transform must be applied to multiple images
 (say, a geometric transform). In this case, multiple images can be provided:
+
 ```python
 img = cc.LoadTransform(dtype='float32')('path/to/mri.nii.gz')
 lab = cc.LoadTransform(dtype='long')('path/to/labels.nii.gz')
 
 # Apply a random elastic transform
+# > A single deformation field is sampled and applied to both images.
 img, lab = cc.ElasticTransform()(img, lab)
 ```
 
-Note that if one wants to have different random parameters applied ot different
-channels of an image, the keyword `shared=False` can be used:
+Note that if one wants to have different random parameters applied ot
+different channels of an image, the keyword `shared=False` can be used:
+
 ```python
 img = cc.ElasticTransform(shared=False)(img)
 ```
+
 The default value for `shared` can differ from transform to transform.
 For example, the default for `ElasticTransform` is `True` (since we expect
 that most people want to apply the same deformation to different channels),
 whereas the default for `GaussianNoiseTransform` is `False` (since we want
-to re-sample noise in each channel).
+to re-sample noise in each channel). In general, `shared` can take the values:
+
+- `"channels+tensors"` or `True`: the same transformation parameters
+   are used for all tensors and all their channels
+- `"channels"`: a different set of parameters is sampled for each tensor,
+  but they are shared across their channels.
+- `"tensors"`: a different set of parameters is sampled for each channel
+  of the first (valid) tensor, which are then applied channel-wise to
+  all other (valid) tensors. This assumes that all valid tensors have the
+  same number of channels.
+- `""` or `False`: a different set of parameteres is sampled for each
+  channel of each tensor.
 
 ### Random transforms
 
 We offer utilities to randomly activate the application of a transform,
 or randomly choose a transform to apply from a set of transforms:
+
 ```python
 gauss = cc.GaussianNoiseTransform()
 chi = cc.ChiNoiseTransform()
@@ -69,11 +86,12 @@ img = cc.ctx.switch({gauss: 0.5, chi: 0.5})(img)   # -> SwitchTransform
 
 Transforms can be composed together using the `SequentialTransform` class,
 or by simply adding them together:
+
 ```python
 # programatic instantiation of a sequence
 seq = cc.SequentialTransform([
-       cc.ElasticTransform(),
-       cc.GaussianNoiseTransform()
+    cc.ElasticTransform(),
+    cc.GaussianNoiseTransform()
 ])
 
 # syntactic sugar
@@ -89,6 +107,7 @@ Better augmentation can be obtained if the parameters of a random transform
 distribution (_e.g._, a uniform distribution between 0 and 10).
 We provide high-level randomized transform for this, as well as a utility
 class that allows any transform to be easily randomized:
+
 ```python
 # use a pre-defined randomized transform
 img = cc.RandomAffineElasticTransform()(img)
@@ -102,14 +121,21 @@ img = hypernoise(img)
 
 Last but not least, transforms accept any nested collection
 (`list`, `tuple`, `dict`) of tensors, applies the transform to each
-leaf Tensor, and returns a collection with the same nested structure:
+leaf tensor, and returns a collection with the same nested structure:
+
 ```python
 img1 = cc.LoadTransform(dtype='float32')('path/to/mri1.nii.gz')
 lab1 = cc.LoadTransform(dtype='long')('path/to/labels1.nii.gz')
 img2 = cc.LoadTransform(dtype='float32')('path/to/mri2.nii.gz')
 lab2 = cc.LoadTransform(dtype='long')('path/to/labels2.nii.gz')
 
+# lists of tuples
 dat = [(img1, lab1), (img2, lab2)]
+dat = cc.ElasticTransform()(dat)
+[(wimg1, wlab1), (wimg2, wlab2)] = dat
+
+# or list of dictionaries
+dat = [{"img": img1, "seg": lab1}, {"img": img2, "seg": lab2}]
 dat = cc.ElasticTransform()(dat)
 ```
 
@@ -119,6 +145,7 @@ keyword arguments. In this case, we return special `Args`, `Kwargs` or
 to properly deal with transfoms composition and such). These structures
 understand implicit unpacking, and always unpack values (which differs from
 native `dict`, which unpack keys).
+
 ```python
 img1, lab1 = cc.ElasticTransform()(img1, lab1)
 img1, lab1 = cc.ElasticTransform()(image=img1, label=lab1)
@@ -134,39 +161,43 @@ It is then possible to take advantage of positional arguments, keywords
 and/or dictionaries to apply some transforms to a subset of inputs.
 This is done using the `cc.MappedTransform` meta-transform (or the
 `cc.ctx.map` utility function):
+
 ```python
 # using positionals
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.map(noise, None)
+trf = cc.SequentialTranform([geom, cc.map(noise, None)])
 img, lab = trf(img, lab)
 
 # using keywords
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.map(image=noise)
+trf = cc.SequentialTranform([geom, cc.map(image=noise)])
 img, lab = trf(image=img, label=lab)
 
 # using dictionaries
-dat = [dict(image=img1, label=lab1),
-       dict(image=img2, label=lab2)]
+dat = [dict(image=img1, label=lab1), dict(image=img2, label=lab2)]
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.map(image=noise, nested=True) # !! must be `nested`
+trf = cc.SequentialTranform([
+    geom,
+    cc.map(image=noise, nested=True)  # !! must be `nested`
+])
 dat = trf(dat)
 ```
 
 Alternatively, a transform can be applied selectively to a set of keys
 (or to all *but* a set of keys):
+
 ```python
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.ctx.include(noise, "image")
+trf = cc.SequentialTranform([geom, cc.ctx.include(noise, "image")])
 img, lab = trf(image=img, label=lab)
 
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = geom + cc.ctx.exclude(noise, "label")
+trf = cc.SequentialTranform([geom, cc.ctx.exclude(noise, "label")])
 img, lab = trf(image=img, label=lab)
 ```
 
@@ -178,6 +209,7 @@ We advise to only call `LoadTransform` (and eventually `PatchTransform`) in
 your dataloader, and apply all other augmentations inside a PyTorch module.
 The `BatchedTransform` class allows a transform to be applied to a batched
 tensor or a nested structure of batched tensors:
+
 ```python
 batched_transform = cc.ctx.batch(transform) # or cc.BatchedTransform(transform)
 img, lab = batched_transform(img, lab)      # input shapes: [B, C, X, Y, Z]
