@@ -4,14 +4,14 @@ icon: fontawesome/solid/rocket
 
 # Getting started
 
-### Import
+## Import
 
 Let's start with importing cornucopia:
 ```python
 import cornucopia as cc
 ```
 
-### Overview
+## Overview
 
 Transforms are simply Pytorch modules that expect tensors with a channel but
 no batch dimension (e.g., `[C, X, Y, Z]`).
@@ -62,7 +62,7 @@ to re-sample noise in each channel). In general, `shared` can take the values:
 - `""` or `False`: a different set of parameteres is sampled for each
   channel of each tensor.
 
-### Random transforms
+## Random transforms
 
 We offer utilities to randomly activate the application of a transform,
 or randomly choose a transform to apply from a set of transforms:
@@ -82,7 +82,7 @@ img = (gauss | chi)(img)                           # -> SwitchTransform
 img = cc.ctx.switch({gauss: 0.5, chi: 0.5})(img)   # -> SwitchTransform
 ```
 
-### Sequences of transforms
+## Sequences of transforms
 
 Transforms can be composed together using the `SequentialTransform` class,
 or by simply adding them together:
@@ -100,7 +100,7 @@ seq = cc.ElasticTransform() + cc.GaussianNoiseTransform()
 img = seq(img)
 ```
 
-### Randomized parameters
+## Randomized parameters
 
 Better augmentation can be obtained if the parameters of a random transform
 (_e.g._, Gaussian noise variance) are themselves sampled from a prior
@@ -117,7 +117,7 @@ hypernoise = cc.ctx.randomize(cc.GaussianNoise, cc.Uniform(0, 10))
 img = hypernoise(img)
 ```
 
-### Nested structures of tensors
+## Nested structures of tensors
 
 Last but not least, transforms accept any nested collection
 (`list`, `tuple`, `dict`) of tensors, applies the transform to each
@@ -155,7 +155,7 @@ img1, lab1 = dat['image'], dat['label']
 # etc.
 ```
 
-### Apply different transforms to different tensors
+## Apply different transforms to different tensors
 
 It is then possible to take advantage of positional arguments, keywords
 and/or dictionaries to apply some transforms to a subset of inputs.
@@ -201,7 +201,7 @@ trf = cc.SequentialTranform([geom, cc.ctx.exclude(noise, "label")])
 img, lab = trf(image=img, label=lab)
 ```
 
-### Batching
+## Batching
 
 Because cornucopia transforms are implemented in pure PyTorch, they can be run
 **on the CPU or GPU**, and benefit greatly from being run on the GPU.
