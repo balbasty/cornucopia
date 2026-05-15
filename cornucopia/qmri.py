@@ -923,11 +923,11 @@ class GradientEchoTransform(FinalTransform):
         tr: float = 25e-3,
         te: float = 7e-3,
         alpha: float = 20,
-        pd: float | None = None,
-        t1: float | None = None,
-        t2: float | None = None,
-        b1: float | None = 1,
-        mt: float | None = 0,
+        pd: tx.Optional[float] = None,
+        t1: tx.Optional[float] = None,
+        t2: tx.Optional[float] = None,
+        b1: tx.Optional[float] = 1,
+        mt: tx.Optional[float] = 0,
         **kwargs
     ) -> None:
         """
