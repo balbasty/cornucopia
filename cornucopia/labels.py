@@ -21,17 +21,20 @@ __all__ = [
 ]
 # stdlib
 import math as pymath
+from math import inf
+from typing import Dict, List, Optional, Tuple, Union
 
 # dependencies
 import torch
 import interpol
 import distmap
+from torch import Tensor
 
 # internals
 from .random import Uniform, Sampler, RandInt, Fixed, RandKFrom, make_range
-from .base import FinalTransform, NonFinalTransform
-from .baseutils import prepare_output
-from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform
+from .base import FinalTransform, NonFinalTransform, Transform
+from .baseutils import Returned, prepare_output
+from .intensity import AddFieldTransform, MulValueTransform, FillValueTransform, ReturnValueTransform
 from .utils.conv import smoothnd
 from .utils.py import ensure_list, make_vector
 from .utils.morpho import bounded_distance
@@ -39,11 +42,70 @@ from .utils.smart_inplace import mul_, div_, add_, sub_
 from . import ctx
 
 
+class OneHotFinalTransform(FinalTransform):
+    """Final transform for `OneHotTransform`."""
+
+    def __init__(
+        self,
+        labels: List[Union[int, List[int]]],
+        keep_background: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        labels : list[ int | list[int] ]
+            Mapping from output label to input label(s).
+        keep_background : bool
+            If True, the first one-hot class is the background class,
+            and the one hot tensor sums to one.
+        dtype : torch.dtype | None
+            Use a different dtype for the one-hot
+        """
+        super().__init__(**kwargs)
+        self.labels = labels
+        self.keep_background = keep_background
+        self.dtype = dtype
+
+    def xform(self, x: Tensor) -> Tensor:
+        if len(x) != 1:
+            raise ValueError('Cannot one-hot multi-channel tensors')
+        x = x[0]
+
+        lmax = len(self.labels) + self.keep_background
+        y = x.new_zeros([lmax, *x.shape], dtype=self.dtype)
+
+        for new_l, old_l in enumerate(self.labels):
+            new_l += self.keep_background
+            if isinstance(old_l, (list, tuple)):
+                for old_l1 in old_l:
+                    y[new_l, x == old_l1] = 1
+            else:
+                y[new_l, x == old_l] = 1
+
+        if self.keep_background:
+            y[0] = 1 - y[1:].sum(0)
+
+        return y
+
+
 class OneHotTransform(NonFinalTransform):
     """Transform a volume of integer labels into a one-hot representation"""
 
-    def __init__(self, label_map=None, label_ref=None, keep_background=True,
-                 dtype=None, **kwargs):
+    Final = Next = OneHotFinalTransform
+    """The transform type returned by `make_final`."""
+
+    _InpLabel = Union[int, str, List[Union[int, str]]]
+
+    def __init__(
+        self,
+        label_map: Optional[List[_InpLabel]] = None,
+        label_ref: Optional[Dict[int, str]] = None,
+        keep_background: bool = True,
+        dtype: Optional[torch.dtype] = None,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -65,7 +127,7 @@ class OneHotTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -98,106 +160,191 @@ class OneHotTransform(NonFinalTransform):
                     new_label_map.append(label)
                 label_map = new_label_map
 
-        return self.Final(
+        return self.Next(
             label_map, self.keep_background, self.dtype, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-
-        def __init__(self, labels, keep_background=True, dtype=None,
-                     **kwargs):
-            super().__init__(**kwargs)
-            self.labels = labels
-            self.keep_background = keep_background
-            self.dtype = dtype
-
-        def xform(self, x):
-            if len(x) != 1:
-                raise ValueError('Cannot one-hot multi-channel tensors')
-            x = x[0]
-
-            lmax = len(self.labels) + self.keep_background
-            y = x.new_zeros([lmax, *x.shape], dtype=self.dtype)
-
-            for new_l, old_l in enumerate(self.labels):
-                new_l += self.keep_background
-                if isinstance(old_l, (list, tuple)):
-                    for old_l1 in old_l:
-                        y[new_l, x == old_l1] = 1
-                else:
-                    y[new_l, x == old_l] = 1
-
-            if self.keep_background:
-                y[0] = 1 - y[1:].sum(0)
-
-            return y
-
 
 class ArgMaxTransform(FinalTransform):
+    """Take the argmax along the channel dimension"""
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         return x.argmax(0)[None]
 
 
-class RelabelTransform(NonFinalTransform):
-    """Relabel a label map"""
+class RelabelFinalTransform(FinalTransform):
+    """Relabel a label map using a fixed mapping scheme.
 
-    def __init__(self, labels=None, **kwargs):
+    !!! note
+
+        - The `labels` are mapped to the range `{1..len(labels)}`.
+
+        - If an element of this list is a sublist of indices,
+            indices in the sublist are merged.
+
+        - All labels absent from the list are mapped to `0`.
+    """
+
+    def __init__(self, labels: List[Union[int, List[int]]], **kwargs) -> None:
         """
-
-        !!! note
-
-            - The `labels` are mapped to the range `{1..len(labels)}`.
-
-            - If an element of this list is a sublist of indices,
-              indices in the sublist are merged.
-
-            - All labels absent from the list are mapped to `0`.
-
         Parameters
         ----------
-        labels : list of [list of] int, optional
+        labels : list of [list of] int
             Relabeling scheme.
-
         """
         super().__init__(**kwargs)
         self.labels = labels
 
-    def make_final(self, x, max_depth=float('inf')):
+    def xform(self, x: Tensor) -> Tensor:
+        if self.labels is None:
+            return self.make_final(x)(x)
+        assert self.labels is not None
+        y = torch.zeros_like(x)
+        for out, inp in enumerate(self.labels):
+            out = out + 1
+            if not isinstance(inp, (list, tuple)):
+                inp = [inp]
+            for inp1 in inp:
+                y.masked_fill_(x == inp1, out)
+        return y
+
+
+class RelabelTransform(NonFinalTransform):
+    """Relabel a label map.
+
+    !!! note
+
+        - The `labels` are mapped to the range `{1..len(labels)}`.
+
+        - If an element of this list is a sublist of indices,
+            indices in the sublist are merged.
+
+        - All labels absent from the list are mapped to `0`.
+    """
+
+    Final = Next = RelabelFinalTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        labels: Optional[List[Union[int, List[int]]]] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        labels : list of [list of] int | None
+            Relabeling scheme.
+        """
+        super().__init__(**kwargs)
+        self.labels = labels
+
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if self.is_final:
             return self
         labels = self.labels
         if labels is None:
             labels = x.unique().tolist()[1:]
-        return self.Final(
+        return self.Next(
             labels, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
 
-        def __init__(self, labels, **kwargs):
-            super().__init__(**kwargs)
-            self.labels = labels
+class GaussianMixtureFinalTransform(FinalTransform):
+    """Sample from a Gaussian mixture with known cluster parameters."""
 
-        def xform(self, x):
-            if self.labels is None:
-                return self.make_final(x)(x)
-            assert self.labels is not None
-            y = torch.zeros_like(x)
-            for out, inp in enumerate(self.labels):
-                out = out + 1
-                if not isinstance(inp, (list, tuple)):
-                    inp = [inp]
-                for inp1 in inp:
-                    y.masked_fill_(x == inp1, out)
-            return y
+    def __init__(
+        self,
+        mu: Union[List[float], Tensor],
+        sigma: Union[List[float], Tensor],
+        fwhm: Union[float, List[float], Tensor, None] = None,
+        background: Optional[int] = None,
+        dtype: Optional[torch.dtype] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        mu : (K,) list[float] | tensor
+            Mean of each cluster.
+        sigma : (K,) list[float] | tensor
+            Standard deviation of each cluster.
+        fwhm : float | (K,) list[float] | tensor | None
+            Width of a within-class smoothing kernel.
+        background : int | None
+            Index of background channel, which does not get filled.
+        dtype : torch.dtype | None
+            Output data type. Only used if input is an integer label map.
+        """
+        super().__init__(**kwargs)
+        self.mu = mu
+        self.sigma = sigma
+        self.fwhm = 0 if fwhm is None else fwhm
+        self.background = background
+        self.dtype = dtype
+
+    def xform(self, x: Tensor) -> Tensor:
+        mu, sigma = self.mu, self.sigma
+        ndim = x.ndim - 1
+
+        def to(x, y):
+            return x.to(y) if torch.is_tensor(x) else x
+
+        if x.is_floating_point():
+            backend = dict(dtype=x.dtype, device=x.device)
+            y = torch.zeros_like(x[0])
+            fwhm = make_vector(self.fwhm, len(x), **backend)
+            for k in range(len(x)):
+                muk, sigmak = to(mu[k], y), to(sigma[k], y)
+                if self.background is not None and k == self.background:
+                    continue
+                y1 = torch.randn(x.shape[1:], **backend)
+                if fwhm[k]:
+                    y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
+                y += mul_(add_(mul_(y1, sigmak), muk), x[k])
+            y = y[None]
+        else:
+            backend = dict(dtype=self.dtype or torch.get_default_dtype(),
+                            device=x.device)
+            y = torch.zeros_like(x, **backend)
+            nk = x.max().item()+1
+            fwhm = make_vector(self.fwhm, nk, **backend)
+            for k in range(nk):
+                muk, sigmak = to(mu[k], y), to(sigma[k], y)
+                if self.background is not None and k == self.background:
+                    continue
+                if fwhm[k]:
+                    mask = x != k
+                    y1 = torch.randn(x.shape, **backend)
+                    y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
+                    y += add_(mul_(y1, sigmak), muk).masked_fill_(mask, 0)
+                else:
+                    mask = x == k
+                    numel = mask.sum()
+                    if numel:
+                        y1 = torch.randn(numel, **backend)
+                        y1 = add_(mul_(y1, sigmak), muk)
+                        y[mask] = y1
+        return y
 
 
 class GaussianMixtureTransform(NonFinalTransform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
-    def __init__(self, mu=None, sigma=None, fwhm=0, background=None,
-                 dtype=None, *, shared=False, **kwargs):
+    Next = Final = GaussianMixtureFinalTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        mu: Union[List[float], Tensor, None] = None,
+        sigma: Union[List[float], Tensor, None] = None,
+        fwhm: Union[float, List[float], Tensor] = 0,
+        background: Union[int, None] = None,
+        dtype: Union[torch.dtype, None] = None,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -208,7 +355,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             Standard deviation of each cluster. Default: `1/nb_classes`.
         fwhm : float or list[float]
             Width of a within-class smoothing kernel.
-        background : int
+        background : int | None
             Index of background channel, which does not get filled.
             Default: fill all classes.
         dtype : torch.dtype
@@ -221,7 +368,7 @@ class GaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         nk = len(x) if x.is_floating_point() else x.unique().numel()
@@ -231,65 +378,10 @@ class GaussianMixtureTransform(NonFinalTransform):
             mu = torch.rand([nk]).tolist()
         if sigma is None:
             sigma = [1 / nk] * nk
-        return self.Final(
+        return self.Next(
             mu, sigma, self.fwhm, self.background, self.dtype,
             **self.get_prm()
         ).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-
-        def __init__(self, mu, sigma, fwhm, background=None, dtype=None,
-                     **kwargs):
-            super().__init__(**kwargs)
-            self.mu = mu
-            self.sigma = sigma
-            self.fwhm = 0 if fwhm is None else fwhm
-            self.background = background
-            self.dtype = dtype
-
-        def xform(self, x):
-            mu, sigma = self.mu, self.sigma
-            ndim = x.ndim - 1
-
-            def to(x, y):
-                return x.to(y) if torch.is_tensor(x) else x
-
-            if x.is_floating_point():
-                backend = dict(dtype=x.dtype, device=x.device)
-                y = torch.zeros_like(x[0])
-                fwhm = make_vector(self.fwhm, len(x), **backend)
-                for k in range(len(x)):
-                    muk, sigmak = to(mu[k], y), to(sigma[k], y)
-                    if self.background is not None and k == self.background:
-                        continue
-                    y1 = torch.randn(x.shape[1:], **backend)
-                    if fwhm[k]:
-                        y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
-                    y += mul_(add_(mul_(y1, sigmak), muk), x[k])
-                y = y[None]
-            else:
-                backend = dict(dtype=self.dtype or torch.get_default_dtype(),
-                               device=x.device)
-                y = torch.zeros_like(x, **backend)
-                nk = x.max().item()+1
-                fwhm = make_vector(self.fwhm, nk, **backend)
-                for k in range(nk):
-                    muk, sigmak = to(mu[k], y), to(sigma[k], y)
-                    if self.background is not None and k == self.background:
-                        continue
-                    if fwhm[k]:
-                        mask = x != k
-                        y1 = torch.randn(x.shape, **backend)
-                        y1 = smoothnd(y1, fwhm=[fwhm[k]]*ndim)
-                        y += add_(mul_(y1, sigmak), muk).masked_fill_(mask, 0)
-                    else:
-                        mask = x == k
-                        numel = mask.sum()
-                        if numel:
-                            y1 = torch.randn(numel, **backend)
-                            y1 = add_(mul_(y1, sigmak), muk)
-                            y[mask] = y1
-            return y
 
 
 class RandomGaussianMixtureTransform(NonFinalTransform):
@@ -297,19 +389,34 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
     Sample from a randomized Gaussian mixture with known cluster assignment.
     """
 
-    def __init__(self, mu=1, sigma=0.05, fwhm=2, background=None, dtype=None,
-                 *, shared=False, **kwargs):
+    Next = GaussianMixtureTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = GaussianMixtureFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        mu: Union[Sampler, List[float], float] = 1,
+        sigma: Union[Sampler, List[float], float] = 0.05,
+        fwhm: Union[Sampler, List[float], float] = 2,
+        background: Optional[int] = None,
+        dtype: Optional[torch.dtype] = None,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        mu : Sampler or [list of] float
+        mu : Sampler | [list of] float
             Sampling function for cluster means, or upper bound
-        sigma : Sampler or [list of] float
+        sigma : Sampler | [list of] float
             Sampling function for cluster standard deviations, or upper bound
-        fwhm : Sampler or [list of] float
+        fwhm : Sampler | [list of] float
             Sampling function for smoothing width, or upper bound
-        background : int, optional
+        background : int | None
             Index of background channel
         """
         super().__init__(shared=shared, **kwargs)
@@ -319,7 +426,7 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if ('channels' in self.shared
@@ -346,8 +453,17 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
 class SmoothLabelMap(NonFinalTransform):
     """Generate a random label map"""
 
-    def __init__(self, nb_classes=2, shape=5, soft=False,
-                 *, shared=False, **kwargs):
+    Final = Next = ReturnValueTransform
+
+    def __init__(
+        self,
+        nb_classes=2,
+        shape=5,
+        soft=False,
+        *,
+        shared=False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -407,39 +523,46 @@ class SmoothLabelMap(NonFinalTransform):
                 mask = maxprob < b1
                 b.masked_fill_(mask, k)
                 maxprob = torch.where(mask, b1, maxprob)
-        return self.Final(b, **self.get_prm()).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-
-        def __init__(self, labelmap, **kwargs):
-            super().__init__(**kwargs)
-            self.labelmap = labelmap
-
-        def xform(self, x):
-            return self.labelmap.to(x.device)
+        return self.Next(
+            b, dtype=b.dtype, **self.get_prm()
+        ).make_final(x, max_depth-1)
 
 
 class RandomSmoothLabelMap(NonFinalTransform):
     """Generate a random label map with random hyper-parameters"""
 
-    def __init__(self, nb_classes=8, shape=5, soft=False,
-                 *, shared=False, shared_field=None, **kwargs):
+    Next = SmoothLabelMap
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = ReturnValueTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        nb_classes: Union[Sampler, int] = 8,
+        shape: Union[Sampler, int, List[int]] = 5,
+        soft: bool = False,
+        *,
+        shared: Union[str, bool] = False,
+        shared_field: Union[str, bool, None] = None,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        nb_classes : Sampler or int
+        nb_classes : Sampler | int
             Maximum number of classes
-        shape : Sampler or [list of] int
+        shape : Sampler | [list of] int
             Maximum number of spline control points
         soft : bool
             Return a soft (one-hot) label map
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Shared hyperparameters across tensors/channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', ''}
+        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
             Shared random fields across tensors/channels
         """
         super().__init__(shared=shared, **kwargs)
@@ -448,7 +571,7 @@ class RandomSmoothLabelMap(NonFinalTransform):
         self.soft = Fixed.make(soft)
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) == 1:
@@ -463,7 +586,7 @@ class RandomSmoothLabelMap(NonFinalTransform):
         shared_field = self.shared_field
         if shared_field is None:
             shared_field = self.shared
-        return SmoothLabelMap(
+        return self.Next(
             nb_classes, shape, soft, shared=shared_field, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -473,8 +596,14 @@ class ErodeLabelTransform(FinalTransform):
     Morphological erosion.
     """
 
-    def __init__(self, labels=tuple(), radius=3, method='conv',
-                 new_labels=False, **kwargs):
+    def __init__(
+        self,
+        labels: Union[int, List[int]] = tuple(),
+        radius: Union[int, List[int]] = 3,
+        method: str = 'conv',
+        new_labels: Union[bool, List[int]] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -487,7 +616,7 @@ class ErodeLabelTransform(FinalTransform):
             If 'conv', use the L1 distance computed using a series of
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
-        new_labels : bool or [sequence of] int
+        new_labels : bool | [sequence of] int
             If not False, the eroded portion of each label gives rise to
             a new label. If True, create new unique labels.
         """
@@ -497,7 +626,7 @@ class ErodeLabelTransform(FinalTransform):
         self.method = method
         self.new_labels = new_labels
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         if self.new_labels is not False:
             return self._apply_newlabels(x)
 
@@ -597,7 +726,13 @@ class DilateLabelTransform(FinalTransform):
     Morphological dilation.
     """
 
-    def __init__(self, labels=tuple(), radius=3, method='conv', **kwargs):
+    def __init__(
+        self,
+        labels: Union[int, List[int]] = tuple(),
+        radius: Union[int, List[int]] = 3,
+        method: str = 'conv',
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -616,7 +751,7 @@ class DilateLabelTransform(FinalTransform):
         self.radius = ensure_list(radius, min(len(self.labels), 1))
         self.method = method
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         max_radius = max(self.radius)
         if self.method == 'conv':
             def dist(x, r):
@@ -664,16 +799,27 @@ class RandomErodeLabelTransform(NonFinalTransform):
     Morphological erosion with random radius/labels.
     """
 
-    def __init__(self, labels=0.5, radius=3, method='conv',
-                 new_labels=False, *, shared=False, **kwargs):
+    Final = Next = ErodeLabelTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        labels: Union[Sampler, float, List[int]] = 0.5,
+        radius: Union[Sampler, int] = 3,
+        method: str = 'conv',
+        new_labels: Union[bool, List[int]] = False,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        labels : Sampler or float or [sequence of] int
+        labels : Sampler | float | [sequence of] int
             Labels to erode.
             If a float in 0..1, probability of eroding a label
-        radius : Sampler or int
+        radius : Sampler | int
             Erosion radius (per label).
             Either an int sampler, or an upper bound.
         method : {'conv', 'l1', 'l2'}
@@ -681,9 +827,14 @@ class RandomErodeLabelTransform(NonFinalTransform):
             If 'conv', use the L1 distance computed using a series of
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
-        new_labels : bool or [sequence of] int
+        new_labels : bool | [sequence of] int
             If not False, the eroded portion of each label gives rise to
             a new label. If True, create new unique labels.
+
+        Other Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
+            Shared hyperparameters across tensors/channels
         """
         super().__init__(shared=shared, **kwargs)
         self.labels = labels
@@ -728,16 +879,26 @@ class RandomDilateLabelTransform(NonFinalTransform):
     Morphological dilation with random radius/labels.
     """
 
-    def __init__(self, labels=0.5, radius=3, method='conv',
-                 *, shared=False, **kwargs):
+    Final = Next = DilateLabelTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        labels: Union[Sampler, float, List[int]] = 0.5,
+        radius: Union[Sampler, int] = 3,
+        method: str = 'conv',
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        labels : Sampler or float or [sequence of] int
+        labels : Sampler | float | [sequence of] int
             Labels to dilate.
-            If a float in 0..1, probability of eroding a label
-        radius : Sampler or int
+            If a float in 0..1, probability of dilating a label
+        radius : Sampler | int
             Dilation radius (per label).
             Either an int sampler, or an upper bound.
         method : {'conv', 'l1', 'l2'}
@@ -745,13 +906,18 @@ class RandomDilateLabelTransform(NonFinalTransform):
             If 'conv', use the L1 distance computed using a series of
             convolutions. The radius will be rounded to the nearest integer.
             Otherwise, use the appropriate distance transform.
+
+        Other Parameters
+        ------------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
+            Shared hyperparameters across tensors/channels
         """
         super().__init__(shared=shared, **kwargs)
         self.labels = labels
         self.radius = Uniform.make(make_range(0, radius))
         self.method = Fixed(method)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -781,13 +947,150 @@ class RandomDilateLabelTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+
+class SmoothMorphoLabelFinalTransform(FinalTransform):
+    """Morphological erosion/dilation with spatially varying radius."""
+
+    def __init__(
+        self,
+        fields: Transform,
+        labels: Union[int, List[int]] = 1,
+        min_radius: Union[int, List[int]] = -30,
+        max_radius: Union[int, List[int]] = 3,
+        method: str = 'conv',
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        fields : Transform | (K|1, *spatial) tensor
+            Transform that generates the radius field(s). The output is
+            expected to be in [0, 1].
+        labels : [sequence of (K,)] int
+            Labels to erode/dilate. By default, 1.
+        min_radius : [sequence of (K,)] int
+            Minimum erosion (if < 0) or dilation (if > 0) radius (per label).
+        max_radius : [sequence of (K,)] int
+            Maximum erosion (if < 0) or dilation (if > 0) radius (per label).
+        method : {'conv', 'l1', 'l2'}
+            Method to use to compute the distance map.
+        """
+        super().__init__(**kwargs)
+        self.fields = fields
+        self.labels = ensure_list(labels)
+        self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
+        self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
+        self.method = method
+
+    @property
+    def is_final(self):
+        if isinstance(self.fields, Transform):
+            return self.fields.is_final
+        return True
+
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+        if max_depth == 0:
+            return self
+        fields = self.fields
+        if isinstance(fields, Transform):
+            if not fields.is_final:
+                fields = fields.make_final(x, max_depth-1)
+            else:
+                dtype = x.dtype
+                if not dtype.is_floating_point:
+                    dtype = torch.get_default_dtype()
+                z = x.new_zeros([], dtype=dtype, device=x.device)
+                z = z.expand(x[:1].shape)
+                fields = torch.cat(
+                    [fields(z) for _ in range(len(self.labels))],
+                    dim=0
+                )
+            max_depth -= 1
+        return type(self)(
+            fields, self.labels, self.min_radius, self.max_radius,
+            self.method, **self.get_prm()
+        ).make_final(x, max(0, max_depth-1))
+
+    def xform(self, x: Tensor) -> Returned:
+        max_abs_radius = 1 + int(pymath.ceil(max(
+            max(map(abs, self.min_radius)),
+            max(map(abs, self.max_radius))
+        )))
+        if self.method == 'conv':
+            def dist(x):
+                return bounded_distance(
+                    x, nb_iter=max_abs_radius, ndim=x.ndim-1
+                )
+        elif self.method == 'l1':
+            def dist(x):
+                return distmap.l1_signed_transform(
+                    x, ndim=x.ndim-1
+                ).neg_()
+        elif self.method == 'l2':
+            def dist(x):
+                return distmap.euclidean_signed_transform(
+                    x, ndim=x.ndim-1
+                ).neg_()
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0].tolist()
+        foreground_min_radius = ensure_list(
+            self.min_radius, len(foreground_labels)
+        )
+        foreground_max_radius = ensure_list(
+            self.max_radius, len(foreground_labels)
+        )
+
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+
+        fields = self.fields
+        if not isinstance(fields, Transform):
+            fields = torch.as_tensor(fields, dtype=dtype, device=x.device)
+            fields = fields.expand([len(foreground_labels), *x.shape[1:]])
+        else:
+            z = x.new_zeros([], dtype=dtype, device=x.device).expand(x.shape)
+
+        y = torch.zeros_like(x)
+        d = torch.full_like(x, float('inf'), dtype=dtype)
+        all_labels = x.unique()
+        for label in all_labels:
+            x0 = x == label
+            is_foreground = label in foreground_labels
+            if is_foreground:
+                label_index = foreground_labels.index(label)
+                min_radius = foreground_min_radius[label_index]
+                max_radius = foreground_max_radius[label_index]
+                if isinstance(fields, Transform):
+                    radius = fields(z)
+                else:
+                    radius = fields[label_index][None]
+                radius = add_(
+                    mul_(radius, max_radius - min_radius),
+                    min_radius
+                )
+            else:
+                radius = 0
+            d1 = sub_(dist(x0).to(d), radius)
+            mask = d1 < d
+            if mask.any():
+                d = torch.where(mask, d1, d)
+                y.masked_fill_(mask, label)
+        return prepare_output(dict(input=x, output=y), self.returns)
+
+
 class SmoothMorphoLabelTransform(NonFinalTransform):
     """
     Morphological erosion with spatially varying radius.
 
     !!! note
-        We're actually computing the level set of each label and pushing it
-        up and down using a smooth "radius" map. In theory, this can
+        We're actually computing the level set of each label and pushing
+        it up and down using a smooth "radius" map. In theory, this can
         create "holes" or "islands", which would not happen with a normal
         erosion. With radii that are small and radius map that are smooth
         compared to the label size, it should be fine.
@@ -798,8 +1101,20 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
         therefore `channels` or `False`.
     """
 
-    def __init__(self, labels=tuple(), min_radius=-3, max_radius=3, shape=5,
-                 method='conv', shared=False, **kwargs):
+    Final = Next = SmoothMorphoLabelFinalTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        labels: Union[int, List[int]] = tuple(),
+        min_radius: Union[int, List[int]] = -3,
+        max_radius: Union[int, List[int]] = 3,
+        shape: Union[int, List[int]] = 5,
+        method: str = 'conv',
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -832,85 +1147,17 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
             self.min_radius, self.max_radius, self.method, **self.get_prm()
         ).make_final(x, max_depth-1)
 
-    class Final(FinalTransform):
-
-        def __init__(self, fields, labels, min_radius=-30, max_radius=3,
-                     method='conv', **kwargs):
-            super().__init__(**kwargs)
-            self.fields = fields
-            self.labels = ensure_list(labels)
-            self.min_radius = ensure_list(min_radius, min(len(self.labels), 1))
-            self.max_radius = ensure_list(max_radius, min(len(self.labels), 1))
-            self.method = method
-
-        def xform(self, x):
-            max_abs_radius = 1 + int(pymath.ceil(max(
-                max(map(abs, self.min_radius)),
-                max(map(abs, self.max_radius))
-            )))
-            if self.method == 'conv':
-                def dist(x):
-                    return bounded_distance(
-                        x, nb_iter=max_abs_radius, ndim=x.ndim-1
-                    )
-            elif self.method == 'l1':
-                def dist(x):
-                    return distmap.l1_signed_transform(
-                        x, ndim=x.ndim-1
-                    ).neg_()
-            elif self.method == 'l2':
-                def dist(x):
-                    return distmap.euclidean_signed_transform(
-                        x, ndim=x.ndim-1
-                    ).neg_()
-            else:
-                raise ValueError('Unknown method', self.method)
-
-            all_labels = x.unique()
-            foreground_labels = self.labels
-            if not foreground_labels:
-                foreground_labels = all_labels[all_labels != 0].tolist()
-            foreground_min_radius = ensure_list(
-                self.min_radius, len(foreground_labels)
-            )
-            foreground_max_radius = ensure_list(
-                self.max_radius, len(foreground_labels)
-            )
-
-            dtype = x.dtype
-            if not dtype.is_floating_point:
-                dtype = torch.get_default_dtype()
-
-            y = torch.zeros_like(x)
-            z = x.new_zeros([], dtype=dtype).expand(x.shape)
-            d = torch.full_like(x, float('inf'), dtype=dtype)
-            all_labels = x.unique()
-            for label in all_labels:
-                x0 = x == label
-                is_foreground = label in foreground_labels
-                if is_foreground:
-                    label_index = foreground_labels.index(label)
-                    min_radius = foreground_min_radius[label_index]
-                    max_radius = foreground_max_radius[label_index]
-                    radius = self.fields(z)
-                    radius = add_(
-                        mul_(radius, max_radius - min_radius),
-                        min_radius
-                    )
-                else:
-                    radius = 0
-                d1 = sub_(dist(x0).to(d), radius)
-                mask = d1 < d
-                if mask.any():
-                    d = torch.where(mask, d1, d)
-                    y.masked_fill_(mask, label)
-            return prepare_output(dict(input=x, output=y), self.returns)
-
 
 class RandomSmoothMorphoLabelTransform(NonFinalTransform):
     """
     Morphological erosion/dilation with smooth random radius/labels.
     """
+
+    Next = SmoothMorphoLabelTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = SmoothMorphoLabelFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(self, labels=0.5, min_radius=-3, max_radius=3,
                  shape=5, method='conv',
@@ -993,8 +1240,164 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
         ).make_final(x, max_depth-1)
 
 
+
+class SmoothShallowLabelFinalTransform(FinalTransform):
+    """
+    Make labels "empty", with a border of a given size.
+    """
+
+    def __init__(
+        self,
+        fields: Union[Transform, Tensor],
+        labels: List[int] = tuple(),
+        max_width: int = 5,
+        min_width: int = 1,
+        background_labels: List[int] = tuple(),
+        method: str = 'l2',
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        fields : Transform | (K|1, *spatial) tensor
+            Transform that generates the width field(s). The output is
+            expected to be in [0, 1].
+        labels : [sequence of (K,)] int
+            Labels to make shallow. By default, all but zero.
+        max_width : [sequence of (K,)] int
+            Maximum border width (per label)
+        min_width : [sequence of (K,)] int
+            Minimum border width (per label)
+        background_labels : [sequence of (K,)] int
+            Labels that are allowed to grow into the shallow space
+            (default: all that are not in labels)
+        method : {'l1', 'l2'}
+            Method to use to compute the distance map.
+        """
+        super().__init__(**kwargs)
+        self.fields = fields
+        self.labels = labels
+        self.max_width = max_width
+        self.min_width = min_width
+        self.background_labels = background_labels
+        self.method = method
+
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+        if max_depth == 0:
+            return self
+        fields = self.fields
+        if isinstance(fields, Transform):
+            if not fields.is_final:
+                fields = fields.make_final(x, max_depth-1)
+            else:
+                dtype = x.dtype
+                if not dtype.is_floating_point:
+                    dtype = torch.get_default_dtype()
+                z = x.new_zeros([], dtype=dtype, device=x.device)
+                z = z.expand(x[:1].shape)
+                fields = torch.cat(
+                    [fields(z) for _ in range(len(self.labels))],
+                    dim=0
+                )
+            max_depth -= 1
+        return type(self)(
+            fields, self.labels, self.min_radius, self.max_radius,
+            self.method, **self.get_prm()
+        ).make_final(x, max(0, max_depth-1))
+
+    def xform(self, x: Tensor) -> Returned:
+        if self.method == 'l1':
+            def dist(x):
+                return distmap.l1_signed_transform(
+                    x, ndim=x.ndim-1
+                ).neg_()
+        elif self.method == 'l2':
+            def dist(x):
+                return distmap.euclidean_signed_transform(
+                    x, ndim=x.ndim-1
+                ).neg_()
+        else:
+            raise ValueError('Unknown method', self.method)
+
+        all_labels = x.unique()
+        foreground_labels = self.labels
+        if not foreground_labels:
+            foreground_labels = all_labels[all_labels != 0]
+        background_labels = self.background_labels
+        if not background_labels:
+            background_labels = [
+                lab for lab in all_labels if lab not in foreground_labels
+            ]
+        foreground_min_width = ensure_list(
+            self.min_width, len(foreground_labels)
+        )
+        foreground_max_width = ensure_list(
+            self.max_width, len(foreground_labels)
+        )
+
+        dtype = x.dtype
+        if not x.dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+
+        fields = self.fields
+        if not isinstance(fields, Transform):
+            fields = torch.as_tensor(fields, dtype=dtype, device=x.device)
+            fields = fields.expand([len(foreground_labels), *x.shape[1:]])
+        else:
+            z = x.new_zeros([], dtype=dtype, device=x.device).expand(x.shape)
+
+        y = torch.zeros_like(x)
+        z = x.new_zeros([], dtype=dtype).expand(x.shape)
+        d = torch.full_like(x, float('inf'), dtype=dtype)
+        m = torch.zeros_like(x, dtype=torch.bool)
+        all_labels = x.unique()
+
+        # fill object borders and keep track of object interiors
+        for k, (label, min_width, max_width) in enumerate(zip(
+                foreground_labels,
+                foreground_min_width,
+                foreground_max_width)):
+            x0 = x == label
+
+            if isinstance(fields, Transform):
+                radius = fields(z)
+            else:
+                radius = fields[k][None]
+
+            radius.mul_(min_width-max_width).sub_(min_width)
+            d1 = dist(x0).to(d)
+            mask = (d1 < 0) & (d1 > radius)
+            m.masked_fill_(d1 < radius, True)
+            d = torch.where(mask, d1, d)
+            y.masked_fill_(mask, label)
+
+        # elsewhere, use maximum probability labels
+        for label in all_labels:
+            if label in foreground_labels:
+                continue
+            x0 = x == label
+            if label not in background_labels:
+                y.masked_fill_(x0, label)
+                d.masked_fill_(x0, -1)
+            elif len(background_labels) == 1:
+                y.masked_fill_(x0, label)
+                d.masked_fill_(x0, -1)
+                y.masked_fill_(m, label)
+                d.masked_fill_(m, -1)
+            else:
+                d1 = dist(x0).to(d)
+                mask = d1 < d
+                d = torch.where(mask, d1, d)
+                y.masked_fill_(mask, label)
+
+        return prepare_output(dict(input=x, output=y), self.returns)
+
+
 class SmoothShallowLabelTransform(NonFinalTransform):
     """Make labels "empty", with a border of a given size."""
+
+    Final = Next = SmoothShallowLabelFinalTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
                  background_labels=tuple(), method='l2',
@@ -1028,96 +1431,10 @@ class SmoothShallowLabelTransform(NonFinalTransform):
         if max_depth == 0:
             return self
         xform = AddFieldTransform(self.shape, shared=self.shared)
-        return self.Final(
+        return self.Next(
             xform, self.labels, self.max_width, self.min_width,
             self.background_labels, self.method, **self.get_prm()
         ).make_final(x, max_depth-1)
-
-    class Final(FinalTransform):
-
-        def __init__(self, fields, labels=tuple(), max_width=5, min_width=1,
-                     background_labels=tuple(), method='l2', **kwargs):
-            super().__init__(**kwargs)
-            self.fields = fields
-            self.labels = labels
-            self.max_width = max_width
-            self.min_width = min_width
-            self.background_labels = background_labels
-            self.method = method
-
-        def xform(self, x):
-            if self.method == 'l1':
-                def dist(x):
-                    return distmap.l1_signed_transform(
-                        x, ndim=x.ndim-1
-                    ).neg_()
-            elif self.method == 'l2':
-                def dist(x):
-                    return distmap.euclidean_signed_transform(
-                        x, ndim=x.ndim-1
-                    ).neg_()
-            else:
-                raise ValueError('Unknown method', self.method)
-
-            all_labels = x.unique()
-            foreground_labels = self.labels
-            if not foreground_labels:
-                foreground_labels = all_labels[all_labels != 0]
-            background_labels = self.background_labels
-            if not background_labels:
-                background_labels = [
-                    lab for lab in all_labels if lab not in foreground_labels
-                ]
-            foreground_min_width = ensure_list(
-                self.min_width, len(foreground_labels)
-            )
-            foreground_max_width = ensure_list(
-                self.max_width, len(foreground_labels)
-            )
-
-            dtype = x.dtype
-            if not x.dtype.is_floating_point:
-                dtype = torch.get_default_dtype()
-            y = torch.zeros_like(x)
-            z = x.new_zeros([], dtype=dtype).expand(x.shape)
-            d = torch.full_like(x, float('inf'), dtype=dtype)
-            m = torch.zeros_like(x, dtype=torch.bool)
-            all_labels = x.unique()
-
-            # fill object borders and keep track of object interiors
-            for label, min_width, max_width in zip(
-                    foreground_labels,
-                    foreground_min_width,
-                    foreground_max_width):
-                x0 = x == label
-                radius = self.fields(z)
-                radius.mul_(min_width-max_width).sub_(min_width)
-                d1 = dist(x0).to(d)
-                mask = (d1 < 0) & (d1 > radius)
-                m.masked_fill_(d1 < radius, True)
-                d = torch.where(mask, d1, d)
-                y.masked_fill_(mask, label)
-
-            # elsewhere, use maximum probability labels
-            for label in all_labels:
-                if label in foreground_labels:
-                    continue
-                x0 = x == label
-                if label not in background_labels:
-                    y.masked_fill_(x0, label)
-                    d.masked_fill_(x0, -1)
-                elif len(background_labels) == 1:
-                    y.masked_fill_(x0, label)
-                    d.masked_fill_(x0, -1)
-                    y.masked_fill_(m, label)
-                    d.masked_fill_(m, -1)
-                else:
-                    d1 = dist(x0).to(d)
-                    mask = d1 < d
-                    d = torch.where(mask, d1, d)
-                    y.masked_fill_(mask, label)
-
-            return prepare_output(dict(input=x, output=y), self.returns)
 
 
 class RandomSmoothShallowLabelTransform(NonFinalTransform):
@@ -1125,25 +1442,41 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
     Make labels "empty", with a border of a given (random) size.
     """
 
-    def __init__(self, labels=0.5, max_width=5, min_width=1, shape=5,
-                 background_labels=tuple(), method='l2',
-                 *, shared=False, shared_fields=None, **kwargs):
+    Next = SmoothShallowLabelTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = SmoothShallowLabelFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        labels: Union[Sampler, float, List[int]] = 0.5,
+        max_width: Union[Sampler, float, List[float]] = 5,
+        min_width: Union[Sampler, float, List[float]] = 1,
+        shape: Union[Sampler, int, List[int]] = 5,
+        background_labels: Union[Sampler, int, List[int]] = tuple(),
+        method: str = 'l2',
+        *,
+        shared: Union[str, bool] = False,
+        shared_fields: Union[str, bool, None] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        labels : Sampler or float or [sequence of] int
+        labels : Sampler | float | [sequence of] int
             Labels to make shallow
             If a float in 0..1, probability of eroding a label
-        max_width : Sampler or [sequence of] float
+        max_width : Sampler | [sequence of] float
             Maximum border width (per label)
             Either an int sampler, or an upper bound.
-        min_width : Sampler or [sequence of] float
+        min_width : Sampler | [sequence of] float
             Minimum border width (per label)
             Either an int sampler, or an upper bound.
-        shape : Sampler or [sequence of] int
+        shape : Sampler | [sequence of] int
             Number of nodes in the smooth width map
             Either an int sampler, or an upper bound.
-        background_labels : [sequence of] int
+        background_labels : Sampler | [sequence of] int
             Labels that are allowed to grow into the shallow space
             (default: all that are not in labels)
         method : {'l1', 'l2'}
@@ -1209,12 +1542,24 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
 class BernoulliTransform(NonFinalTransform):
     """Randomly mask voxels"""
 
-    def __init__(self, prob=0.1, *, shared=False, **kwargs):
+    Next = Final = MulValueTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        prob: float = 0.1,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
         prob : float
             Probability of masking out a voxel
+
+        Other Parameters
+        ----------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensor to return
         shared : bool
@@ -1223,7 +1568,7 @@ class BernoulliTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.prob = prob
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         batch, *shape = x.shape
@@ -1242,8 +1587,18 @@ class BernoulliTransform(NonFinalTransform):
 class SmoothBernoulliTransform(NonFinalTransform):
     """Randomly mask voxels"""
 
-    def __init__(self, prob=0.1, shape=5,
-                 *, shared=False, shared_noise=False, **kwargs):
+    Final = Next = MulValueTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        prob: float = 0.1,
+        shape: Union[int, List[int]] = 5,
+        *,
+        shared: Union[str, bool] = False,
+        shared_noise: Union[str, bool, None] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -1263,7 +1618,7 @@ class SmoothBernoulliTransform(NonFinalTransform):
         self.prob = prob
         self.shared_noise = self._prepare_shared(shared_noise)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1299,8 +1654,19 @@ class SmoothBernoulliTransform(NonFinalTransform):
 class BernoulliDiskTransform(NonFinalTransform):
     """Randomly mask voxels in balls at random locations"""
 
-    def __init__(self, prob=0.1, radius=2, value=0, method='l2',
-                 *, shared=False, **kwargs):
+    Final = Next = FillValueTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        prob: float = 0.1,
+        radius: Union[Sampler, float] = 2,
+        value: Union[int, float, str] = 0,
+        method: str = 'l2',
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -1323,7 +1689,7 @@ class BernoulliDiskTransform(NonFinalTransform):
         self.value = value
         self.method = method
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -1367,8 +1733,21 @@ class BernoulliDiskTransform(NonFinalTransform):
 class SmoothBernoulliDiskTransform(NonFinalTransform):
     """Randomly mask voxels in balls at random locations"""
 
-    def __init__(self, prob=0.1, radius=2, shape=5, value=0, method='l2',
-                 *, shared=False, shared_field=None, **kwargs):
+    Final = Next = FillValueTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        prob: float = 0.1,
+        radius: Union[float, Tuple[float, float]] = 2,
+        shape: Union[int, List[int]] = 5,
+        value: Union[int, float, str] = 0,
+        method: str = 'l2',
+        *,
+        shared: Union[str, bool] = False,
+        shared_field: str = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -1379,6 +1758,9 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
             Max or Min/Max disk radius, sampled from a smooth random field.
         shape : int or sequence[int]
             Number of control points in the random field
+        value : float or int or {'min', 'max', 'rand'}
+            Value to set in the disks. If 'rand', a random value in the
+            input range is used for each disk.
         method : {'conv', 'l1', 'l2'}
             Method used to compute the distance map
         returns : [list or dict of] {'input', 'output', 'disks'}

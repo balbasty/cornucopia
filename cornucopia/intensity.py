@@ -2,6 +2,7 @@ __all__ = [
     'AddValueTransform',
     'MulValueTransform',
     'AddMulTransform',
+    'ReturnValueTransform',
     'FillValueTransform',
     'ClipTransform',
     'BaseFieldTransform',
@@ -21,31 +22,48 @@ __all__ = [
 ]
 # stdlib
 import math
+from math import inf
+from numbers import Number
+from typing import Callable, Dict, Tuple, Union, List, Optional
 
 # dependencies
 import interpol
 import torch
+from torch import Tensor
 from torch.nn.functional import interpolate
 
 # internals
-from .baseutils import prepare_output
-from .base import FinalTransform, NonFinalTransform
+from .baseutils import Returned, prepare_output
+from .base import Transform, FinalTransform, NonFinalTransform
 from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
 from .utils.smart_inplace import add_, mul_, div_, pow_
 from .utils.compat import clamp
 
+# typing
+_NumberOrTensor = Union[Number, Tensor]
+_UnaryOperator = Callable[[Tensor], Tensor]
+_BinaryOperator = Callable[[Tensor, _NumberOrTensor], Tensor]
+
+
 
 class OpConstTransform(FinalTransform):
     """Base class for arithmetic operations with a constant value"""
-    _op = None
-    _inv = {
+
+    _op: Optional[_BinaryOperator] = None
+    _inv: Dict[_BinaryOperator, _UnaryOperator] = {
         torch.add: lambda x: -x,
         torch.mul: lambda x: 1/x,
     }
 
-    def __init__(self, value, op=None, value_name='value', **kwargs):
+    def __init__(
+        self,
+        value: _NumberOrTensor,
+        op: Optional[_BinaryOperator] = None,
+        value_name: str = 'value',
+        **kwargs
+    ):
         """
         Parameters
         ----------
@@ -61,7 +79,7 @@ class OpConstTransform(FinalTransform):
         self.op = op or self._op
         self.value_name = value_name
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         value = self.value
         if torch.is_tensor(value):
             value = value.to(x)
@@ -70,7 +88,7 @@ class OpConstTransform(FinalTransform):
             {'input': x, 'output': y, self.value_name: value}, self.returns
         )
 
-    def make_inverse(self):
+    def make_inverse(self) -> Transform:
         inv = self._inv[self.op]
         return type(self)(
             inv(self.value), **self.get_prm(), value_name=self.value_name
@@ -79,19 +97,25 @@ class OpConstTransform(FinalTransform):
 
 class AddValueTransform(OpConstTransform):
     """Add a constant value"""
-    _op = torch.add
+    _op: _BinaryOperator = torch.add
 
 
 class MulValueTransform(OpConstTransform):
     """Multiply with a constant value"""
-    _op = torch.mul
+    _op: _BinaryOperator = torch.mul
 
 
 class FillValueTransform(FinalTransform):
     """Fills the tensor with a value inside a mask"""
 
-    def __init__(self, mask, value, mask_name='mask', value_name='value',
-                 **kwargs):
+    def __init__(
+        self,
+        mask: Tensor,
+        value: _NumberOrTensor,
+        mask_name: str = 'mask',
+        value_name: str = 'value',
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -110,7 +134,7 @@ class FillValueTransform(FinalTransform):
         self.mask_name = mask_name
         self.value_name = value_name
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         mask, value = self.mask, self.value
         mask = mask.to(x.device)
         if torch.is_tensor(value):
@@ -124,10 +148,43 @@ class FillValueTransform(FinalTransform):
         )
 
 
+class ReturnValueTransform(FinalTransform):
+    """Fills the tensor with a value inside a mask"""
+
+    def __init__(
+        self,
+        value: _NumberOrTensor,
+        value_name: str = 'output',
+        dtype: Optional[torch.dtype] = None,
+        **kwargs
+    ) -> None:
+        """
+        Parameters
+        ----------
+        value : number or tensor
+            right-hand side of the operation
+        value_name : str
+            Name used when returning the rhs value
+        """
+        super().__init__(**kwargs)
+        self.value = value
+        self.value_name = value_name
+        self.dtype = dtype
+
+    def xform(self, x: Tensor) -> Returned:
+        dtype = self.dtype or x.dtype
+        return torch.as_tensor(self.value, dtype=dtype, device=x.device)
+
+
 class AddMulTransform(FinalTransform):
     """Constant intensity affine transform: `y = x * slope + offset`"""
 
-    def __init__(self, slope=1, offset=0, **kwargs):
+    def __init__(
+        self,
+        slope: _NumberOrTensor = 1,
+        offset: _NumberOrTensor = 0,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -140,7 +197,7 @@ class AddMulTransform(FinalTransform):
         self.slope = slope
         self.offset = offset
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         slope, offset = self.slope, self.offset
         if torch.is_tensor(slope):
             slope = slope.to(x)
@@ -152,7 +209,7 @@ class AddMulTransform(FinalTransform):
             self.returns
         )
 
-    def make_inverse(self):
+    def make_inverse(self) -> 'AddMulTransform':
         return AddMulTransform(
             1/self.slope, -self.offset/self.slope, **self.get_prm()
         )
@@ -161,20 +218,25 @@ class AddMulTransform(FinalTransform):
 class ClipTransform(FinalTransform):
     """Clip extremum values"""
 
-    def __init__(self, vmin=None, vmax=None, **kwargs):
+    def __init__(
+        self,
+        vmin: Optional[_NumberOrTensor] = None,
+        vmax: Optional[_NumberOrTensor] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        vmin : number or tensor
+        vmin : number or tensor, optional
             Min value
-        vmax : number or tensor
-            Max valur
+        vmax : number or tensor, optional
+            Max value
         """
         super().__init__(**kwargs)
         self.vmin = vmin
         self.vmax = vmax
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         vmin, vmax = self.vmin, self.vmax
         if torch.is_tensor(vmin):
             vmin = vmin.to(x)
@@ -192,14 +254,22 @@ class RandomMulTransform(RandomizedTransform):
     Random multiplicative transform.
     """
 
-    def __init__(self, value=(0.5, 2), *, shared=True, **kwargs):
-        """
+    Final = Next = MulValueTransform
+    """The transform type returned by `make_final`."""
 
+    def __init__(
+        self,
+        value: Union[Sampler, float, Tuple[float, float]] = (0.5, 2),
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
+        """
         Parameters
         ----------
-        value : Sampler or [pair of] float
+        value : Sampler | [pair of] float
             Bound for multiplicative value
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Apply same transform to all images/channels
         """
         super().__init__(
@@ -215,14 +285,22 @@ class RandomAddTransform(RandomizedTransform):
     Random additive transform.
     """
 
-    def __init__(self, value=1, *, shared=True, **kwargs):
-        """
+    Final = Next = AddValueTransform
+    """The transform type returned by `make_final`."""
 
+    def __init__(
+        self,
+        value: Union[Sampler, float, Tuple[float, float]] = 1,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
+        """
         Parameters
         ----------
-        value : Sampler or [pair of] float
+        value : Sampler | [pair of] float
             Bound for additive value
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Apply same transform to all images/channels
         """
         super().__init__(
@@ -238,16 +316,26 @@ class RandomAddMulTransform(RandomizedTransform):
     Random intensity affine transform.
     """
 
-    def __init__(self, slope=1, offset=0.5, *, shared=True, **kwargs):
+    Final = Next = AddMulTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        slope: Union[Sampler, float, Tuple[float, float]] = 1,
+        offset: Union[Sampler, float, Tuple[float, float]] = 0.5,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        slope : Sampler or [pair of] float
+        slope : Sampler | [pair of] float
             Bound for slope
-        offset : Sampler or [pair of] float
+        offset : Sampler | [pair of] float
             Bound for offset
-        shared : {'channels', 'tensors', 'channels+tensors', None}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Apply same transform to all images/channels
         """
         super().__init__(
@@ -262,21 +350,26 @@ class RandomAddMulTransform(RandomizedTransform):
 class SplineUpsampleTransform(FinalTransform):
     """Upsample a field using spline interpolation"""
 
-    def __init__(self, order=3, prefilter=False, **kwargs):
+    def __init__(
+        self,
+        order: int = 3,
+        prefilter: bool = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
         order : int
             Spline interpolation order
         prefilter : bool
-            Splie prefiltering
+            Spline prefiltering
             (True for interpolation, False for spline evaluation)
         """
         super().__init__(**kwargs)
         self.order = order
         self.prefilter = prefilter
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Tensor:
         fullshape = x.shape[1:]
         if self.order == 1:
             mode = ('trilinear' if len(fullshape) == 3 else
@@ -297,12 +390,23 @@ class SplineUpsampleTransform(FinalTransform):
 class BaseFieldTransform(NonFinalTransform):
     """Base class for transforms that sample a smooth field"""
 
-    finalklass = AddValueTransform
-    value_name = 'field'
+    Final = Next = AddValueTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, shape=5, vmin=0, vmax=1, order=3,
-                 slice=None, thickness=None,
-                 *, shared=False, **kwargs):
+    value_name: str = 'field'
+
+    def __init__(
+        self,
+        shape: Union[int, List[int]] = 5,
+        vmin: float= 0 ,
+        vmax: float = 1,
+        order: int = 3,
+        slice: Optional[int] = None,
+        thickness: Optional[int] = None,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -335,8 +439,38 @@ class BaseFieldTransform(NonFinalTransform):
         self.slice = slice
         self.thickness = thickness
 
-    def make_field(self, batch, smallshape, fullshape=None, **backend):
-        """Generate the random coefficients"""
+    def make_field(
+        self,
+        batch: int,
+        smallshape: List[int],
+        fullshape: Optional[List[int]] = None,
+        **backend
+    ) -> None:
+        """Generate the random coefficients.
+
+        Parameters
+        ----------
+        batch : int
+            Number of fields to generate
+        smallshape : list of int
+            Number of spline control points
+        fullshape : list of int, optional
+            If given, the coefficients will be upsampled to this shape.
+
+        Other Parameters
+        ----------------
+        dtype : torch.dtype
+            Data type of the generated field.
+        device : torch.device | str
+            Device on which to generate the field.
+
+        Returns
+        -------
+        field : (batch, *smallshape) tensor | (batch, *fullshape) tensor
+            If `fullshape` is given, returns the upsampled field of values.
+            Otherise, returns the spline coefficients.
+
+        """
         smallshape = ensure_list(smallshape, len(fullshape))
         smallshape = [min(small, full) for small, full
                       in zip(smallshape, fullshape)]
@@ -347,24 +481,37 @@ class BaseFieldTransform(NonFinalTransform):
             b = self.upsample_field(b, fullshape)
         return b
 
-    def upsample_field(self, coeff, fullshape):
-        """Resize spline coefficients to full size"""
+    def upsample_field(self, coeff: Tensor, shape: List[int]) -> Tensor:
+        """Compute the full-sized field from its spline coefficients.
+
+        Parameters
+        ----------
+        coeff : (batch, *smallshape) tensor
+            Spline coefficients
+        shape : list of int
+            Target shape for the upsampled field
+
+        Returns
+        -------
+        field : (batch, *shape) tensor
+            Upsampled field of values
+        """
         if self.order == 1:
-            mode = ('trilinear' if len(fullshape) == 3 else
-                    'bilinear' if len(fullshape) == 2 else
+            mode = ('trilinear' if len(shape) == 3 else
+                    'bilinear' if len(shape) == 2 else
                     'linear')
             b = interpolate(
-                coeff.unsqueeze(0), fullshape, mode=mode,
+                coeff.unsqueeze(0), shape, mode=mode,
                 align_corners=True
             ).squeeze(-0)
         else:
             b = interpol.resize(
-                coeff, shape=fullshape, interpolation=self.order,
+                coeff, shape=shape, interpolation=self.order,
                 prefilter=False
             )
         return b
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -450,31 +597,48 @@ class BaseFieldTransform(NonFinalTransform):
 
         b = add_(mul_(b, self.vmax-self.vmin), self.vmin)
 
-        return self.finalklass(
+        return self.Final(
             b, value_name=self.value_name, **self.get_prm()
         ).make_final(x, max_depth-1)
 
 
 class MulFieldTransform(BaseFieldTransform):
     """Smooth multiplicative (bias) field"""
-    finalklass = MulValueTransform
+
+    Final = Next = MulValueTransform
+    """The transform type returned by `make_final`."""
 
 
 class RandomMulFieldTransform(NonFinalTransform):
     """Random multiplicative bias field transform"""
 
-    def __init__(self, shape=8, vmax=1, order=3, symmetric=False, *,
-                 shared=False, shared_field=None, **kwargs):
+    Next = MulFieldTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = MulValueTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        shape: Union[Sampler, int] = 8,
+        vmax: Union[Sampler, float] = 1,
+        order: int = 3,
+        symmetric: Union[bool, float] = False,
+        *,
+        shared: Union[str, bool] = False,
+        shared_field: Union[str, bool, None] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        shape : Sampler or int
+        shape : Sampler | int
             Sampler or Upper bound for number of control points
-        vmax : Sampler or float
+        vmax : Sampler | float
             Sampler or Upper bound for maximum value
         order : int
             Spline order
-        symmetric : bool or float
+        symmetric : bool | float
             If a float, the bias field will take values in
             `(symmetric-vmax, symmetric+vmax)`.
             If False, it will take values in `(0, vmax)`.
@@ -484,12 +648,12 @@ class RandomMulFieldTransform(NonFinalTransform):
         ------------------
         returns : [list or dict of] {'input', 'output', 'field'}
             Which tensor(s) to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
-        """
+        """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.vmax = Uniform.make(make_range(0, vmax))
         self.shape = RandInt.make(make_range(2, shape))
@@ -497,7 +661,7 @@ class RandomMulFieldTransform(NonFinalTransform):
         self.symmetric = symmetric
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         vmax, shape, order = self.vmax, self.shape, self.order
         shared_field = self.shared_field
         if isinstance(vmax, Sampler):
@@ -521,15 +685,31 @@ class RandomMulFieldTransform(NonFinalTransform):
 class RandomSlicewiseMulFieldTransform(NonFinalTransform):
     """Random multiplicative bias field transform, per slice or slab"""
 
-    def __init__(self, shape=8, vmax=1, order=3, slice=None, thickness=32,
-                 shape_through=None, *, shared=False, shared_field=None,
-                 **kwargs):
+    Next = MulFieldTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = MulValueTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
+    def __init__(
+        self,
+        shape: Union[Sampler, int] = 8,
+        vmax: Union[Sampler, float] = 1,
+        order: int = 3,
+        slice: Optional[int] = None,
+        thickness: Union[Sampler, int] = 32,
+        shape_through: Optional[Union[Sampler, int]] = None,
+        *,
+        shared: Union[str, bool] = False,
+        shared_field: Union[str, bool, None] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        shape : Sampler or int
+        shape : Sampler | int
             Sampler or Upper bound for number of control points
-        vmax : Sampler or float
+        vmax : Sampler | float
             Sampler or Upper bound for maximum value
         order : int
             Spline order
@@ -537,18 +717,18 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
             Slice axis. If None, sample one randomly
         thickness:
             Sampler or Upper bound for slice thickness
-        shape_through : Sampler or int
+        shape_through : Sampler | int
             Sampler or Upper bound for number of control points
             along the slice direction. If None, same as `shape`.
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
-        """
+        """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         if shape_through is not None:
             shape_through = RandInt.make(make_range(1, shape_through))
@@ -560,7 +740,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         self.shape_through = shape_through
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -614,31 +794,42 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
 
 class AddFieldTransform(BaseFieldTransform):
     """Smooth additive (bias) field"""
-    finalklass = AddValueTransform
+
+    Final = Next = AddValueTransform
+    """The transform type returned by `make_final`."""
 
 
 class RandomAddFieldTransform(NonFinalTransform):
     """Random additive bias field transform"""
 
-    def __init__(self, shape=8, vmin=-1, vmax=1, order=3, *,
-                 shared=False, shared_field=None, **kwargs):
+    def __init__(
+        self,
+        shape: Union[Sampler, int] = 8,
+        vmin: Union[Sampler, float] = -1,
+        vmax: Union[Sampler, float] = 1,
+        order: Union[Sampler, int] = 3,
+        *,
+        shared: Union[str, bool] = False,
+        shared_field: Union[str, bool, None] = None,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
-        shape : Sampler or int
+        shape : Sampler | int
             Sampler or Upper bound for number of control points
-        vmin : Sampler or float
+        vmin : Sampler | float
             Sampler or Lower bound for minimum value
-        vmax : Sampler or float
+        vmax : Sampler | float
             Sampler or Upper bound for maximum value
-        order : int
+        order : Sampler | int
             Spline order
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
         """
@@ -649,7 +840,7 @@ class RandomAddFieldTransform(NonFinalTransform):
         self.order = Fixed.make(order)
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         vmin, vmax, shape, order = self.vmin, self.vmax, self.shape, self.order
         shared_field = self.shared_field
         if isinstance(vmin, Sampler):
@@ -668,14 +859,43 @@ class RandomAddFieldTransform(NonFinalTransform):
 
 
 class GammaFinalTransform(FinalTransform):
+    """Gamma correction with fixed parameters.
 
-    def __init__(self, gamma, vmin, vmax, **kwargs):
+    The transform is defined as:
+
+    ```python
+    y = (x-vmin) / (vmax-vmin) ** gamma * (vmax-vmin) + vmin
+    ```
+
+    In this transform, `vmin` and `vmax` are pre-calculated and fixed,
+    whereas in `GammaTransform`, they are computed from the image intensities.
+    """
+
+    _ScalarOrVector = Union[float, List[float], Tensor]
+
+    def __init__(
+        self,
+        gamma: _ScalarOrVector = 1,
+        vmin: _ScalarOrVector = 0,
+        vmax: _ScalarOrVector = 1,
+        **kwargs
+    ):
+        """
+        Parameters
+        ----------
+        gamma : number | (C,) list[number] | (C,) tensor
+            Exponent of the Gamma transform
+        vmin : number | (C,) list[number] | (C,) tensor
+            Minimum value for the transform
+        vmax : number | (C,) list[number] | (C,) tensor
+            Maximum value for the transform
+        """
         super().__init__(**kwargs)
         self.gamma = gamma
         self.vmin = vmin
         self.vmax = vmax
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         gamma, vmin, vmax = self.gamma, self.vmin, self.vmax
         if torch.is_tensor(gamma):
             gamma = gamma.detach().tolist()
@@ -685,7 +905,7 @@ class GammaFinalTransform(FinalTransform):
             vmax = vmax.detach().tolist()
         return f"{type(self).__name__}(gamma={gamma}, vmin={vmin}, vmax={vmax})"
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
         vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
         gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
@@ -727,26 +947,34 @@ class GammaTransform(NonFinalTransform):
     1. https://en.wikipedia.org/wiki/Gamma_correction
     """
 
-    Final = GammaFinalTransform
+    Final = Next = GammaFinalTransform
+    """The transform type returned by `make_final`."""
 
-    def __init__(self, gamma=1, vmin=None, vmax=None,
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        gamma: float = 1,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
+        *,
+        shared: Union[str, bool] = False,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
         gamma : float
             Exponent of the Gamma transform
-        vmin : float
+        vmin : float | None
             Value to use as the minimum (default: x.min())
-        vmax : float
+        vmax : float | None
             Value to use as the maximum (default: x.max())
         returns : [list or dict] {'input', 'output', 'vmin', 'vmax', 'gamma'}
             Which tensors to return
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Use the same vmin/vmax for all channels
 
         """
@@ -755,7 +983,7 @@ class GammaTransform(NonFinalTransform):
         self.vmin = vmin
         self.vmax = vmax
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -785,6 +1013,12 @@ class RandomGammaTransform(NonFinalTransform):
     Random Gamma transform.
     """
 
+    Next = GammaTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = GammaFinalTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
+
     def __init__(self, gamma=(0.5, 2), *, shared=False, shared_minmax=None,
                  **kwargs):
         """
@@ -805,7 +1039,7 @@ class RandomGammaTransform(NonFinalTransform):
         self.gamma = Uniform.make(kwargs.pop('value', gamma))
         self.shared_minmax = self._prepare_shared(shared_minmax)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         gamma = self.gamma
         if isinstance(gamma, Sampler):
             gamma = gamma()
@@ -822,7 +1056,13 @@ class ZTransform(NonFinalTransform):
     Z-transform the data -> zero mean, unit standard deviation
     """
 
-    def __init__(self, mu=0, sigma=1, *, shared=False, **kwargs):
+    Final = Next = AddMulTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self, mu: float = 0, sigma: float = 1,
+        *, shared: Union[str, bool] = False, **kwargs
+    ):
         """
         Parameters
         ----------
@@ -840,7 +1080,7 @@ class ZTransform(NonFinalTransform):
         self.mu = mu
         self.sigma = sigma
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared:
@@ -860,8 +1100,19 @@ class ZTransform(NonFinalTransform):
 class QuantileTransform(NonFinalTransform):
     """Match lower and upper quantiles to (0, 1)"""
 
-    def __init__(self, pmin=0.01, pmax=0.99, vmin=0, vmax=1,
-                 clip=False, max_samples=10000, **kwargs):
+    Final = Next = AddMulTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(
+        self,
+        pmin: float = 0.01,
+        pmax: float = 0.99,
+        vmin: float = 0,
+        vmax: float = 1,
+        clip: bool = False,
+        max_samples: int = 10000,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -876,6 +1127,8 @@ class QuantileTransform(NonFinalTransform):
             Upper target value
         clip : bool
             Clip values outside (vmin, vmax)
+        max_samples : int
+            Maximum number of pixels to use for quantile estimation (for speed)
         """
         super().__init__(**kwargs)
         self.pmin = pmin
@@ -885,7 +1138,7 @@ class QuantileTransform(NonFinalTransform):
         self.clip = clip
         self.max_samples = max_samples
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -923,7 +1176,10 @@ class QuantileTransform(NonFinalTransform):
 class MinMaxTransform(NonFinalTransform):
     """Match min and max values to (0, 1)"""
 
-    def __init__(self, vmin=0, vmax=1, **kwargs):
+    Final = Next = AddMulTransform
+    """The transform type returned by `make_final`."""
+
+    def __init__(self, vmin: float = 0, vmax: float = 1, **kwargs) -> None:
         """
 
         Parameters
@@ -939,7 +1195,7 @@ class MinMaxTransform(NonFinalTransform):
         self.vmin = vmin
         self.vmax = vmax
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
 

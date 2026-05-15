@@ -59,6 +59,9 @@ class FlipTransform(FinalTransform):
 class RandomFlipTransform(NonFinalTransform):
     """Randomly flip one or more axes."""
 
+    Final = Next = FlipTransform
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
         axes: Union[Sampler, List[int], int] = None,
@@ -130,6 +133,9 @@ class PermuteAxesTransform(FinalTransform):
 
 class RandomPermuteAxesTransform(NonFinalTransform):
     """Randomly permute axes."""
+
+    Final = Next = PermuteAxesTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -232,6 +238,9 @@ class Rot180Transform(Rot90Transform):
 
 class RandomRot90Transform(NonFinalTransform):
     """Random set of 90 transforms."""
+
+    Final = Next = Rot90Transform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -337,6 +346,9 @@ class CropPadTransform(FinalTransform):
 class PatchTransform(NonFinalTransform):
     """Extract a patch from the volume"""
 
+    Final = Next = CropPadTransform
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
         shape: Union[int, List[int]] = 64,
@@ -397,6 +409,12 @@ class RandomPatchTransform(NonFinalTransform):
     original field of view (unless the patch size is larger than the
     input shape).
     """
+
+    Next = PatchTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = CropPadTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
         self,
@@ -494,6 +512,9 @@ class CropTransform(NonFinalTransform):
 class PadTransform(NonFinalTransform):
     """Pad a tensor by some amount"""
 
+    Final = Next = CropPadTransform
+    """The transform type returned by `make_final`."""
+
     def __init__(
         self,
         padding: Union[int, float, List[Union[int, float]]],
@@ -561,6 +582,12 @@ class PadTransform(NonFinalTransform):
 
 class PowerTwoTransform(NonFinalTransform):
     """Pad the volume such that the tensor shape can be divided by 2**x"""
+
+    Next = PatchTransform
+    """The transform type returned by `make_final(..., max_depth=1)`."""
+
+    Final = CropPadTransform
+    """The transform type returned by `make_final(..., max_depth=inf)`."""
 
     def __init__(
         self,

@@ -64,7 +64,8 @@ class ApplyArrayCoilTransform(FinalTransform):
 class ArrayCoilTransform(NonFinalTransform):
     """Generate and apply random coil sensitivities (real or complex)"""
 
-    Final = ApplyArrayCoilTransform
+    Final = Next = ApplyArrayCoilTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -183,7 +184,7 @@ class IntraScanMotionFinalTransform(FinalTransform):
         axis: int = -1,
         freq: bool = False,
         **kwargs
-    ):
+    ) -> None:
         """
         Parameters
         ----------
@@ -211,7 +212,7 @@ class IntraScanMotionFinalTransform(FinalTransform):
         self.axis = axis
         self.freq = freq
 
-    def xform(self, x):
+    def xform(self, x: Tensor) -> Returned:
         motions = self.motion
         patterns = self.patterns.to(x.device)
 
@@ -285,7 +286,8 @@ class IntraScanMotionFinalTransform(FinalTransform):
 class IntraScanMotionTransform(NonFinalTransform):
     """Model intra-scan motion"""
 
-    Final = IntraScanMotionFinalTransform
+    Final = Next = IntraScanMotionFinalTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -399,7 +401,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             pattern = self.pattern
         return pattern.to(device, torch.bool)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         # compute number of motion shots
         shots = min(self.shots, x.shape[self.axis])
 
@@ -417,7 +419,7 @@ class IntraScanMotionTransform(NonFinalTransform):
         if self.coils:
             sens = self.coils.make_final(x)
 
-        return self.Final(
+        return self.Next(
             motion, pattern, sens, self.axis, self.freq, **self.get_prm()
         ).make_final(x, max_depth-1)
 

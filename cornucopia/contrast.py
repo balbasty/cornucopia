@@ -102,7 +102,8 @@ class ContrastMixtureTransform(NonFinalTransform):
 
     """
 
-    Final = ContrastMixtureFinalTransform
+    Final = Next = ContrastMixtureFinalTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(
         self,
@@ -206,7 +207,8 @@ class ContrastLookupTransform(NonFinalTransform):
     Segment intensities into equidistant bins and change their mean value.
     """
 
-    Final = ContrastLookupFinalTransform
+    Final = Next = ContrastLookupFinalTransform
+    """The transform type returned by `make_final`."""
 
     def __init__(self, nk=16, keep_background=True,
                  *, shared=False, **kwargs):

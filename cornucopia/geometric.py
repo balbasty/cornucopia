@@ -96,18 +96,36 @@ class ApplyElasticTransform(FinalTransform):
         self.backend = dict(dtype=dtype, device=device)
 
     def make_flow(
-        self, control: Tensor, fullshape: List[int]
+        self, shape: List[int], control: Optional[Tensor] = None,
     ) -> Tensor:
+        """Make a flow field from its spline control points.
+
+        Parameters
+        ----------
+        shape : list of int
+            Shape of the output flow field
+        control : (C, D, *spatial) tensor, optional
+            Spline control points
+            (if not provided, `self.control` will be used)
+
+        Returns
+        -------
+        flow : (C, D, *shape) tensor
+            The flow field
+
+        """
+        if control is None:
+            control = self.control
         if self.order == 1:
-            mode = ('trilinear' if len(fullshape) == 3 else
-                    'bilinear' if len(fullshape) == 2 else
+            mode = ('trilinear' if len(shape) == 3 else
+                    'bilinear' if len(shape) == 2 else
                     'linear')
             flow = interpolate(
-                control[None], fullshape, mode=mode, align_corners=True
+                control[None], shape, mode=mode, align_corners=True
             )[0]
         else:
             flow = interpol.resize(
-                control, shape=fullshape, interpolation=self.order,
+                control, shape=shape, interpolation=self.order,
                 prefilter=False
             )
         if self.steps:
@@ -127,7 +145,7 @@ class ApplyElasticTransform(FinalTransform):
         controls = cast_like(self.controls, x)
         required = return_requires(self.returns)
         if flow is None and ('flow' in required or 'output' in required):
-            flow = self.make_flow(controls, x.shape[1:])
+            flow = self.make_flow(x.shape[1:], controls)
         y = None
         if 'output' in required:
             mode = 'bilinear'
@@ -151,7 +169,7 @@ class ElasticTransform(NonFinalTransform):
     randomly sampled from a uniform distribution.
     """
 
-    Final = ApplyElasticTransform
+    Final = Next = ApplyElasticTransform
     """The transform type returned by `make_final`."""
 
     def __init__(
@@ -450,7 +468,27 @@ class ApplyAffineTransform(FinalTransform):
         self.nearest_if_label = nearest_if_label
         self.backend = dict(dtype=dtype, device=device)
 
-    def make_flow(self, matrix: Tensor, shape: List[int]) -> Tensor:
+    def make_flow(
+        self, shape: List[int], matrix: Optional[Tensor] = None
+    ) -> Tensor:
+        """Make a flow field from an affine matrix.
+
+        Parameters
+        ----------
+        shape : list of int
+            Shape of the output flow field
+        matrix : ([C], D+1, D+1) tensor, optional
+            Affine matrix
+            (if not provided, `self.matrix` will be used)
+
+        Returns
+        -------
+        flow : ([C], D, *shape) tensor
+            The flow field
+
+        """
+        if matrix is None:
+            matrix = self.matrix
         return warps.affine_flow(matrix, shape).movedim(-1, 0)
 
     def xform(self, x: Tensor) -> Returned:
@@ -459,7 +497,7 @@ class ApplyAffineTransform(FinalTransform):
         matrix = cast_like(self.matrix, x)
         required = return_requires(self.returns)
         if flow is None and ('flow' in required or 'output' in required):
-            flow = self.make_flow(matrix, x.shape[1:])
+            flow = self.make_flow(x.shape[1:], matrix)
         y = None
         if 'output' in required:
             mode = 'bilinear'
@@ -1323,7 +1361,27 @@ class ApplySlicewiseAffineTransform(FinalTransform):
         self.subsample = subsample
         self.bound = bound
 
-    def make_flow(self, A: Tensor, shape: List[int]) -> Tensor:
+    def make_flow(
+        self, shape: List[int], matrix: Optional[Tensor] = None
+    ) -> Tensor:
+        """
+        Compute the flow field for a given shape and matrix.
+
+        Parameters
+        ----------
+        shape : list of int
+            Shape of the output flow field
+        matrix : (Nz, D+1, D+1) tensor, optional
+            Slicewise affine matrix
+            (if not provided, `self.matrix` will be used)
+
+        Returns
+        -------
+        flow : (D, *shape) tensor
+            The flow field
+        """
+        if matrix is None:
+            matrix = self.matrix
         ndim = len(shape)
         z = self.slice - ndim if self.slice >= 0 else self.slice
         oshape = list(shape)
@@ -1333,7 +1391,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
 
         slicer = [slice(None, None, self.subsample)] * ndim
         slicer = (*slicer, slice(None))
-        id = warps.identity(shape, dtype=A.dtype, device=A.device)
+        id = warps.identity(shape, dtype=matrix.dtype, device=matrix.device)
         id = id[slicer]
         flow = id.unfold(
             z-1,
@@ -1342,8 +1400,8 @@ class ApplySlicewiseAffineTransform(FinalTransform):
         ).movedim(-1, 0)  # [spacing, *sshape, D]
         flow = flow.movedim(-1, 0).movedim(z, -1).movedim(0, -1)
         # ^ [spacing, *oshape, nb_slices, D]
-        flow = A[:, :-1, :-1].matmul(flow.unsqueeze(-1)).squeeze(-1)
-        flow += A[:, :-1, -1]
+        flow = matrix[:, :-1, :-1].matmul(flow.unsqueeze(-1)).squeeze(-1)
+        flow += matrix[:, :-1, -1]
         # flow = flow.movedim(-1, 0).movedim(-1, zindex).movedim(0, -1)
         flow = flow.transpose(0, -1).flatten(-2).movedim(-1, z).movedim(0, -1)
         # ^ [*oshape, D]
@@ -1356,7 +1414,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
         matrix = cast_like(self.matrix, x)
 
         if flow is None:
-            flow = self.make_flow(matrix, list(x.shape[1:]))
+            flow = self.make_flow(x.shape[1:], matrix)
 
         # compute shape
         fullshape = list(x.shape[1:])
