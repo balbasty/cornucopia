@@ -1262,12 +1262,24 @@ class PowerOfSamplers(CombinedSamplers):
 
 
 # Aliases
+
 min = MinimumOfSamplers
+"""Alias for [MinimumOfSamplers][]"""
+
 max = MaximumOfSamplers
+"""Alias for [MinimumOfSamplers][]"""
+
 sum = SumOfSamplers
+"""Alias for [MinimumOfSamplers][]"""
+
 exp = ExponentiatedSampler
+"""Alias for [ExponentiatedSampler][]"""
+
 log = LogarithmOfSampler
+"""Alias for [LogarithmOfSampler][]"""
+
 pow = PowerOfSamplers
+"""Alias for [PowerOfSamplers][]"""
 
 
 @overload

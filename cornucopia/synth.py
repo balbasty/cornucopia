@@ -132,7 +132,7 @@ class IntensityTransform(SequentialTransform):
 
     It is also possible to directly provide the probability distribution
     from which to sample the parametes. In this case, it **must** be a
-    [cornucopia.random.Sampler][] instance.
+    [`Sampler`][cornucopia.random.Sampler] instance.
 
     Setting any argument to `False` disables the corresponding transform
     entirely.
