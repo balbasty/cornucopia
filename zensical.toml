@@ -81,16 +81,18 @@ show_root_heading = true
 show_overloads = true
 overloads_only = true
 
-[markdown_extensions.admonition]
-[markdown_extensions.pymdownx.details]
-[markdown_extensions.pymdownx.superfences]
-[markdown_extensions.pymdownx.tabbed]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.superfences]
+[project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
-[markdown_extensions.pymdownx.highlight]
+[project.markdown_extensions.pymdownx.highlight]
 anchor_linenums = true
 line_spans = "__span"
 pygments_lang_class = true
-[markdown_extensions.pymdownx.inlinehilite]
-[markdown_extensions.pymdownx.snippets]
-[markdown_extensions.pymdownx.arithmatex]
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.snippets]
+[project.markdown_extensions.pymdownx.arithmatex]
 generic = true
+[project.markdown_extensions.toc]
+toc_depth = 2
