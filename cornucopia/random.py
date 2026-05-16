@@ -1264,22 +1264,22 @@ class PowerOfSamplers(CombinedSamplers):
 # Aliases
 
 min = MinimumOfSamplers
-"""Alias for [MinimumOfSamplers][]"""
+"""Alias for [`MinimumOfSamplers`][cornucopia.random.MinimumOfSamplers]"""
 
 max = MaximumOfSamplers
-"""Alias for [MinimumOfSamplers][]"""
+"""Alias for [`MaximumOfSamplers`][cornucopia.random.MaximumOfSamplers]"""
 
 sum = SumOfSamplers
-"""Alias for [MinimumOfSamplers][]"""
+"""Alias for [`SumOfSamplers`][cornucopia.random.SumOfSamplers]"""
 
 exp = ExponentiatedSampler
-"""Alias for [ExponentiatedSampler][]"""
+"""Alias for [`ExponentiatedSampler`][cornucopia.random.ExponentiatedSampler]"""
 
 log = LogarithmOfSampler
-"""Alias for [LogarithmOfSampler][]"""
+"""Alias for [`LogarithmOfSampler`][cornucopia.random.LogarithmOfSampler]"""
 
 pow = PowerOfSamplers
-"""Alias for [PowerOfSamplers][]"""
+"""Alias for [`PowerOfSamplers`][cornucopia.random.PowerOfSamplers]"""
 
 
 @overload

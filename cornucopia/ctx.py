@@ -1,3 +1,4 @@
+"""This module contains context managers that modify the behavior of a transform."""
 __all__ = [
     'include',
     'exclude',

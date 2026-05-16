@@ -1,3 +1,4 @@
+"""This module contains meta-transforms that act on transforms."""
 __all__ = [
     'IdentityTransform',
     'SequentialTransform',

@@ -19,7 +19,7 @@ dependencies = [
     "numpy",
     "nibabel",
     "torch-interpol >= 0.3",
-    "torch-distmap",
+    "torch-distmap >= 0.3",
     "typing_extensions",
 ]
 

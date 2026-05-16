@@ -892,6 +892,13 @@ class SwitchTransform(SharedMixin, Transform):
             Roll the dice once for all input tensors
         """
         super().__init__(**kwargs)
+        if isinstance(transforms, dict):
+            if prob:
+                raise ValueError(
+                    "When `transforms` is a dict, `prob` should not be provided."
+                )
+            prob = list(transforms.values())
+            transforms = list(transforms.keys())
         self.shared = self._prepare_shared(shared)
         self.transforms = list(transforms)
         self.prob = prob or []
