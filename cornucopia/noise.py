@@ -21,6 +21,8 @@ import torch
 import typing_extensions as tx
 from torch import Tensor
 
+from cornucopia.utils.py import make_vector
+
 # internals
 from .baseutils import prepare_output
 from .base import FinalTransform, NonFinalTransform, PerChannelTransform, Transform
@@ -41,7 +43,6 @@ def _parentof(child):
     return decorator
 
 
-
 class GaussianNoiseFinalTransform(AddValueTransform):
     """Precomputed Gaussian noise transform"""
 
@@ -58,7 +59,7 @@ class GaussianNoiseTransform(NonFinalTransform):
 
     def __init__(
         self,
-        sigma: float = 0.1,
+        sigma: cct.VectorLike = 0.1,
         *,
         shared: cct.SharedType = False,
         **kwargs
@@ -66,8 +67,8 @@ class GaussianNoiseTransform(NonFinalTransform):
         """
         Parameters
         ----------
-        sigma : float
-            Standard deviation
+        sigma : float | list[float] | Tensor
+            Standard deviation [per channel].
 
         Other Parameters
         ------------------
@@ -88,8 +89,10 @@ class GaussianNoiseTransform(NonFinalTransform):
         dtype = x.dtype
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
+        sigma = make_vector(self.sigma, shape[0], device=x.device, dtype=dtype)
+        sigma = sigma.reshape(-1, *[1]*(x.ndim-1))
         noise = torch.randn(shape, dtype=dtype, device=x.device)
-        noise = mul_(noise, self.sigma)
+        noise = mul_(noise, sigma)
         return self.Next(
             noise, **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -108,7 +111,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
         self,
         sigma: cct.SamplerOrBound[float] = 0.1,
         *,
-        shared: cct.SharedType=False,
+        shared: cct.SharedType = False,
         shared_noise: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
@@ -126,7 +129,7 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
             Which tensors to return
         shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Use the same sd for all channels/tensors
-        shared_noise : {'channels', 'tensors', 'channels+tensors', '', None}
+        shared_noise : {'channels', 'tensors', 'channels+tensors', ''} | None | bool
             Use the exact same noise for all channels/tensors
         """
         super().__init__(GaussianNoiseTransform,
@@ -170,7 +173,7 @@ class ChiNoiseTransform(NonFinalTransform):
 
     def __init__(
         self,
-        sigma: float = 0.1,
+        sigma: cct.VectorLike = 0.1,
         nb_channels: int = 2,
         *,
         shared: cct.SharedType = False,
@@ -179,10 +182,10 @@ class ChiNoiseTransform(NonFinalTransform):
         """
         Parameters
         ----------
-        sigma : float
-            Standard deviation
+        sigma : float | list[float] | Tensor
+            Standard deviation [per channel].
         nb_channels : int
-            Number of independent channels
+            Number of independent noise channels
 
         Other Parameters
         ------------------
@@ -206,6 +209,9 @@ class ChiNoiseTransform(NonFinalTransform):
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
 
+        sigma = make_vector(self.sigma, shape[0], device=x.device, dtype=dtype)
+        sigma = sigma.reshape(-1, *[1]*(x.ndim-1))
+
         df = self.nb_channels
         mu = math.sqrt(2) * math.gamma((df+1)/2) / math.gamma(df/2)
         noise = 0
@@ -214,7 +220,7 @@ class ChiNoiseTransform(NonFinalTransform):
         noise = noise.sqrt_()
 
         # scale to reach target variance
-        sigma = self.sigma / math.sqrt(df - mu*mu)
+        sigma = sigma / math.sqrt(df - mu*mu)
         noise = mul_(noise, sigma)
 
         return self.Next(
@@ -235,7 +241,8 @@ class RandomChiNoiseTransform(RandomizedTransform):
         self,
         sigma: cct.SamplerOrBound[float] = 0.1,
         nb_channels: cct.SamplerOrBound[int] = 8,
-        *, shared: cct.SharedType = False,
+        *,
+        shared: cct.SharedType = False,
         shared_noise: tx.Optional[cct.SharedType] = None,
         **kwargs
     ) -> None:
@@ -329,6 +336,7 @@ class GFactorFinalTransform(NonFinalTransform):
 
 @_parentof(GFactorFinalTransform)
 class GFactorTransform(NonFinalTransform):
+    """Noise with spatially varying variance"""
 
     Final = Next = GFactorFinalTransform
     """The transform type returned by `make_final`."""
@@ -397,8 +405,8 @@ class GammaNoiseTransform(NonFinalTransform):
 
     def __init__(
         self,
-        sigma: float = 0.1,
-        mean: float = 1,
+        sigma: cct.VectorLike = 0.1,
+        mean: cct.VectorLike = 1,
         *,
         shared: cct.SharedType = False,
         **kwargs
@@ -406,10 +414,10 @@ class GammaNoiseTransform(NonFinalTransform):
         """
         Parameters
         ----------
-        sigma : float
-            Standard deviation
-        mean : float
-            Expected value
+        sigma : float | list[float] | Tensor
+            Standard deviation [per channel].
+        mean : float | list[float] | Tensor
+            Expected value [per channel].
 
         Other Parameters
         ------------------
@@ -428,12 +436,20 @@ class GammaNoiseTransform(NonFinalTransform):
         shape = list(x.shape)
         if 'channels' in self.shared:
             shape[0] = 1
-        var = self.sigma * self.sigma
-        beta = self.mean / var
-        alpha = self.mean * beta
-        alpha = torch.as_tensor(alpha, dtype=x.dtype, device=x.device)
-        beta = torch.as_tensor(beta, dtype=x.dtype, device=x.device)
-        noise = torch.distributions.Gamma(alpha, beta).rsample(shape)
+
+        dtype = x.dtype
+        if not dtype.is_floating_point:
+            dtype = torch.get_default_dtype()
+
+        sigma = make_vector(self.sigma, shape[0], device=x.device, dtype=dtype)
+        mean = make_vector(self.mean, shape[0], device=x.device, dtype=dtype)
+
+        var = sigma * sigma
+        beta = mean / var
+        alpha = mean * beta
+
+        noise = torch.distributions.Gamma(alpha, beta).rsample(shape[1:])
+        noise = noise.movedim(-1, 0)
         # ^ rsample() allows backprop, whereas sample() does not
         return self.Next(
             noise, **self.get_prm()

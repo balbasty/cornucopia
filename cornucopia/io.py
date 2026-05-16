@@ -56,6 +56,7 @@ class LoadTransform(FinalTransform):
     Load data from disk.
 
     Available loaders are:
+
     - `BabelLoader`: for medical image formats (nifti, mgz, minc, etc.)
     - `TiffLoader`: for TIFF files (including multi-page)
     - `PillowLoader`: for common image formats (png, jpg, etc., with optional rot90)
@@ -91,7 +92,7 @@ class LoadTransform(FinalTransform):
         ------------------
         to_ras : bool, default=True
             Reorient data so that it has a RAS layout.
-            Only used by `BabelLoader``.
+            Only used by `BabelLoader`.
         rot90 : bool, default=True
             Rotate by 90 degrees in-plane.
             Only used by `PillowLoader`.

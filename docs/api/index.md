@@ -13,7 +13,7 @@ Meta-transforms act on other transforms:
         options:
             heading_level: 3
 
-??? quote "<code>[cc.RandomizedTransform](special/#cornucopia.special.RandomizedTransform)(type[[Transform][cornucopia.base.Transform]], tuple[[Sampler][cornucopia.random.Sampler]], dict[str, [Sampler][cornucopia.random.Sampler]]])</code> <br/>Randomize the input parameters of a transform"
+??? quote "<code>[cc.RandomizedTransform](special/#cornucopia.special.RandomizedTransform)(type[[Transform][cornucopia.base.Transform]], tuple[[Sampler][cornucopia.random.Sampler]], dict[str, [Sampler][cornucopia.random.Sampler]])</code> <br/>Randomize the input parameters of a transform"
     ::: cornucopia.special.RandomizedTransform
         options:
             heading_level: 3
@@ -115,61 +115,248 @@ We define aliases for these meta-transforms under `cc.ctx`:
 
 ## [`cc.io`](io/): Data loaders and converters
 
-```python
-cc.ToTensorTransform(ndim=None, dtype=None, device=None)
-cc.LoadTransform(ndim=None, dtype=None, device=None)
-```
+??? quote "<code>[cc.ToTensorTransform](io/#cornucopia.io.ToTensorTransform)(ndim: int | None, dtype: [dtype][torch.dtype] | None, device: [device][torch.device] | None)</code> <br/>Ensure that an array is a tensor (with required properties)"
+    ::: cornucopia.io.ToTensorTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.LoadTransform](io/#cornucopia.io.LoadTransform)(ndim: int | None, dtype: [dtype][torch.dtype] | None, *, device: [device][torch.device] | None)</code> <br/>Load a tensor from disk"
+    ::: cornucopia.io.LoadTransform
+        options:
+            heading_level: 3
 
 ## [`cc.fov`](fov/): Modify the field-of-view
 
-```python
-cc.FlipTransform(axis=None, shared=True)
-cc.PatchTransform(shape=64, center=0, bound='dct2', shared=True)
-cc.RandomPatchTransform(patch_size: int or list[int], bound='dct2', shared=True)
-cc.CropTransform(cropping: int or float or list[int or float], unit='vox', side='both', shared=True)
-cc.PadTransform(padding: int or float or list[int or float], unit='vox', side='both', shared=True)
-cc.PowerTwoTransform(exponent=1, bound='dct2', shared='channels')
-```
+### Deterministic transforms
+
+??? quote "<code>[cc.FlipTransform](fov/#cornucopia.fov.FlipTransform)(axis: int | list[int] | None = None)</code> <br/>Flip one or more axes"
+    ::: cornucopia.fov.FlipTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.PermuteAxesTransform](fov/#cornucopia.fov.PermuteAxesTransform)(permutation: int | list[int] | None = None)</code> <br/>Permute axes"
+    ::: cornucopia.fov.PermuteAxesTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.Rot90Transform](fov/#cornucopia.fov.Rot90Transform)(axis: int | list[int] = 0, negative: bool | list[bool] = False)</code> <br/>Apply a 90 rotation along one or several axes"
+    ::: cornucopia.fov.Rot90Transform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.Rot180Transform](fov/#cornucopia.fov.Rot180Transform)(axis: int | list[int] = 0)</code> <br/>Apply a 180 rotation along one or several axes"
+    ::: cornucopia.fov.Rot180Transform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.CropPadTransform](fov/#cornucopia.fov.CropPadTransform)(crop: list[slice] = (), pad: list[int] = (), ...)</code> <br/>Crop and/or pad a tensor"
+    ::: cornucopia.fov.CropPadTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.CropTransform](fov/#cornucopia.fov.CropTransform)(cropping: number | list[number], unit: {'fov','vox'} = 'vox', side: {'pre','post','both'} = 'both')</code> <br/>Crop a tensor"
+    ::: cornucopia.fov.CropTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.PadTransform](fov/#cornucopia.fov.PadTransform)(padding: number | list[number], unit: {'fov','vox'} = 'vox', side: {'pre','post','both'} = 'both', ...)</code> <br/>Pad a tensor"
+    ::: cornucopia.fov.PadTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.PatchTransform](fov/#cornucopia.fov.PatchTransform)(shape: int | list[int] = 64, center: float | list[float] = 0, ...)</code> <br/>Extract a patch from the tensor"
+    ::: cornucopia.fov.PatchTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.PowerTwoTransform](fov/#cornucopia.fov.PowerTwoTransform)(exponent: int | list[int] = 1, ...)</code> <br/>Pad the volume such that the tensor shape can be divided by 2**x"
+    ::: cornucopia.fov.PowerTwoTransform
+        options:
+            heading_level: 3
+
+### Random transforms
+
+
+??? quote "<code>[cc.RandomFlipTransform](fov/#cornucopia.fov.RandomFlipTransform)(axes: [Sampler](random/cornucopia.random.Sampler) | int | list[int] | None = None, *, shared: bool | str = True)</code> <br/>Randomly flip one or more axes"
+    ::: cornucopia.fov.RandomFlipTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomPermuteAxesTransform](fov/#cornucopia.fov.RandomPermuteAxesTransform)(permutation: list[int] | None = None, *, shared: bool | str = True)</code> <br/>Randomly permute axes"
+    ::: cornucopia.fov.RandomPermuteAxesTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomRot90Transform](fov/#cornucopia.fov.RandomRot90Transform)(axes: int | list[int] | None = None, max_rot: [Sampler](random/cornucopia.random.Sampler) | int = 2, negative: bool | list[bool] = False, *, shared: bool | str = True)</code> <br/>Random set of 90 transforms"
+    ::: cornucopia.fov.RandomRot90Transform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomPatchTransform](fov/#cornucopia.fov.RandomPatchTransform)(shape: int | list[int], *, shared: bool | str = True)</code> <br/>Extract a random patch from the tensor"
+    ::: cornucopia.fov.RandomPatchTransform
+        options:
+            heading_level: 3
 
 ## [`cc.noise`](noise/): Inject noise
 
-```python
-cc.GaussianNoiseTransform(sigma=0.1, shared=False)
-cc.ChiNoiseTransform(sigma=0.1, nb_channels=2, shared=False)
-cc.GammaNoiseTransform(mean=1, sigma=0.1, shared=False)
-cc.GFactorTransform(noise: Transform, shape=5, vmin=1, vmax=4)
+### Deterministic parameters
 
-# randomized
-cc.RandomGaussianNoiseTransform(sigma=0.1, shared=False)
-cc.RandomChiNoiseTransform(sigma=0.1, nb_channels=8, shared=False)
-cc.RandomGammaNoiseTransform(mean=2, sigma=0.1, shared=False)
-```
+??? quote "<code>[cc.GaussianNoiseTransform](noise/#cornucopia.noise.GaussianNoiseTransform)(sigma: float | list[float] = 0.1, *, shared: bool | str = False)</code> <br/>Inject Gaussian noise"
+    ::: cornucopia.noise.GaussianNoiseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ChiNoiseTransform](noise/#cornucopia.noise.ChiNoiseTransform)(sigma: float | list[float] = 0.1, nb_channels: int = 2, *, shared: bool | str = False)</code> <br/>Inject non-central Chi noise"
+    ::: cornucopia.noise.ChiNoiseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.GammaNoiseTransform](noise/#cornucopia.noise.GammaNoiseTransform)(sigma: float | list[float] = 0.1, mean: float | list[float] = 1, *, shared: bool | str = False)</code> <br/>Inject Gamma noise"
+    ::: cornucopia.noise.GammaNoiseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.GFactorTransform](noise/#cornucopia.noise.GFactorTransform)(noise: [Transform](base/#cornucopia.base.Transform), shape: int = 5, vmin: float = 0.5, vmax: float = 1.5, order: int = 3, *, shared: bool | str = False)</code> <br/>Inject noise with spatially varying variance"
+    ::: cornucopia.noise.GFactorTransform
+        options:
+            heading_level: 3
+
+### Random parameters
+
+??? quote "<code>[cc.RandomGaussianNoiseTransform](noise/#cornucopia.noise.RandomGaussianNoiseTransform)(sigma: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, *, shared: bool | str = False)</code> <br/>Inject Gaussian noise with random parameters"
+    ::: cornucopia.noise.RandomGaussianNoiseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomChiNoiseTransform](noise/#cornucopia.noise.RandomChiNoiseTransform)(sigma: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, nb_channels: [Sampler](random/#cornucopia.random.Sampler) | int = 8, *, shared: bool | str = False)</code> <br/>Inject non-central Chi noise with random parameters"
+    ::: cornucopia.noise.RandomChiNoiseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomGammaNoiseTransform](noise/#cornucopia.noise.RandomGammaNoiseTransform)(sigma: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, mean: [Sampler](random/#cornucopia.random.Sampler) | float = [Fixed](random/#cornucopia.random.Fixed)(1), *, shared: bool | str = False)</code> <br/>Inject Gamma noise with random parameters"
+    ::: cornucopia.noise.RandomGammaNoiseTransform
+        options:
+            heading_level: 3
 
 ## [`cc.intensity`](intensity/): Modify image intensities
 
-```python
-cc.MultFieldTransform(shape=5, vmin=0, vmax=1, shared=False)
-cc.AddFieldTransform(shape=5, vmin=0, vmax=1, shared=False)
-cc.GlobalMultTransform(value=1, shared=False)
-cc.GlobalAdditiveTransform(value=0, shared=False)
-cc.GammaTransform(gamma=1, vmin=None, vmax=None, shared=False)
-cc.ZTransform(shared=False)
-cc.QuantileTransform(pmin=0.01, pmax=0.99, vmin=0, vmax=1, clamp=False, shared=False)
+### Deterministic transforms
 
-# randomized
-cc.RandomMultFieldTransform(shape=8, vmax=2, shared=False)
-cc.RandomAddFieldTransform(shape=8, vmin=-1, vmax=1, shared=False)
-cc.RandomGlobalMultTransform(value=(0.5, 2), shared=True)
-cc.RandomGlobalAdditiveTransform(value=1, shared=True)
-cc.RandomGammaTransform(gamma=(0.5, 2), vmin=None, vmax=None, shared=False)
-```
+??? quote "<code>[cc.AddValueTransform](intensity/#cornucopia.intensity.AddValueTransform)(value: float | list[float] | tensor)</code> <br/>Add a constant value"
+    ::: cornucopia.intensity.AddValueTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.MulValueTransform](intensity/#cornucopia.intensity.MulValueTransform)(value: float | list[float] | tensor)</code> <br/>Multiply by a constant value"
+    ::: cornucopia.intensity.MulValueTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.FillValueTransform](intensity/#cornucopia.intensity.FillValueTransform)(mask: tensor, value: float | list[float] | tensor)</code> <br/>Fill with a constant value"
+    ::: cornucopia.intensity.FillValueTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ReturnValueTransform](intensity/#cornucopia.intensity.ReturnValueTransform)(value: float | list[float] | tensor)</code> <br/>Return a constant value"
+    ::: cornucopia.intensity.ReturnValueTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.AddMulTransform](intensity/#cornucopia.intensity.AddMulTransform)(slope: float | list[float] | tensor = 1, offset: float | list[float] | tensor = 0)</code> <br/>Element wise affine transform"
+    ::: cornucopia.intensity.AddMulTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ClipTransform](intensity/#cornucopia.intensity.ClipTransform)(vmin: float | list[float] | tensor | None = None, vmax: float | list[float] | tensor | None = None)</code> <br/>Clip extremum values"
+    ::: cornucopia.intensity.ClipTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SplineUpsampleTransform](intensity/#cornucopia.intensity.SplineUpsampleTransform)(order: int = 3, prefilter: bool = False)</code> <br/>Upsample a field using spline interpolation"
+    ::: cornucopia.intensity.SplineUpsampleTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.GammaTransform](intensity/#cornucopia.intensity.GammaTransform)(gamma: float = 1, vmin: float = 0, vmax: float = 1)</code> <br/>Gamma correction"
+    ::: cornucopia.intensity.GammaTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ZTransform](intensity/#cornucopia.intensity.ZTransform)(mu: float = 0, sigma: float = 1, *, shared: bool | str = False)</code> <br/>Gamma correction"
+    ::: cornucopia.intensity.ZTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.QuantileTransform](intensity/#cornucopia.intensity.QuantileTransform)(pmin: float = 0.01, pmax: float = 0.99, vmin: float = 0, vmax: float = 1, clip: bool = False, *, shared: bool | str = False)</code> <br/>Match lower and upper quantiles to (0, 1)"
+    ::: cornucopia.intensity.QuantileTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.MinMaxTransform](intensity/#cornucopia.intensity.MinMaxTransform)(vmin: float = 0, vmax: float = 1, clip: bool = False, *, shared: bool | str = False)</code> <br/>Match min and max values to (0, 1)"
+    ::: cornucopia.intensity.MinMaxTransform
+        options:
+            heading_level: 3
+
+### Transforms with fixed parameters (but random coefficients)
+
+??? quote "<code>[cc.AddFieldTransform](intensity/#cornucopia.intensity.AddFieldTransform)(shape: int | list[int] = 5, vmin: float = 0, vmax: float = 1, order: int = 3, ...)</code> <br/>Smooth additive field"
+    ::: cornucopia.intensity.AddFieldTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.MulFieldTransform](intensity/#cornucopia.intensity.MulFieldTransform)(shape: int | list[int] = 5, vmin: float = 0, vmax: float = 1, order: int = 3, ...)</code> <br/>Smooth multiplicative field"
+    ::: cornucopia.intensity.MulFieldTransform
+        options:
+            heading_level: 3
+
+### Transforms with random parameters
+
+??? quote "<code>[cc.RandomAddTransform](intensity/#cornucopia.intensity.RandomAddTransform)(value: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = 1, *, shared: bool = False)</code> <br/>Add a random value"
+    ::: cornucopia.intensity.RandomAddTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomMulTransform](intensity/#cornucopia.intensity.RandomMulTransform)(value: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = (0.5, 2), *, bool | str: bool = False)</code> <br/>Multiply by a random value"
+    ::: cornucopia.intensity.RandomMulTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomAddMulTransform](intensity/#cornucopia.intensity.RandomAddMulTransform)(slope: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = 1, offset: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = 0.5, *, shared: bool | str = False)</code> <br/>Random element-wise affine transform"
+    ::: cornucopia.intensity.RandomAddMulTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomAddFieldTransform](intensity/#cornucopia.intensity.RandomAddFieldTransform)(shape: [Sampler](random/#cornucopia.random.Sampler) | int = 8, vmin: [Sampler](random/#cornucopia.random.Sampler) | float = -1, vmax: [Sampler](random/#cornucopia.random.Sampler) | float = 1, order: int = 3, *, shared: bool | str = False)</code> <br/>Random smooth multiplicative field"
+    ::: cornucopia.intensity.RandomAddFieldTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomMulFieldTransform](intensity/#cornucopia.intensity.RandomMulFieldTransform)(shape: [Sampler](random/#cornucopia.random.Sampler) | int = 8, vmax: [Sampler](random/#cornucopia.random.Sampler) | float = 1, order: int = 3, symmetric: bool | float = False, *, shared: bool | str = False)</code> <br/>Random smooth multiplicative field"
+    ::: cornucopia.intensity.RandomMulFieldTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomSlicewiseMulFieldTransform](intensity/#cornucopia.intensity.RandomSlicewiseMulFieldTransform)(shape: [Sampler](random/#cornucopia.random.Sampler) | int = 8, vmax: [Sampler](random/#cornucopia.random.Sampler) | float = 1, order: int = 3, slice: int | None = None, thickness: [Sampler](random/#cornucopia.random.Sampler) | int = 32,shape_through: [Sampler](random/#cornucopia.random.Sampler) | int | None = None, *, shared: bool | str = False)</code> <br/>Random smooth slicewise multiplicative field"
+    ::: cornucopia.intensity.RandomSlicewiseMulFieldTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomGammaTransform](intensity/#cornucopia.intensity.RandomGammaTransform)(gamma: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = (0.5, 2), *, shared: bool | str = False)</code> <br/>Gamma correction"
+    ::: cornucopia.intensity.RandomGammaTransform
+        options:
+            heading_level: 3
 
 ## [`cc.contrast`](contrast/): Modify image contrast
 
-```python
-cc.ContrastMixtureTransform(nk=16, keep_background=True, shared='channels')
-cc.ContrastLookupTransform(nk=16, keep_background=True, shared=False)
-```
+??? quote "<code>[cc.ContrastMixtureTransform](intensity/#cornucopia.contrast.ContrastMixtureTransform)(nk: int = 16, keep_background: bool = True, *, shared: bool = False)</code> <br/>Change the means and covariances of intensity modes"
+    ::: cornucopia.contrast.ContrastMixtureTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ContrastLookupTransform](intensity/#cornucopia.contrast.ContrastMixtureTransform)(nk: int = 16, keep_background: bool = True, *, shared: bool = False)</code> <br/>Segment intensities into equidistant bins and change their mean value"
+    ::: cornucopia.contrast.ContrastMixtureTransform
+        options:
+            heading_level: 3
 
 ## [`cc.psf`](psf/): Modify point-spread function (or resolution)
 

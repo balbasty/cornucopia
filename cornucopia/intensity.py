@@ -26,11 +26,11 @@ __all__ = [
 import math
 from math import inf
 from numbers import Number
-from typing import Callable, Dict, Tuple, Union, List, Optional
 
 # dependencies
 import interpol
 import torch
+import typing_extensions as tx
 from torch import Tensor
 from torch.nn.functional import interpolate
 
@@ -42,19 +42,19 @@ from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
 from .utils.smart_inplace import add_, mul_, div_, pow_
 from .utils.compat import clamp
+from . import typing as cct
 
 # typing
-_NumberOrTensor = Union[Number, Tensor]
-_UnaryOperator = Callable[[Tensor], Tensor]
-_BinaryOperator = Callable[[Tensor, _NumberOrTensor], Tensor]
-
+_NumberOrTensor = tx.Union[Number, Tensor]
+_UnaryOperator = tx.Callable[[Tensor], Tensor]
+_BinaryOperator = tx.Callable[[Tensor, _NumberOrTensor], Tensor]
 
 
 class OpConstTransform(FinalTransform):
     """Base class for arithmetic operations with a constant value"""
 
-    _op: Optional[_BinaryOperator] = None
-    _inv: Dict[_BinaryOperator, _UnaryOperator] = {
+    _op: tx.Optional[_BinaryOperator] = None
+    _inv: tx.Dict[_BinaryOperator, _UnaryOperator] = {
         torch.add: lambda x: -x,
         torch.mul: lambda x: 1/x,
     }
@@ -62,7 +62,7 @@ class OpConstTransform(FinalTransform):
     def __init__(
         self,
         value: _NumberOrTensor,
-        op: Optional[_BinaryOperator] = None,
+        op: tx.Optional[_BinaryOperator] = None,
         value_name: str = 'value',
         **kwargs
     ):
@@ -167,7 +167,7 @@ class ReturnValueTransform(FinalTransform):
         self,
         value: _NumberOrTensor,
         value_name: str = 'output',
-        dtype: Optional[torch.dtype] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         **kwargs
     ) -> None:
         """
@@ -242,8 +242,8 @@ class ClipTransform(FinalTransform):
 
     def __init__(
         self,
-        vmin: Optional[_NumberOrTensor] = None,
-        vmax: Optional[_NumberOrTensor] = None,
+        vmin: tx.Optional[_NumberOrTensor] = None,
+        vmax: tx.Optional[_NumberOrTensor] = None,
         **kwargs
     ) -> None:
         """
@@ -281,9 +281,9 @@ class RandomMulTransform(RandomizedTransform):
 
     def __init__(
         self,
-        value: Union[Sampler, float, Tuple[float, float]] = (0.5, 2),
+        value: tx.Union[Sampler, float, tx.Tuple[float, float]] = (0.5, 2),
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedType = False,
         **kwargs
     ) -> None:
         """
@@ -312,9 +312,9 @@ class RandomAddTransform(RandomizedTransform):
 
     def __init__(
         self,
-        value: Union[Sampler, float, Tuple[float, float]] = 1,
+        value: tx.Union[Sampler, float, tx.Tuple[float, float]] = 1,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedType = False,
         **kwargs
     ) -> None:
         """
@@ -343,10 +343,10 @@ class RandomAddMulTransform(RandomizedTransform):
 
     def __init__(
         self,
-        slope: Union[Sampler, float, Tuple[float, float]] = 1,
-        offset: Union[Sampler, float, Tuple[float, float]] = 0.5,
+        slope: tx.Union[Sampler, float, tx.Tuple[float, float]] = 1,
+        offset: tx.Union[Sampler, float, tx.Tuple[float, float]] = 0.5,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedType = False,
         **kwargs
     ) -> None:
         """
@@ -419,14 +419,14 @@ class BaseFieldTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[int, List[int]] = 5,
-        vmin: float= 0 ,
+        shape: tx.Union[int, tx.Sequence[int]] = 5,
+        vmin: float = 0 ,
         vmax: float = 1,
         order: int = 3,
-        slice: Optional[int] = None,
-        thickness: Optional[int] = None,
+        slice: tx.Optional[int] = None,
+        thickness: tx.Optional[int] = None,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedType = False,
         **kwargs
     ) -> None:
         """
@@ -464,8 +464,8 @@ class BaseFieldTransform(NonFinalTransform):
     def make_field(
         self,
         batch: int,
-        smallshape: List[int],
-        fullshape: Optional[List[int]] = None,
+        smallshape: tx.Sequence[int],
+        fullshape: tx.Optional[tx.Sequence[int]] = None,
         **backend
     ) -> None:
         """Generate the random coefficients.
@@ -503,7 +503,7 @@ class BaseFieldTransform(NonFinalTransform):
             b = self.upsample_field(b, fullshape)
         return b
 
-    def upsample_field(self, coeff: Tensor, shape: List[int]) -> Tensor:
+    def upsample_field(self, coeff: Tensor, shape: tx.Sequence[int]) -> Tensor:
         """Compute the full-sized field from its spline coefficients.
 
         Parameters
@@ -642,13 +642,13 @@ class RandomMulFieldTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[Sampler, int] = 8,
-        vmax: Union[Sampler, float] = 1,
+        shape: tx.Union[Sampler, int] = 8,
+        vmax: tx.Union[Sampler, float] = 1,
         order: int = 3,
-        symmetric: Union[bool, float] = False,
+        symmetric: tx.Union[bool, float] = False,
         *,
-        shared: Union[str, bool] = False,
-        shared_field: Union[str, bool, None] = None,
+        shared: cct.SharedType = False,
+        shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
         """
@@ -715,15 +715,15 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[Sampler, int] = 8,
-        vmax: Union[Sampler, float] = 1,
+        shape: tx.Union[Sampler, int] = 8,
+        vmax: tx.Union[Sampler, float] = 1,
         order: int = 3,
-        slice: Optional[int] = None,
-        thickness: Union[Sampler, int] = 32,
-        shape_through: Optional[Union[Sampler, int]] = None,
+        slice: tx.Optional[int] = None,
+        thickness: tx.Union[Sampler, int] = 32,
+        shape_through: tx.Optional[tx.Union[Sampler, int]] = None,
         *,
-        shared: Union[str, bool] = False,
-        shared_field: Union[str, bool, None] = None,
+        shared: cct.SharedType = False,
+        shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
         """
@@ -735,11 +735,11 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
             Sampler or Upper bound for maximum value
         order : int
             Spline order
-        slice : int
+        slice : int | None
             Slice axis. If None, sample one randomly
-        thickness:
+        thickness : Sampler | int
             Sampler or Upper bound for slice thickness
-        shape_through : Sampler | int
+        shape_through : Sampler | int | None
             Sampler or Upper bound for number of control points
             along the slice direction. If None, same as `shape`.
 
@@ -826,13 +826,13 @@ class RandomAddFieldTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[Sampler, int] = 8,
-        vmin: Union[Sampler, float] = -1,
-        vmax: Union[Sampler, float] = 1,
-        order: Union[Sampler, int] = 3,
+        shape: tx.Union[Sampler, int] = 8,
+        vmin: tx.Union[Sampler, float] = -1,
+        vmax: tx.Union[Sampler, float] = 1,
+        order: tx.Union[Sampler, int] = 3,
         *,
-        shared: Union[str, bool] = False,
-        shared_field: Union[str, bool, None] = None,
+        shared: cct.SharedType = False,
+        shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
         """
@@ -893,7 +893,7 @@ class GammaFinalTransform(FinalTransform):
     whereas in `GammaTransform`, they are computed from the image intensities.
     """
 
-    _ScalarOrVector = Union[float, List[float], Tensor]
+    _ScalarOrVector = tx.Union[float, tx.Sequence[float], Tensor]
 
     def __init__(
         self,
@@ -975,10 +975,10 @@ class GammaTransform(NonFinalTransform):
     def __init__(
         self,
         gamma: float = 1,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
+        vmin: tx.Optional[float] = None,
+        vmax: tx.Optional[float] = None,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedType = False,
         **kwargs
     ) -> None:
         """
@@ -1041,8 +1041,14 @@ class RandomGammaTransform(NonFinalTransform):
     Final = GammaFinalTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
-    def __init__(self, gamma=(0.5, 2), *, shared=False, shared_minmax=None,
-                 **kwargs):
+    def __init__(
+        self,
+        gamma: tx.Union[Sampler, float, tx.Tuple[float, float]] = (0.5, 2),
+        *,
+        shared: cct.SharedType = False,
+        shared_minmax: tx.Optional[cct.SharedType] = None,
+        **kwargs
+    ):
         """
         Parameters
         ----------
@@ -1083,7 +1089,7 @@ class ZTransform(NonFinalTransform):
 
     def __init__(
         self, mu: float = 0, sigma: float = 1,
-        *, shared: Union[str, bool] = False, **kwargs
+        *, shared: cct.SharedType = False, **kwargs
     ):
         """
         Parameters

@@ -68,7 +68,7 @@ class RandomFlipTransform(NonFinalTransform):
 
     def __init__(
         self,
-        axes: Union[Sampler, List[int], int] = None,
+        axes: Union[Sampler, List[int], int, None] = None,
         *,
         shared: bool = True,
         **kwargs
@@ -248,11 +248,11 @@ class RandomRot90Transform(NonFinalTransform):
 
     def __init__(
         self,
-        axes: Union[int, List[int]] = None,
+        axes: Union[int, List[int], None] = None,
         max_rot: Union[int, Sampler] = 2,
-        negative=True,
+        negative: bool = True,
         *,
-        shared=True,
+        shared: Union[bool, str] = True,
         **kwargs
      ) -> None:
         """
@@ -309,8 +309,8 @@ class CropPadTransform(FinalTransform):
 
     def __init__(
         self,
-        crop: List[slice],
-        pad: List[int],
+        crop: List[slice] = (),
+        pad: List[int] = (),
         bound: Union[str, List[str]] = 'zero',
         value: Number = 0,
         **kwargs
@@ -422,17 +422,17 @@ class RandomPatchTransform(NonFinalTransform):
 
     def __init__(
         self,
-        patch_size: Union[int, List[int]],
+        shape: Union[int, List[int]],
         bound: Union[str, List[str]] = 'zero',
         *,
-        shared: Union[str, bool] = 'channels',
+        shared: Union[str, bool] = True,
         **kwargs
     ) -> None:
         """
 
         Parameters
         ----------
-        patch_size : [list of] int
+        shape : [list of] int
             Patch shape
         bound : [list of] str
             Boundary condition in case padding is needed
@@ -441,17 +441,21 @@ class RandomPatchTransform(NonFinalTransform):
         ------------------
         shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
             Extract the same patch from all channels and/or tensors
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                        Default for `shared` changed from `"channels"` to `True`"
         """
+        shape = kwargs.pop('patch_size', shape)  # support legacy name
         kwargs.setdefault('shared', shared)
         super().__init__(**kwargs)
-        self.patch_size = patch_size
+        self.shape = shape
         self.bound = bound
 
     def make_final(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         shape = x.shape[1:]
-        patch_size = ensure_list(self.patch_size, len(shape))
+        patch_size = ensure_list(self.shape, len(shape))
         min_center = [max(p/s - 1, -1) for p, s in zip(patch_size, shape)]
         max_center = [min(1 - p/s, 1) for p, s in zip(patch_size, shape)]
         center = [Uniform(mn, mx)() for mn, mx in zip(min_center, max_center)]
@@ -595,7 +599,7 @@ class PowerTwoTransform(NonFinalTransform):
 
     def __init__(
         self,
-        exponent: Union[int, List[int]] =1,
+        exponent: Union[int, List[int]] = 1,
         bound: Union[str, List[str]] = 'zero',
         **kwargs
     ) -> None:
