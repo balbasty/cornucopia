@@ -468,7 +468,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
         Number of spatial dimensions
     lam_abs : float, default=1
         Penalty on absolute values
-    lam_abs : float, default=10
+    lam_grad : float, default=10
         Penalty on gradients
     returns : combination of {'corrected', 'correction', 'parameters'}
         Components to return
@@ -504,7 +504,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
 
     # compute basis of spherical harmonics
     basis = []
-    for i in range(1, max_order + 1):
+    for i in range(0, max_order + 1):
         b0 = spherical_harmonics(shape, i, isocenter, **backend)
         b0 = torch.movedim(b0, -1, 0)
         b = diff(b0, ndim)
@@ -525,7 +525,7 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
 
     # rebuild basis (without taking gradients)
     basis = []
-    for i in range(1, max_order + 1):
+    for i in range(0, max_order + 1):
         b = spherical_harmonics(shape, i, isocenter, **backend)
         b = torch.movedim(b, -1, 0)
         b = b.reshape([b.shape[0], *batch, -1])
@@ -554,7 +554,7 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
 
     !!! note
         - This should be checked!
-        - Only orders 1 and 2 implemented
+        - Only orders 0, 1 and 2 implemented
         - I tried to implement some sort of "circular" harmonics in
          dimension 2 but I don't know what I am doing.
         - The basis is not orthogonal
@@ -562,7 +562,7 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
     Parameters
     ----------
     shape : sequence of int
-    order : {1, 2}, default=2
+    order : {0, 1, 2}, default=2
     isocenter : [sequence of] int, default=shape/2
     dtype : torch.dtype, optional
     device : torch.device, optional
@@ -577,8 +577,11 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
     ndim = len(shape)
     if ndim not in (2, 3):
         raise ValueError('Dimension must be 2 or 3')
-    if order not in (1, 2):
-        raise ValueError('Order must be 1 or 2')
+    if order not in (0, 1, 2):
+        raise ValueError('Order must be 0, 1 or 2')
+
+    if order == 0:
+        return torch.ones(shape + [1], **backend)
 
     if isocenter is None:
         isocenter = [s / 2 for s in shape]
@@ -617,7 +620,7 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
     Parameters
     ----------
     shape : sequence of int
-    order : {1, 2}, default=2
+    order : {0, 1, 2}, default=2
     isocenter : [sequence of] int, default=shape/2
     dtype : torch.dtype, optional
     device : torch.device, optional
@@ -634,8 +637,8 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
     ndim = len(shape)
     if ndim not in (2, 3):
         raise ValueError('Dimension must be 2 or 3')
-    if order not in (1, 2):
-        raise ValueError('Order must be 1 or 2')
+    if order not in (0, 1, 2):
+        raise ValueError('Order must be 0, 1 or 2')
 
     # zero-th order (global shift)
     yield torch.ones(shape, **backend)
@@ -670,7 +673,6 @@ def yield_spherical_harmonics(shape, order=2, isocenter=None, **backend):
         assert ndim == 2
         yield 2 * ramps[0] * ramps[1]
         yield ramps[0].square() - ramps[1].square()
-
 
 # --- values from the literature
 

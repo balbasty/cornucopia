@@ -103,7 +103,7 @@ def identity(shape, **backend):
     return torch.stack(cartesian_grid(shape, **backend), dim=-1)
 
 
-def affine_flow(affine, shape):
+def affine_flow(affine, shape, with_identity=False):
     """Generate an affine flow field
 
     Parameters
@@ -112,6 +112,9 @@ def affine_flow(affine, shape):
         Affine matrix
     shape : (D,) list[int]
         Lattice size
+    with_identity : bool, default=False
+        If True, the returned flow contains absolute coordinates.
+        If False, the returned flow contains relative displacements.
 
     Returns
     -------
@@ -132,7 +135,8 @@ def affine_flow(affine, shape):
     flow = flow.add_(trl)
 
     # subtract identity to get a flow
-    flow = sub_identity_(flow)
+    if not with_identity:
+        flow = sub_identity_(flow)
 
     return flow
 

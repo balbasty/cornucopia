@@ -41,6 +41,8 @@ from .intensity import (
 from .random import Sampler, Uniform, RandInt, make_range
 from .utils.py import cast_like, ensure_list, make_vector
 from .utils.smart_inplace import exp_, div_
+from .utils.conv import smoothnd
+from .utils import warps
 from .utils import b0
 from . import typing as cct
 
@@ -175,6 +177,9 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
             for i in range(n):
                 fwhm[i] = self.fwhm
 
+       # Negate
+        mu = [-v for v in mu]
+
         return GaussianMixtureTransform(
             mu, sigma, fwhm, dtype=self.dtype, **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -193,7 +198,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         s0: float = 0.4,
         s1: float = -9.5,
         voxel_size: float = 1,
-        mask_air: bool = False,
+        mask_air: tx.Union[bool, tx.Literal['fill']] = False,
         **kwargs
      ) -> None:
         """
@@ -236,15 +241,31 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         self.voxel_size = voxel_size
 
     def xform(self, x: Tensor) -> Returned:
+        ndim = x.ndim - 1
+
         axis = self.axis
         if isinstance(axis, int):
             axis = 1 + ((x.ndim - 1 + axis) if axis < 0 else axis)
         field = b0.chi_to_fieldmap(x, zaxis=axis, ndim=x.ndim-1,
                                    s0=self.s0, s1=self.s1, vx=self.voxel_size)
+
         if self.mask_air:
             field.masked_fill_(x == 0, 0)
+
+            if self.mask_air == 'fill':
+                mask0 = mask = (x == 0)
+                while mask.any():
+                    smask = mask.logical_not().to(field)
+                    sfield = smoothnd(field, fwhm=[16] * ndim, bound="replicate")
+                    smask = smoothnd(smask, fwhm=[16] * ndim, bound="replicate")
+                    mask = smask > 0
+                    sfield[mask] /= smask[mask]
+                    mask = mask.logical_not_()
+                    field[mask0] = sfield[mask0]
+
         if self.field_strength:
             field = b0.ppm_to_hz(field, self.field_strength, self.larmor)
+
         return prepare_output(dict(input=x, output=field, fieldmap=field),
                               self.returns)
 
@@ -645,16 +666,11 @@ class ApplyB0DistortionTransform(FinalTransform):
 
         y = None
         if 'output' in required:
-            interpolation_order = 1
+            mode = 'linear'
             if not x.dtype.is_floating_point and self.nearest_if_label:
-                interpolation_order = 0
-            y = interpol.pull(
-                x[:, None], flow,
-                bound=self.bound,
-                interpolation=interpolation_order,
-                extrapolate=True,
-                prefilter=True,
-            )[:, 0]
+                mode ='nearest'
+            y = warps.apply_flow(x[None], flow.movedim(1, -1), mode=mode)[0]
+
         return prepare_output(
             dict(input=x, output=y, flow=flow, vdm=vdm, controls=controls),
             self.returns
@@ -1218,7 +1234,6 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
 
         dtype = x.dtype if x.is_floating_point() else torch.get_default_dtype()
         y = x.new_zeros([4 + nb1, *x.shape[1:]], dtype=dtype)
-        print(y.shape)
         # PD
         y[0] = exp_(GaussianMixtureTransform(
             mu=logpd, sigma=logsigma[:n], fwhm=fwhm[:n],

@@ -178,6 +178,10 @@ def conv1d(input, kernel, dim=-1,  padding='same',
         input = pad(input, [padding], bound, side='both')
         padding = 0
 
+    padding = [0, 0, padding]
+    stride = [1, 1, stride]
+    dilation = [1, 1, dilation]
+
     # reshape kernel
     C = input.shape[1]
     kernel = kernel.reshape([1, 1, 1, 1, -1])
