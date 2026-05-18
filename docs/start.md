@@ -24,7 +24,7 @@ import cornucopia as cc
     See the section
     [**Overview**](#overview) on this page.
 
-!!! tip "All transforms take tensors with *one channel dimension* and *no batch dimension*"
+!!! tip "All transforms take tensors with *one channel dimension* and *no batch dimension*."
 
     Their shape must be `[C, X, Y, Z]` or `[C, X, Y]`.
 
@@ -40,7 +40,7 @@ import cornucopia as cc
 
     See the section [**Nested structures of tensors**](#nested) on this page.
 
-!!! tip "Arguments can be **nested structures of tensors**"
+!!! tip "Arguments can be **nested structures of tensors**."
 
     !!! example
         ```python
@@ -75,7 +75,7 @@ import cornucopia as cc
       themselves final. They may or may not also inherit from
       [`NonFinalTransform`][cornucopia.base.NonFinalTransform].
 
-!!! tip "Non-final transforms can share their parameters across channels and/or tensors"
+!!! tip "Non-final transforms can share their parameters across channels and/or tensors."
 
     This can be controlled by their `shared` attribute, whose default
     value depends on each transform:
