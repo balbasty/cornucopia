@@ -4,7 +4,7 @@ icon: fontawesome/brands/python
 
 # API
 
-## [`cc.special`](special/): Meta transforms:
+## [`cc.special`](special/): Meta transforms: {#special}
 
 Meta-transforms act on other transforms:
 
@@ -58,7 +58,7 @@ Meta-transforms act on other transforms:
         options:
             heading_level: 3
 
-## [`cc.ctx`](ctx/): Context managers
+## [`cc.ctx`](ctx/): Context managers {#ctx}
 
 Most meta-transforms can be used as context managers.
 We define aliases for these meta-transforms under `cc.ctx`:
@@ -113,7 +113,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.io`](io/): Data loaders and converters
+## [`cc.io`](io/): Data loaders and converters {#io}
 
 ??? quote "<code>[cc.ToTensorTransform](io/#cornucopia.io.ToTensorTransform)(ndim: int | None, dtype: [dtype][torch.dtype] | None, device: [device][torch.device] | None)</code> <br/>Ensure that an array is a tensor (with required properties)"
     ::: cornucopia.io.ToTensorTransform
@@ -125,9 +125,9 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.fov`](fov/): Modify the field-of-view
+## [`cc.fov`](fov/): Modify the field-of-view {#fov}
 
-### Deterministic transforms
+### Deterministic transforms {#fov-deterministic}
 
 ??? quote "<code>[cc.FlipTransform](fov/#cornucopia.fov.FlipTransform)(axis: int | list[int] | None = None)</code> <br/>Flip one or more axes"
     ::: cornucopia.fov.FlipTransform
@@ -174,7 +174,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-### Random transforms
+### Random transforms {#fov-random}
 
 
 ??? quote "<code>[cc.RandomFlipTransform](fov/#cornucopia.fov.RandomFlipTransform)(axes: [Sampler](random/cornucopia.random.Sampler) | int | list[int] | None = None, *, shared: bool | str = True)</code> <br/>Randomly flip one or more axes"
@@ -197,9 +197,9 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.noise`](noise/): Inject noise
+## [`cc.noise`](noise/): Inject noise {#noise}
 
-### Deterministic parameters
+### Deterministic parameters {#noise-deterministic}
 
 ??? quote "<code>[cc.GaussianNoiseTransform](noise/#cornucopia.noise.GaussianNoiseTransform)(sigma: float | list[float] = 0.1, *, shared: bool | str = False)</code> <br/>Inject Gaussian noise"
     ::: cornucopia.noise.GaussianNoiseTransform
@@ -221,7 +221,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-### Random parameters
+### Random parameters {#noise-random}
 
 ??? quote "<code>[cc.RandomGaussianNoiseTransform](noise/#cornucopia.noise.RandomGaussianNoiseTransform)(sigma: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, *, shared: bool | str = False)</code> <br/>Inject Gaussian noise with random parameters"
     ::: cornucopia.noise.RandomGaussianNoiseTransform
@@ -238,9 +238,9 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.intensity`](intensity/): Modify image intensities
+## [`cc.intensity`](intensity/): Modify image intensities {#intensity}
 
-### Deterministic transforms
+### Deterministic transforms {#intensity-deterministic}
 
 ??? quote "<code>[cc.AddValueTransform](intensity/#cornucopia.intensity.AddValueTransform)(value: float | list[float] | tensor)</code> <br/>Add a constant value"
     ::: cornucopia.intensity.AddValueTransform
@@ -297,7 +297,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-### Transforms with fixed parameters (but random coefficients)
+### Transforms with fixed parameters (but random coefficients) {#intensity-fixed}
 
 ??? quote "<code>[cc.AddFieldTransform](intensity/#cornucopia.intensity.AddFieldTransform)(shape: int | list[int] = 5, vmin: float = 0, vmax: float = 1, order: int = 3, ...)</code> <br/>Smooth additive field"
     ::: cornucopia.intensity.AddFieldTransform
@@ -309,7 +309,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-### Transforms with random parameters
+### Transforms with random parameters {#intensity-random}
 
 ??? quote "<code>[cc.RandomAddTransform](intensity/#cornucopia.intensity.RandomAddTransform)(value: [Sampler](random/#cornucopia.random.Sampler) | float | tuple[float, float] = 1, *, shared: bool = False)</code> <br/>Add a random value"
     ::: cornucopia.intensity.RandomAddTransform
@@ -346,7 +346,7 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.contrast`](contrast/): Modify image contrast
+## [`cc.contrast`](contrast/): Modify image contrast {#contrast}
 
 ??? quote "<code>[cc.ContrastMixtureTransform](intensity/#cornucopia.contrast.ContrastMixtureTransform)(nk: int = 16, keep_background: bool = True, *, shared: bool = False)</code> <br/>Change the means and covariances of intensity modes"
     ::: cornucopia.contrast.ContrastMixtureTransform
@@ -358,84 +358,289 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-## [`cc.psf`](psf/): Modify point-spread function (or resolution)
+## [`cc.psf`](psf/): Modify point-spread function (or resolution) {#psf}
 
-```python
-cc.SmoothTransform(fwhm=1)
-cc.LowResTransform(resolution=2, noise: Transform = None)
-cc.LowResSliceTransform(resolution=3, thickness=0.8, axis=-1, noise: Transform = None)
+### Deterministic transforms {#psf-deterministic}
 
-# randomized
-cc.RandomSmoothTransform(fwhm=2)
-cc.RandomLowResTransform(resolution=2, noise: Transform = None)
-cc.RandomLowResSliceTransform(resolution=3, thickness=0.1, axis=None, noise: Transform = None)
-```
+??? quote "<code>[cc.SmoothTransform](intensity/#cornucopia.psf.SmoothTransform)(fwhm: float | list[float] = 1)</code> <br/>Apply Gaussian smoothing"
+    ::: cornucopia.psf.SmoothTransform
+        options:
+            heading_level: 3
 
-## [`cc.geometric`](geometric/): Geometric transformations
+??? quote "<code>[cc.LowResSliceTransform](intensity/#cornucopia.psf.LowResSliceTransform)(resolution: float = 3, thickness: float = 0.8, axis: int = -1, noise: [Transform](base/#cornucopia.base.Transform) | None = None)</code> <br/>Model a low-resolution slice direction, with Gaussian profile"
+    ::: cornucopia.psf.LowResSliceTransform
+        options:
+            heading_level: 3
 
-```python
-cc.ElasticTransform(dmax=0.1, unit='fov', shape=5, bound='border', steps=0, shared=True)
-cc.AffineTransform(translations=0, rotations=0, shears=0, zooms=0,
-                   unit='fov', bound='border', shared=True)
-cc.AffineElasticTransform(dmax=0.1, shape=5, steps=0,
-                          translations=0, rotations=0, shears=0, zooms=0,
-                          unit='fov', bound='border', patch=None, shared=True)
-cc.Slicewise3DAffineTransform(translations=0, rotations=0, shears=0, zooms=0,
-                              slice=-1, unit='fov', bound='border', shared=True)
+??? quote "<code>[cc.LowResTransform](intensity/#cornucopia.psf.LowResSliceTransform)(resolution: float | list[float] = 2, noise: [Transform](base/#cornucopia.base.Transform) | None = None)</code> <br/>Model a lower-resolution image"
+    ::: cornucopia.psf.LowResSliceTransform
+        options:
+            heading_level: 3
 
-# randomized
-cc.RandomElasticTransform(dmax=0.15, shape=10, unit='fov', bound='border', steps=0, shared=True)
-cc.RandomAffineTransform(translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                         unit='fov', bound='border', shared=True)
-cc.RandomAffineElasticTransform(dmax=0.15, shape=10, steps=0,
-                                translations=0.1, rotations=15, shears=0.012, zooms=0.15,
-                                unit='fov', bound='border', patch=None, shared=True):
-cc.RandomSlicewise3DAffineTransform(translations=0.1, rotations=15,
-                                    shears=0, zooms=0, slice=-1, shots=2, nodes=8,
-                                    unit='fov', bound='border', shared=True)
-```
+### Random transforms {#psf-random}
 
-## [`cc.labels`](labels/): Transforms that act on label maps
+??? quote "<code>[cc.RandomSmoothTransform](intensity/#cornucopia.psf.RandomSmoothTransform)(fwhm: [Sampler](random/#cornucopia.random.Sampler) | float = 2, *, shared: bool | str = False)</code> <br/>Apply Gaussian smoothing with random width"
+    ::: cornucopia.psf.RandomSmoothTransform
+        options:
+            heading_level: 3
 
-```python
-cc.OneHotTransform(label_map=None, label_ref=None, keep_background=True, dtype=None)
-cc.ArgMaxTransform()
-cc.GaussianMixtureTransform(mu=None, sigma=None, fwhm=0, background=None, shared=False)
-cc.SmoothLabelMap(nb_classes=2, shape=5, soft=False, shared=False)
-cc.ErodeLabelMap(labels=tuple(), radius=3, method='conv')
-cc.DilateLabelMap(labels=tuple(), radius=3, method='conv')
-cc.SmoothMorphoLabelTransform(labels=tuple(), min_radius=-3, max_radius=3, shape=5, method='conv')
-cc.SmoothShallowLabelTransform(labels=tuple(), max_width=5, min_width=1, shape=5,
-                               background_labels=tuple(), method='l2', shared=False)
-cc.BernoulliTransform(prob=0.1, shared=False)
-cc.SmoothBernoulliTransform(prob=0.1, shape=5, shared=False)
+??? quote "<code>[cc.RandomLowResSliceTransform](intensity/#cornucopia.psf.RandomLowResSliceTransform)(resolution: [Sampler](random/#cornucopia.random.Sampler) | float = 3, thickness: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, axis: [Sampler](random/#cornucopia.random.Sampler) | int | None = None, noise: [Transform](base/#cornucopia.base.Transform) | None = None, *, shared: bool | str = False)</code> <br/>Random low-resolution slice direction"
+    ::: cornucopia.psf.RandomLowResSliceTransform
+        options:
+            heading_level: 3
 
-# randomized
-cc.RandomGaussianMixtureTransform(mu=255, sigma=16, fwhm=2, background=None, shared='channels')
-cc.RandomErodeLabelTransform(labels=0.5, radius=3, method='conv', shared=False)
-cc.RandomDilateLabelTransform(labels=0.5, radius=3, method='conv', shared=False)
-cc.RandomSmoothMorphoLabelTransform(labels=0.5, min_radius=-3, max_radius=3,
-                                    shape=5, method='conv', shared=False)
-cc.RandomSmoothShallowLabelTransform(labels=0.5, max_width=5, min_width=1, shape=5,
-                                     background_labels=tuple(), method='l2', shared=False)
+??? quote "<code>[cc.RandomLowResTransform](intensity/#cornucopia.psf.RandomLowResTransform)(resolution: [Sampler](random/#cornucopia.random.Sampler) | float = 2, noise: [Transform](base/#cornucopia.base.Transform) | None = None, *, shared: bool | str = False)</code> <br/>Random lower-resolution image"
+    ::: cornucopia.psf.RandomLowResTransform
+        options:
+            heading_level: 3
 
-```
+## [`cc.geometric`](geometric/): Geometric transformations {#geometric}
 
-## [`cc.kspace`](kspace/): Transforms that act on k-space (Fourier domain)
-```python
-cc.ArrayCoilTransform(ncoils=8, fwhm=0.5, diameter=0.8, jitter=0.01,
-                      unit='fov', shape=4, sos=True, shared=True)
-cc.SumOfSquaresTransform()
-cc.IntraScanMotionTransform(shots=4, axis=-1, freq=True, pattern='sequential',
-                 translations=0.1, rotations=15, sos=True, coils=None, shared='channels')
-cc.SmallIntraScanMotionTransform(translations=0.05, rotations=5, axis=-1, shared='channels')
-```
+### Deterministic transforms {#geometric-deterministic}
 
-## [`cc.synth`](synth/): Synthesize images (domain randomization)
+??? quote "<code>[cc.ApplyAffineTransform](intensity/#cornucopia.geometric.ApplyAffineTransform)(matrix: tensor | None = None, flow: tensor | None = None, ...)</code> <br/>Apply an affine matrix (or precomputed flow field)"
+    ::: cornucopia.geometric.ApplyAffineTransform
+        options:
+            heading_level: 3
 
-```python
-cc.SynthContrastTransform(...)
-cc.SynthFromLabelTransform(patch=None, from_disk=False, one_hot=False,
-                           synth_labels=None, synth_labels_maybe=None, target_labels=None,
-                           ...)
-```
+??? quote "<code>[cc.ApplySlicewiseAffineTransform](intensity/#cornucopia.geometric.ApplySlicewiseAffineTransform)(matrix: tensor, flow: tensor | None = None, ...)</code> <br/>Apply a slice-wise affine transformation"
+    ::: cornucopia.geometric.ApplySlicewiseAffineTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ApplyElasticTransform](intensity/#cornucopia.geometric.ApplyElasticTransform)(flow: tensor | None = None, controls: tensor | None = None, ...)</code> <br/>Apply an elastic tranform"
+    ::: cornucopia.geometric.ApplyElasticTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ApplyAffineElasticTransform](intensity/#cornucopia.geometric.ApplyAffineElasticTransform)(flow: tensor | None = None, controls: tensor | None = None, affine: tensor | None = None, ...)</code> <br/>Apply an affine + elastic tranform"
+    ::: cornucopia.geometric.ApplyAffineElasticTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.AffineTransform](intensity/#cornucopia.geometric.AffineTransform)(translations: vector_like[float] = 0, rotations: vector_like[float] = 0, shears: vector_like[float] = 0, zooms: vector_like[float] = 0)</code> <br/>Apply an affine transformation, encoded by its parameters"
+    ::: cornucopia.geometric.AffineTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SlicewiseAffineTransform](intensity/#cornucopia.geometric.SlicewiseAffineTransform)(translations: list[float | list[float]] = 0, rotations: list[float | list[float]] = 0, shears: list[float | list[float]] = 0, zooms: list[float | list[float]] = 0)</code> <br/>Apply a slice-wise affine transformation"
+    ::: cornucopia.geometric.SlicewiseAffineTransform
+        options:
+            heading_level: 3
+
+### Transforms with fixed parameters (but random coefficients) {#geometric-fixed}
+
+??? quote "<code>[cc.ElasticTransform](intensity/#cornucopia.geometric.ElasticTransform)(dmax: vector_like[float] = 0.1, unit: {'fov','vox'} = 'fov', shape: int | list[int] = 5, ...)</code> <br/>Sample a smooth elastic deformation."
+    ::: cornucopia.geometric.ElasticTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.AffineElasticTransform](intensity/#cornucopia.geometric.AffineElasticTransform)(dmax: vector_like[float] = 0.1, shape: int | list[int] = 5, steps: int = 0, translations: vector_like[float] = 0, rotations: vector_like[float] = 0, shears: vector_like[float] = 0, zooms: vector_like[float] = 0, ...)</code> <br/>Apply an affine + elastic transformation."
+    ::: cornucopia.geometric.AffineElasticTransform
+        options:
+            heading_level: 3
+
+### Transforms with random parameters {#geometric-random}
+
+??? quote "<code>[cc.RandomAffineTransform](intensity/#cornucopia.geometric.RandomAffineTransform)(translations: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0.1, rotations: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 15, shears: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0.012, [Sampler](random/#cornucopia.random.Sampler) | zooms: vector_like[float] = 0.15, ..., *, shared: bool | str = True)</code> <br/>Apply a random affine transformation"
+    ::: cornucopia.geometric.RandomAffineTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomSlicewiseAffineTransform](intensity/#cornucopia.geometric.RandomSlicewiseAffineTransform)(translations: list[float | list[float]] = 0, rotations: list[float | list[float]] = 0, shears: list[float | list[float]] = 0, zooms: list[float | list[float]] = 0)</code> <br/>Apply a random slice-wise affine transformation"
+    ::: cornucopia.geometric.RandomSlicewiseAffineTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomElasticTransform](intensity/#cornucopia.geometric.RandomElasticTransform)(dmax: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0.1, shape: [Sampler](random/#cornucopia.random.Sampler) | int | list[int] = 5, unit: {'fov','vox'} = 'fov', ...)</code> <br/>Apply a random elsstic transformation"
+    ::: cornucopia.geometric.RandomElasticTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomAffineElasticTransform](intensity/#cornucopia.geometric.RandomAffineElasticTransform)([Sampler](random/#cornucopia.random.Sampler) | dmax: vector_like[float] = 0.1, shape: [Sampler](random/#cornucopia.random.Sampler) | int | list[int] = 5, steps: int = 0, translations: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0, rotations: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0, shears: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0, zooms: [Sampler](random/#cornucopia.random.Sampler) | vector_like[float] = 0, ...)</code> <br/>Apply an affine + elastic transformation."
+    ::: cornucopia.geometric.RandomAffineElasticTransform
+        options:
+            heading_level: 3
+
+## [`cc.labels`](labels/): Transforms that act on label maps {#labels}
+
+### Deterministic transforms {#labels-deterministic}
+
+??? quote "<code>[cc.OneHotTransform](intensity/#cornucopia.labels.OneHotTransform)(label_map: list[int | str | list[int | str]] | None = None, label_ref: dict[str, int] | None = None, ...)</code> <br/>Transform a volume of integer labels into a one-hot representation."
+    ::: cornucopia.labels.OneHotTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ArgMaxTransform](intensity/#cornucopia.labels.ArgMaxTransform)()</code> <br/>Take the argmax along the channel dimension."
+    ::: cornucopia.labels.ArgMaxTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RelabelTransform](intensity/#cornucopia.labels.RelabelTransform)(labels: list[int | list[int]] | None = None)</code> <br/>Relabel a label map."
+    ::: cornucopia.labels.RelabelTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ErodeLabelTransform](intensity/#cornucopia.labels.ErodeLabelTransform)(labels: int | list[int] = (), radius: int | list[int] = 3, method: {'conv','l1','l2'} = 'conv', ...)</code> <br/>Morphological erosion."
+    ::: cornucopia.labels.ErodeLabelTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.DilateLabelTransform](intensity/#cornucopia.labels.DilateLabelTransform)(labels: int | list[int] = (), radius: int | list[int] = 3, method: {'conv','l1','l2'} = 'conv', ...)</code> <br/>Morphological erosion."
+    ::: cornucopia.labels.DilateLabelTransform
+        options:
+            heading_level: 3
+
+### Transforms with fixed parameters (but random coefficients) {#labels-fixed}
+
+??? quote "<code>[cc.GaussianMixtureTransform](intensity/#cornucopia.labels.GaussianMixtureTransform)(mu: vector_like[float] | None = None, sigma: vector_like[float] | None = None, fwhm: vector_like[float] = 0, ...)</code> <br/>Sample from a Gaussian mixture."
+    ::: cornucopia.labels.GaussianMixtureTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmoothLabelMap](intensity/#cornucopia.labels.SmoothLabelMap)(nb_classes: int = 2, shape: int | list[int] = 5, soft: bool = True, *, shared: bool | str = False)</code> <br/>Generate a random label map."
+    ::: cornucopia.labels.SmoothLabelMap
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmoothMorphoLabelTransform](intensity/#cornucopia.labels.SmoothMorphoLabelTransform)(labels: int | list[int] = (), min_radius: int | list[int] = -3, max_radius: int | list[int] = 3, shape: int | list[int] = 5, conv: {'conv','l1','l2'} = 'conv')</code> <br/>Morphological erosion/dilation with spatially varying radius."
+    ::: cornucopia.labels.SmoothMorphoLabelTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmoothShallowLabelTransform](intensity/#cornucopia.labels.SmoothShallowLabelTransform)(labels: int | list[int] = (), max_width: int | list[int] = 5, min_width: int | list[int] = 1, shape: int | list[int] = 5, ...)</code> <br/>Make labels "empty", with a border of a given size."
+    ::: cornucopia.labels.SmoothShallowLabelTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.BernoulliTransform](intensity/#cornucopia.labels.BernoulliTransform)(prob: float = 0.1)</code> <br/>Randomly mask voxels."
+    ::: cornucopia.labels.BernoulliTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmoothBernoulliTransform](intensity/#cornucopia.labels.SmoothBernoulliTransform)(prob: float = 0.1, shape: int | list[int] = 5, *, shared: bool | str = False)</code> <br/>Randomly mask voxels."
+    ::: cornucopia.labels.SmoothBernoulliTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.BernoulliDiskTransform](intensity/#cornucopia.labels.BernoulliDiskTransform)(prob: float = 0.1, radius: Sampler | float = 2)</code> <br/>Randomly mask voxels in balls at random locations."
+    ::: cornucopia.labels.BernoulliDiskTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmoothBernoulliDiskTransform](intensity/#cornucopia.labels.SmoothBernoulliDiskTransform)(prob: float = 0.1, radius: float | tuple[float, float] = 2, shape: int | list[int] = 5, ..., *, shared: bool | str = False)</code> <br/>Randomly mask voxels in balls at random locations."
+    ::: cornucopia.labels.SmoothBernoulliDiskTransform
+        options:
+            heading_level: 3
+
+### Transforms with random parameters {#labels-random}
+
+!!! bug "TODO"
+
+## [`cc.kspace`](kspace/): Transforms that act on k-space (Fourier domain) {#kspace}
+
+### Deterministic transforms {#kspace-deterministic}
+
+??? quote "<code>[cc.SumOfSquaresTransform](intensity/#cornucopia.kspace.SumOfSquaresTransform)()</code> <br/>Compute the sum-of-squares across coils/channels."
+    ::: cornucopia.kspace.SumOfSquaresTransform
+        options:
+            heading_level: 3
+
+### Transforms with fixed parameters (but random coefficients) {#kspace-fixed}
+
+??? quote "<code>[cc.ArrayCoilTransform](intensity/#cornucopia.kspace.ArrayCoilTransform)(ncoils: int = 8, fwhm: float = 0.5, diameter: float = 0.8, jitter: float = 0.01, ...)</code> <br/>Generate and apply random coil sensitivities (real or complex)."
+    ::: cornucopia.kspace.ArrayCoilTransform
+        options:
+            heading_level: 3
+
+### Transforms with random parameters {#kspace-random}
+
+??? quote "<code>[cc.IntraScanMotionTransform](intensity/#cornucopia.kspace.IntraScanMotionTransform)(shots: int = 4, axis: int = -1, freq: bool = True, ...)</code> <br/>Model intra-scan motion."
+    ::: cornucopia.kspace.IntraScanMotionTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SmallIntraScanMotionTransform](intensity/#cornucopia.kspace.SmallIntraScanMotionTransform)(translations: [Sampler](random/#cornucopia.random.Sampler) | float = 0.05, rotations: [Sampler](random/#cornucopia.random.Sampler) | float = 5, axis: int = -1)</code> <br/>Model small intra-scan motion."
+    ::: cornucopia.kspace.SmallIntraScanMotionTransform
+        options:
+            heading_level: 3
+
+## [`cc.qmri`](qmri/): Quantitative MRI {#qmri}
+
+### Deterministic transforms {#qmri-deterministic}
+
+??? quote "<code>[cc.SusceptibilityToFieldmapTransform](intensity/#cornucopia.qmri.SusceptibilityToFieldmapTransform)(axis: int | vector_like[float] = -1, ...)</code> <br/>Convert a susceptibiity map (in ppm) into a field map (in Hz)."
+    ::: cornucopia.qmri.SusceptibilityToFieldmapTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ShimTransform](intensity/#cornucopia.qmri.ShimTransform)(linear: vector_like[float] = 0, quadratic[float] = 0, isocenter: vector_like[float] | None = None)</code> <br/>Apply a shim field to the input field map."
+    ::: cornucopia.qmri.ShimTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.OptimalShimTransform](intensity/#cornucopia.qmri.OptimalShimTransform)(max_order: int = 2, lam_abs: float = 1, lam_grad: float = 10)</code> <br/>Compute an optimal shim field for the input field map."
+    ::: cornucopia.qmri.OptimalShimTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.HertzToPhaseTransform](intensity/#cornucopia.qmri.HertzToPhaseTransform)(te: float = 0)</code> <br/>Converts a ΔB0 field (in Hz) into a Phase shift field Δφ (in rad)."
+    ::: cornucopia.qmri.HertzToPhaseTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.HertzToVoxelShiftTransform](intensity/#cornucopia.qmri.HertzToVoxelShiftTransformHertzToVoxelShiftTransform)(te: float = 0)</code> <br/>Converts a ΔB0 field (in Hz) into a voxel shift field Δv."
+    ::: cornucopia.qmri.HertzToVoxelShiftTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.ApplyB0DistortionTransform](intensity/#cornucopia.qmri.ApplyB0DistortionTransform)(flow: tensor | str | None = None, vdm: tensor | str | None = None, controls: tensor | str | None = None, ...)</code> <br/>Apply a pre-compute B0 distortion field."
+    ::: cornucopia.qmri.ApplyB0DistortionTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.GradientEchoTransform](intensity/#cornucopia.qmri.GradientEchoTransform)(tr: float = 25e-3, te: float = 7e-3, alpha: float = 20, pd: float | None = None, t1: float | None = None, t2: float | None = None, b1: float | None = 1, mt: float | None = 0)</code> <br/>Spoiled Gradient Echo forward model."
+    ::: cornucopia.qmri.GradientEchoTransform
+        options:
+            heading_level: 3
+
+### Transforms with fixed parameters (but random coefficients) {#qmri-fixed}
+
+??? quote "<code>[cc.B0DistortionTransform](intensity/#cornucopia.qmri.B0DistortionTransform)(dmax: float = 0.1, unit: {'fov','vox'} = 'fov', shape: int | list[int] = 5, ...)</code> <br/>Compute and apply a B0 distortion field.."
+    ::: cornucopia.qmri.B0DistortionTransform
+        options:
+            heading_level: 3
+
+### Transforms with random parameters {#qmri-random}
+
+??? quote "<code>[cc.RandomSusceptibilityMixtureTransform](intensity/#cornucopia.qmri.RandomSusceptibilityMixtureTransform)(...)</code> <br/>A RandomGaussianMixtureTransform tailored to susceptibility maps."
+    ::: cornucopia.qmri.RandomSusceptibilityMixtureTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomShimTransform](intensity/#cornucopia.qmri.RandomShimTransform)(...)</code> <br/>Apply a random shim field to an input field."
+    ::: cornucopia.qmri.RandomShimTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomB0DistortionTransform](intensity/#cornucopia.qmri.B0DistortionTransform)(dmax: [Sampler](random/#cornucopia.random.Sampler) | float = 0.1, shape: [Sampler](random/#cornucopia.random.Sampler) | int = 5, ...)</code> <br/>Apply a random B0 distortion field."
+    ::: cornucopia.qmri.B0DistortionTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.RandomGMMGradientEchoTransform](intensity/#cornucopia.qmri.RandomGMMGradientEchoTransform)(tr: [Sampler](random/#cornucopia.random.Sampler) | float = 50E-3, te: [Sampler](random/#cornucopia.random.Sampler) | float = 50E-3, alpha: [Sampler](random/#cornucopia.random.Sampler) | float = 90, ...)</code> <br/>A RandomGaussianMixtureTransform tailored to quantitative MRI maps, followed by a GRE forward model."
+    ::: cornucopia.qmri.RandomGMMGradientEchoTransform
+        options:
+            heading_level: 3
+
+## [`cc.synth`](synth/): Synthesize images (domain randomization) {#synth}
+
+??? quote "<code>[cc.IntensityTransform](intensity/#cornucopia.synth.IntensityTransform)(...)</code> <br/>Common intensity augmentation for MRI and related images."
+    ::: cornucopia.synth.IntensityTransform
+        options:
+            heading_level: 3
+
+??? quote "<code>[cc.SynthFromLabelTransform](intensity/#cornucopia.synth.SynthFromLabelTransform)(...)</code> <br/>Synthesize an MRI from an existing label map."
+    ::: cornucopia.synth.IntensityTransform
+        options:
+            heading_level: 3

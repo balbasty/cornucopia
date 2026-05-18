@@ -36,13 +36,15 @@ from . import typing as cct
 class SmoothTransform(FinalTransform):
     """Apply Gaussian smoothing"""
 
-    def __init__(self, fwhm: float = 1, **kwargs) -> None:
+    def __init__(
+        self, fwhm: cct.NumberOrSequence[float] = 1, **kwargs
+    ) -> None:
         """
 
         Parameters
         ----------
-        fwhm : float
-            Full-width at half-maximum of the Gaussian kernel
+        fwhm : float | list[float]
+            Full-width at half-maximum of the Gaussian kernel (per dimension)
 
         Other Parameters
         ------------------
@@ -66,7 +68,7 @@ class RandomSmoothTransform(RandomizedTransform):
         self,
         fwhm: cct.SamplerOrBound[float] = 2,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -249,7 +251,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
         axis: tx.Union[Sampler, int, None] = None,
         noise: tx.Optional[Transform] = None,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -430,7 +432,7 @@ class RandomLowResTransform(RandomizedTransform):
         resolution: cct.SamplerOrBound[float] = 2,
         noise: tx.Optional[Transform] = None,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """

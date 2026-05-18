@@ -461,7 +461,7 @@ class SynthFromLabelTransform(NonFinalTransform):
     def __init__(
         self,
         *,
-        patch: tx.Optional[cct.ScalarOrSequence[int]] = None,
+        patch: tx.Optional[cct.NumberOrSequence[int]] = None,
         from_disk: bool = False,
         one_hot: bool = False,
         synth_labels: tx.Optional[_LabelGrouping] = None,
@@ -488,7 +488,7 @@ class SynthFromLabelTransform(NonFinalTransform):
         sample_in_background: bool = False,
         dtype: tx.Optional[torch.dtype] = None,
         device: tx.Optional[cct.TorchDevice] = None,
-        returns: tx.Union[cct.ReturnsType] = Kwargs(image='image', label='label')
+        returns: tx.Union[cct.ReturnsT] = Kwargs(image='image', label='label')
     ) -> None:
         """
 

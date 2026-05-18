@@ -66,11 +66,11 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         mu_bone: cct.SamplerOrBound[float] = Uniform(12, 13),
         sigma_bone: cct.SamplerOrBound[float] = 0.1,
         fwhm: cct.SamplerOrBound[float] = 2,
-        label_air: cct.ScalarOrSequence[int] = 0,
-        label_bone: tx.Optional[cct.ScalarOrSequence[int]] = None,
+        label_air: cct.NumberOrSequence[int] = 0,
+        label_bone: tx.Optional[cct.NumberOrSequence[int]] = None,
         dtype: tx.Optional[torch.dtype] = None,
         *,
-        shared: cct.SharedType = 'channels',
+        shared: cct.SharedT = 'channels',
         **kwargs
     ) -> None:
         """
@@ -187,7 +187,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
 
     def __init__(
         self,
-        axis: tx.Union[int, tx.Sequence[float]] = -1,
+        axis: tx.Union[int, cct.VectorLike[float]] = -1,
         field_strength: float = 3,
         larmor: float = 42.576E6,
         s0: float = 0.4,
@@ -236,7 +236,9 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         self.voxel_size = voxel_size
 
     def xform(self, x: Tensor) -> Returned:
-        axis = 1 + ((x.ndim - 1 + self.axis) if self.axis < 0 else self.axis)
+        axis = self.axis
+        if isinstance(axis, int):
+            axis = 1 + ((x.ndim - 1 + axis) if axis < 0 else axis)
         field = b0.chi_to_fieldmap(x, zaxis=axis, ndim=x.ndim-1,
                                    s0=self.s0, s1=self.s1, vx=self.voxel_size)
         if self.mask_air:
@@ -248,12 +250,13 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
 
 
 class ShimTransform(FinalTransform):
+    """Apply a shim field to the input field map."""
 
     def __init__(
         self,
-        linear: tx.Optional[cct.VectorLike] = None,
-        quadratic: tx.Optional[cct.VectorLike] = None,
-        isocenter: tx.Optional[cct.VectorLike] = None,
+        linear: tx.Optional[cct.VectorLike[float]] = None,
+        quadratic: tx.Optional[cct.VectorLike[float]] = None,
+        isocenter: tx.Optional[cct.VectorLike[float]] = None,
         **kwargs
     ):
         """
@@ -319,7 +322,7 @@ class OptimalShimTransform(NonFinalTransform):
         max_order: int = 2,
         lam_abs: float = 1,
         lam_grad: float = 10,
-        mask: bool = True,
+        mask: tx.Union[bool, Tensor] = True,
         **kwargs
     ) -> None:
         """
@@ -332,7 +335,7 @@ class OptimalShimTransform(NonFinalTransform):
             Regularization factor for absolute values
         lam_grad : float
             Regularization factor for first order gradients
-        mask : bool
+        mask : bool | Tensor
             Mask zeros/NaNs from objective functions
 
         Other Parameters
@@ -350,7 +353,11 @@ class OptimalShimTransform(NonFinalTransform):
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return self.make_per_channel(x, max_depth)
-        mask = (x != 0) if self.mask else None
+        mask = self.mask
+        if mask is True:
+            mask = (x != 0) if self.mask else None
+        elif mask is False:
+            mask = None
         shim = b0.shim(x, max_order=self.max_order, ndim=x.ndim-1, mask=mask,
                        lam_abs=self.lam_abs, lam_grad=self.lam_grad,
                        returns='correction').neg_()
@@ -378,7 +385,7 @@ class RandomShimTransform(NonFinalTransform):
         coefficients: cct.SamplerOrBound[int] = 5,
         max_order: cct.SamplerOrBound[int] = 2,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -472,17 +479,17 @@ class HertzToVoxelShiftTransform(FinalTransform):
 
 
 class ApplyB0DistortionTransform(FinalTransform):
-    """Final (deterministic) elastic transform"""
+    """Apply a pre-computed B0 voxel displacement map."""
 
     def __init__(
         self,
         flow: tx.Union[Tensor, str, None] = None,
         vdm: tx.Union[Tensor, str, None] = None,
         controls: tx.Union[Tensor, str, None] = None,
+        axis: tx.Union[int, tx.Sequence[float]] = -1,
         order: int = 3,
         bound: cct.TorchBound = 'border',
         nearest_if_label: bool = True,
-        axis: tx.Union[int, tx.Sequence[float]] = -1,
         *,
         dtype: tx.Optional[torch.dtype] = None,
         device: tx.Optional[cct.TorchDevice] = None,
@@ -491,15 +498,25 @@ class ApplyB0DistortionTransform(FinalTransform):
         """
         Parameters
         ----------
-        flow : (C, D, *spatial) tensor
-            Flow field (in voxels)
-            (if not provided, `vdm` of `controls` must be provided)
+        flow : (C, D, *spatial) tensor | [list of] (str | int)
+            Flow field (in voxels),
+            If an index or list of indices, they are used to retrieve
+            the flow from the called arguments.
+            (If not provided, `vdm` of `controls` must be provided)
         vdm : (C, *spatial) tensor
             Voxel displacement field
-            (if not provided, `controls` must be provided)
+            If an index or list of indices, they are used to retrieve
+            the flow from the called arguments.
+            (If not provided, `controls` or `flow` must be provided)
         controls : (C, *shape) tensor
             Spline control points
-            (if not provided, `vdm` must be provided)
+            If an index or list of indices, they are used to retrieve
+            the flow from the called arguments.
+            (If not provided, `vdm` or `flow` must be provided)
+        axis : int | sequence[float]
+            If int, the distortion is applied along this dimension.
+            If sequence of floats, it is a unit vector that encodes the
+            direction of the distortion in the voxel coordinate system.
         order : 1..7
             Order of the splines that encode the smooth deformation.
         bound : {'zeros', 'border', 'reflection'}
@@ -511,10 +528,6 @@ class ApplyB0DistortionTransform(FinalTransform):
             and an argmax output label map is computed on the fly).
             If `nearest_if_label=True`, the entire label map will be
             resampled at once using nearest-neighbour interpolation.
-        axis : int | sequence[float]
-            If int, the distortion is applied along this dimension.
-            If sequence of floats, it is a unit vector that encodes the
-            direction of the distortion in the voxel coordinate system.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -663,9 +676,9 @@ class B0DistortionTransform(NonFinalTransform):
 
     def __init__(
         self,
-        dmax: cct.ScalarOrSequence[float] = 0.1,
+        dmax: cct.NumberOrSequence[float] = 0.1,
         unit: tx.Literal['fov', 'vox'] = 'fov',
-        shape: cct.ScalarOrSequence[int] = 5,
+        shape: cct.NumberOrSequence[int] = 5,
         bound: cct.TorchBound = 'circular',
         order: int = 3,
         nearest_if_label: bool = True,
@@ -673,15 +686,15 @@ class B0DistortionTransform(NonFinalTransform):
         *,
         dtype: tx.Optional[torch.dtype] = None,
         device: tx.Optional[cct.TorchDevice] = None,
-        shared: cct.SharedType = True,
+        shared: cct.SharedT = True,
         **kwargs
     ) -> None:
         """
 
         Parameters
         ----------
-        dmax : [list of] float
-            Max displacement per dimension
+        dmax : float
+            Max displacement
         unit : {'fov', 'vox'}
             Unit of `dmax`.
         shape : [list of] int
@@ -771,7 +784,6 @@ class B0DistortionTransform(NonFinalTransform):
             batch = 1
         ndim = len(fullshape)
         smallshape = ensure_list(self.shape, ndim)
-        dmax = ensure_list(self.dmax, ndim)
         backend = dict(dtype=x.dtype, device=x.device)
         if self.backend.get("device", None):
             backend["device"] = self.backend["device"]
@@ -779,16 +791,14 @@ class B0DistortionTransform(NonFinalTransform):
             backend["dtype"] = self.backend["dtype"]
         if not backend['dtype'].is_floating_point:
             backend['dtype'] = torch.get_default_dtype()
-        if self.unit == 'fov':
-            dmax = [d * f for d, f in zip(dmax, fullshape)]
-        controls = torch.rand([batch, ndim, *smallshape], **backend)
+        dmax = make_vector(self.dmax, 1, **backend)[0]
+        controls = torch.rand([batch, 1, *smallshape], **backend)
         controls = controls.sub_(0.5).mul_(2)
-        for d in range(ndim):
-            if getattr(dmax[d], 'requires_grad', False):
-                controls1 = controls[:, d].clone()
-                controls[:, d].copy_(dmax[d]*controls1)
-            else:
-                controls[:, d].mul_(dmax[d])
+        if getattr(dmax, 'requires_grad', False):
+            controls1 = controls.clone()
+            controls.copy_(dmax*controls1)
+        else:
+            controls.mul_(dmax)
         if vdm or flow:
             vdm = self.Next._make_vdm(fullshape, controls, self.order)
         else:
@@ -799,7 +809,7 @@ class B0DistortionTransform(NonFinalTransform):
             flow = None
         return self.Next(
             flow, vdm, controls,
-            self.order, self.bound, self.nearest_if_label, self.axis,
+            self.axis, self.order, self.bound, self.nearest_if_label,
             **self.backend, **self.get_prm()
         ).make_final(x, max_depth-1)
 
@@ -825,8 +835,8 @@ class RandomB0DistortionTransform(FinalTransform):
         *,
         dtype: tx.Optional[torch.dtype] = None,
         device: tx.Optional[cct.TorchDevice] = None,
-        shared: cct.SharedType = True,
-        shared_vdm: tx.Optional[cct.SharedType] = None,
+        shared: cct.SharedT = True,
+        shared_vdm: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """

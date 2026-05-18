@@ -10,11 +10,11 @@ __all__ = [
 # stdlib
 import math
 import random
-from typing import List, Optional, Union
 from math import inf
 
 # dependencies
 import torch
+import typing_extensions as tx
 from torch import Tensor
 
 # internals
@@ -26,6 +26,7 @@ from .random import Fixed, Sampler
 from .utils.warps import identity
 from .utils.smart_inplace import sqrt_, square_, abs_, mul_, exp_, sub_, add_
 from . import ctx
+from . import typing as cct
 
 
 class ApplyArrayCoilTransform(FinalTransform):
@@ -74,8 +75,8 @@ class ArrayCoilTransform(NonFinalTransform):
         fwhm: float = 0.5,
         diameter: float = 0.8,
         jitter: float = 0.01,
-        unit: str = 'fov',
-        shape: Union[int, List[int]] = 4,
+        unit: tx.Literal['fov', 'vox'] = 'fov',
+        shape: cct.NumberOrSequence[int] = 4,
         sos: bool = True,
         *,
         shared=True,
@@ -181,7 +182,7 @@ class IntraScanMotionFinalTransform(FinalTransform):
         self,
         motion: FinalTransform,
         patterns: Tensor,
-        sens: Optional[FinalTransform] = None,
+        sens: tx.Optional[FinalTransform] = None,
         axis: int = -1,
         freq: bool = False,
         **kwargs
@@ -295,13 +296,16 @@ class IntraScanMotionTransform(NonFinalTransform):
         shots: int = 4,
         axis: int = -1,
         freq: bool = True,
-        pattern: Union[str, List[Tensor]] = 'sequential',
-        translations: Union[Sampler, float] = 0.1,
-        rotations: Union[Sampler, float] = 15,
+        pattern: tx.Union[
+            tx.Literal['sequential', 'random'],
+            tx.Sequence[Tensor]
+        ] = 'sequential',
+        translations: tx.Union[Sampler, float] = 0.1,
+        rotations: tx.Union[Sampler, float] = 15,
         sos: bool = True,
-        coils: Optional[Transform] = None,
+        coils: tx.Optional[Transform] = None,
         *,
-        shared: Union[str, bool] = 'channels',
+        shared: tx.Union[str, bool] = 'channels',
         **kwargs
     ) -> None:
         """
@@ -363,7 +367,7 @@ class IntraScanMotionTransform(NonFinalTransform):
             zooms=Fixed(0), shears=Fixed(0), bound='reflection')
 
     def get_pattern(
-        self, n: int, device: Optional[torch.device] = None
+        self, n: int, device: tx.Optional[torch.device] = None
     ) -> Tensor:
         shots = min(self.shots, n)
         pattern = []
@@ -430,11 +434,11 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
 
     def __init__(
         self,
-        translations: Union[Sampler, float] = 0.05,
-        rotations: Union[Sampler, float] = 5,
+        translations: tx.Union[Sampler, float] = 0.05,
+        rotations: tx.Union[Sampler, float] = 5,
         axis: int = -1,
         *,
-        shared: Union[str, bool] = 'channels',
+        shared: tx.Union[str, bool] = 'channels',
         **kwargs
     ) -> None:
         """
@@ -456,7 +460,7 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
                          shared=shared, shots=2, axis=axis, **kwargs)
 
     def get_pattern(
-        self, n: int, device: Optional[torch.device] = None
+        self, n: int, device: tx.Optional[torch.device] = None
     ) -> Tensor:
         k = random.randint(0, n-1)
         mask = torch.zeros(n, dtype=torch.bool, device=device)

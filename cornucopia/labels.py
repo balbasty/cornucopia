@@ -28,12 +28,12 @@ __all__ = [
 # stdlib
 import math as pymath
 from math import inf
-from typing import Dict, List, Optional, Tuple, Union
 
 # dependencies
 import torch
 import interpol
 import distmap
+import typing_extensions as tx
 from torch import Tensor
 
 # internals
@@ -46,6 +46,7 @@ from .utils.py import ensure_list, make_vector
 from .utils.morpho import bounded_distance
 from .utils.smart_inplace import mul_, div_, add_, sub_
 from . import ctx
+from . import typing as cct
 
 
 class OneHotFinalTransform(FinalTransform):
@@ -53,9 +54,9 @@ class OneHotFinalTransform(FinalTransform):
 
     def __init__(
         self,
-        labels: List[Union[int, List[int]]],
+        labels: tx.Sequence[cct.NumberOrSequence[int]],
         keep_background: bool = True,
-        dtype: Optional[torch.dtype] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         **kwargs
     ) -> None:
         """
@@ -102,24 +103,24 @@ class OneHotTransform(NonFinalTransform):
     Final = Next = OneHotFinalTransform
     """The transform type returned by `make_final`."""
 
-    _InpLabel = Union[int, str, List[Union[int, str]]]
+    _InpLabel = cct.ItemOrSequence[tx.Union[int, str]]
 
     def __init__(
         self,
-        label_map: Optional[List[_InpLabel]] = None,
-        label_ref: Optional[Dict[int, str]] = None,
+        label_map: tx.Optional[tx.Sequence[_InpLabel]] = None,
+        label_ref: tx.Optional[tx.Mapping[int, str]] = None,
         keep_background: bool = True,
-        dtype: Optional[torch.dtype] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         **kwargs
     ) -> None:
         """
 
         Parameters
         ----------
-        label_map : list or [list of] int
+        label_map : list or [list of] (int | str)
             Map one-hot classes to [list of] labels or label names
             !!! warning "Should not include the background class"
-        label_ref : dict[int] -> str
+        label_ref : dict[int, str]
             Map label values to label names
         keep_background : bool
             If True, the first one-hot class is the background class,
@@ -191,7 +192,9 @@ class RelabelFinalTransform(FinalTransform):
         - All labels absent from the list are mapped to `0`.
     """
 
-    def __init__(self, labels: List[Union[int, List[int]]], **kwargs) -> None:
+    def __init__(
+        self, labels: tx.Sequence[cct.NumberOrSequence[int]], **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -233,7 +236,7 @@ class RelabelTransform(NonFinalTransform):
 
     def __init__(
         self,
-        labels: Optional[List[Union[int, List[int]]]] = None,
+        labels: tx.Optional[tx.Sequence[cct.NumberOrSequence[int]]] = None,
         **kwargs
     ) -> None:
         """
@@ -261,21 +264,21 @@ class GaussianMixtureFinalTransform(FinalTransform):
 
     def __init__(
         self,
-        mu: Union[List[float], Tensor],
-        sigma: Union[List[float], Tensor],
-        fwhm: Union[float, List[float], Tensor, None] = None,
-        background: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
+        mu: cct.VectorLike[float],
+        sigma: cct.VectorLike[float],
+        fwhm: tx.Optional[cct.VectorLike[float]] = None,
+        background: tx.Optional[int] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         **kwargs
     ) -> None:
         """
         Parameters
         ----------
-        mu : (K,) list[float] | tensor
+        mu : ([K],) list[float] | tensor
             Mean of each cluster.
-        sigma : (K,) list[float] | tensor
+        sigma : ([K],) list[float] | tensor
             Standard deviation of each cluster.
-        fwhm : float | (K,) list[float] | tensor | None
+        fwhm : ([K],) list[float] | tensor | None
             Width of a within-class smoothing kernel.
         background : int | None
             Index of background channel, which does not get filled.
@@ -342,13 +345,13 @@ class GaussianMixtureTransform(NonFinalTransform):
 
     def __init__(
         self,
-        mu: Union[List[float], Tensor, None] = None,
-        sigma: Union[List[float], Tensor, None] = None,
-        fwhm: Union[float, List[float], Tensor] = 0,
-        background: Union[int, None] = None,
-        dtype: Union[torch.dtype, None] = None,
+        mu: tx.Optional[cct.VectorLike[float]] = None,
+        sigma: tx.Optional[cct.VectorLike[float]] = None,
+        fwhm: tx.Optional[cct.VectorLike[float]] = 0,
+        background: tx.Optional[int] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -359,7 +362,7 @@ class GaussianMixtureTransform(NonFinalTransform):
             Mean of each cluster. Default: random in (0, 1).
         sigma : list[float]
             Standard deviation of each cluster. Default: `1/nb_classes`.
-        fwhm : float or list[float]
+        fwhm : float | list[float]
             Width of a within-class smoothing kernel.
         background : int | None
             Index of background channel, which does not get filled.
@@ -403,13 +406,13 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
 
     def __init__(
         self,
-        mu: Union[Sampler, List[float], float] = 1,
-        sigma: Union[Sampler, List[float], float] = 0.05,
-        fwhm: Union[Sampler, List[float], float] = 2,
-        background: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
+        mu: tx.Union[Sampler, cct.VectorLike[float]] = 1,
+        sigma: tx.Union[Sampler, cct.VectorLike[float]] = 0.05,
+        fwhm: tx.Union[Sampler, cct.VectorLike[float]] = 2,
+        background: tx.Optional[int] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -463,11 +466,11 @@ class SmoothLabelMap(NonFinalTransform):
 
     def __init__(
         self,
-        nb_classes=2,
-        shape=5,
-        soft=False,
+        nb_classes: int = 2,
+        shape: cct.NumberOrSequence[int] = 5,
+        soft: bool = False,
         *,
-        shared=False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -480,8 +483,11 @@ class SmoothLabelMap(NonFinalTransform):
             Number of spline control points
         soft : bool
             Return a soft (one-hot) label map
-        shared : bool
-            Apply the same field to all channels
+
+        Other Parameters
+        ----------------
+        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
+            Apply the same field to all tensors/channels
         """
         super().__init__(shared=shared, **kwargs)
         self.nb_classes = nb_classes
@@ -545,12 +551,12 @@ class RandomSmoothLabelMap(NonFinalTransform):
 
     def __init__(
         self,
-        nb_classes: Union[Sampler, int] = 8,
-        shape: Union[Sampler, int, List[int]] = 5,
+        nb_classes: cct.SamplerOrBound[int] = 8,
+        shape: tx.Union[Sampler, cct.NumberOrSequence[int]] = 5,
         soft: bool = False,
         *,
-        shared: Union[str, bool] = False,
-        shared_field: Union[str, bool, None] = None,
+        shared: cct.SharedT = False,
+        shared_field: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """
@@ -604,10 +610,10 @@ class ErodeLabelTransform(FinalTransform):
 
     def __init__(
         self,
-        labels: Union[int, List[int]] = tuple(),
-        radius: Union[int, List[int]] = 3,
-        method: str = 'conv',
-        new_labels: Union[bool, List[int]] = False,
+        labels: cct.NumberOrSequence[int] = tuple(),
+        radius: cct.NumberOrSequence[int] = 3,
+        method: tx.Literal['conv', 'l1', 'l2'] = 'conv',
+        new_labels: tx.Union[bool, cct.NumberOrSequence[int]] = False,
         **kwargs
     ) -> None:
         """
@@ -734,8 +740,8 @@ class DilateLabelTransform(FinalTransform):
 
     def __init__(
         self,
-        labels: Union[int, List[int]] = tuple(),
-        radius: Union[int, List[int]] = 3,
+        labels: cct.NumberOrSequence[int] = tuple(),
+        radius: cct.NumberOrSequence[int] = 3,
         method: str = 'conv',
         **kwargs
     ) -> None:
@@ -810,12 +816,12 @@ class RandomErodeLabelTransform(NonFinalTransform):
 
     def __init__(
         self,
-        labels: Union[Sampler, float, List[int]] = 0.5,
-        radius: Union[Sampler, int] = 3,
+        labels: tx.Union[Sampler, cct.NumberOrSequence[float]] = 0.5,
+        radius: tx.Union[Sampler, int] = 3,
         method: str = 'conv',
-        new_labels: Union[bool, List[int]] = False,
+        new_labels: tx.Union[bool, cct.NumberOrSequence[int]] = False,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -890,11 +896,11 @@ class RandomDilateLabelTransform(NonFinalTransform):
 
     def __init__(
         self,
-        labels: Union[Sampler, float, List[int]] = 0.5,
-        radius: Union[Sampler, int] = 3,
+        labels: tx.Union[Sampler, cct.NumberOrSequence[float]] = 0.5,
+        radius: tx.Union[Sampler, cct.NumberOrSequence[int]] = 3,
         method: str = 'conv',
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -960,9 +966,9 @@ class SmoothMorphoLabelFinalTransform(FinalTransform):
     def __init__(
         self,
         fields: Transform,
-        labels: Union[int, List[int]] = 1,
-        min_radius: Union[int, List[int]] = -30,
-        max_radius: Union[int, List[int]] = 3,
+        labels: cct.NumberOrSequence[int] = 1,
+        min_radius: cct.NumberOrSequence[int] = -30,
+        max_radius: cct.NumberOrSequence[int] = 3,
         method: str = 'conv',
         **kwargs
     ) -> None:
@@ -1112,13 +1118,13 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
 
     def __init__(
         self,
-        labels: Union[int, List[int]] = tuple(),
-        min_radius: Union[int, List[int]] = -3,
-        max_radius: Union[int, List[int]] = 3,
-        shape: Union[int, List[int]] = 5,
-        method: str = 'conv',
+        labels: cct.NumberOrSequence[int] = tuple(),
+        min_radius: cct.NumberOrSequence[int] = -3,
+        max_radius: cct.NumberOrSequence[int] = 3,
+        shape: cct.NumberOrSequence[int] = 5,
+        method: tx.Literal['conv', 'l1', 'l2'] = 'conv',
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -1165,9 +1171,18 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
     Final = SmoothMorphoLabelFinalTransform
     """The transform type returned by `make_final(..., max_depth=inf)`."""
 
-    def __init__(self, labels=0.5, min_radius=-3, max_radius=3,
-                 shape=5, method='conv',
-                 *, shared=False, shared_fields=None, **kwargs):
+    def __init__(
+        self,
+        labels: tx.Union[Sampler, float, cct.NumberOrSequence[int]] = 0.5,
+        min_radius: cct.NumberOrSequence[int] = -3,
+        max_radius: cct.NumberOrSequence[int] = 3,
+        shape: cct.NumberOrSequence[int] = 5,
+        method: tx.Literal['conv', 'l1', 'l2'] = 'conv',
+        *,
+        shared: cct.SharedT = False,
+        shared_fields: tx.Optional[cct.SharedT] = None,
+        **kwargs
+    ) -> None:
         """
 
         Parameters
@@ -1204,7 +1219,7 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
         self.method = Fixed(method)
         self.shared_fields = shared_fields
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> None:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -1254,12 +1269,12 @@ class SmoothShallowLabelFinalTransform(FinalTransform):
 
     def __init__(
         self,
-        fields: Union[Transform, Tensor],
-        labels: List[int] = tuple(),
+        fields: tx.Union[Transform, Tensor],
+        labels: cct.NumberOrSequence[int] = tuple(),
         max_width: int = 5,
         min_width: int = 1,
-        background_labels: List[int] = tuple(),
-        method: str = 'l2',
+        background_labels: cct.NumberOrSequence[int] = tuple(),
+        method: tx.Literal['l1', 'l2'] = 'l2',
         **kwargs
     ) -> None:
         """
@@ -1405,9 +1420,18 @@ class SmoothShallowLabelTransform(NonFinalTransform):
     Final = Next = SmoothShallowLabelFinalTransform
     """The transform type returned by `make_final`."""
 
-    def __init__(self, labels=tuple(), max_width=5, min_width=1, shape=5,
-                 background_labels=tuple(), method='l2',
-                 *, shared=False, **kwargs):
+    def __init__(
+        self,
+        labels: cct.NumberOrSequence[int] = tuple(),
+        max_width: cct.NumberOrSequence[int] = 5,
+        min_width: cct.NumberOrSequence[int] = 1,
+        shape: cct.NumberOrSequence[int] = 5,
+        background_labels: cct.NumberOrSequence[int] = tuple(),
+        method: tx.Literal['l1', 'l2'] = 'l2',
+        *,
+        shared: cct.SharedT = False,
+        **kwargs
+    ) -> None:
         """
         Parameters
         ----------
@@ -1433,7 +1457,7 @@ class SmoothShallowLabelTransform(NonFinalTransform):
         self.max_width = ensure_list(max_width, min(len(self.labels), 1))
         self.method = method
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         xform = AddFieldTransform(self.shape, shared=self.shared)
@@ -1456,15 +1480,15 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
 
     def __init__(
         self,
-        labels: Union[Sampler, float, List[int]] = 0.5,
-        max_width: Union[Sampler, float, List[float]] = 5,
-        min_width: Union[Sampler, float, List[float]] = 1,
-        shape: Union[Sampler, int, List[int]] = 5,
-        background_labels: Union[Sampler, int, List[int]] = tuple(),
-        method: str = 'l2',
+        labels: tx.Union[Sampler, float, cct.NumberOrSequence[int]] = 0.5,
+        max_width: tx.Union[Sampler, cct.NumberOrSequence[float]] = 5,
+        min_width: tx.Union[Sampler, cct.NumberOrSequence[float]] = 1,
+        shape: tx.Union[Sampler, int, cct.NumberOrSequence[int]] = 5,
+        background_labels: tx.Union[Sampler, cct.NumberOrSequence[int]] = (),
+        method: tx.Literal['l1', 'l2'] = 'l2',
         *,
-        shared: Union[str, bool] = False,
-        shared_fields: Union[str, bool, None] = None,
+        shared: cct.SharedT = False,
+        shared_fields: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """
@@ -1500,7 +1524,7 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
         self.method = method
         self.shared_fields = shared_fields
 
-    def make_final(self, x, max_depth=float('inf')):
+    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -1555,7 +1579,7 @@ class BernoulliTransform(NonFinalTransform):
         self,
         prob: float = 0.1,
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -1599,10 +1623,10 @@ class SmoothBernoulliTransform(NonFinalTransform):
     def __init__(
         self,
         prob: float = 0.1,
-        shape: Union[int, List[int]] = 5,
+        shape: cct.NumberOrSequence[int] = 5,
         *,
-        shared: Union[str, bool] = False,
-        shared_noise: Union[str, bool, None] = False,
+        shared: cct.SharedT = False,
+        shared_noise: tx.Optional[cct.SharedT] = False,
         **kwargs
     ) -> None:
         """
@@ -1612,6 +1636,9 @@ class SmoothBernoulliTransform(NonFinalTransform):
             Probability of masking out a voxel
         shape : int or sequence[int]
             Number of control points in the smooth field
+
+        Other Parameters
+        ----------------
         returns : [list or dict of] {'input', 'output', 'noise'}
             Which tensor to return
         shared : bool
@@ -1666,11 +1693,11 @@ class BernoulliDiskTransform(NonFinalTransform):
     def __init__(
         self,
         prob: float = 0.1,
-        radius: Union[Sampler, float] = 2,
-        value: Union[int, float, str] = 0,
-        method: str = 'l2',
+        radius: tx.Union[Sampler, float] = 2,
+        value: tx.Union[int, float, str] = 0,
+        method: tx.Literal['conv', 'l1', 'l2'] = 'l2',
         *,
-        shared: Union[str, bool] = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -1745,13 +1772,13 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
     def __init__(
         self,
         prob: float = 0.1,
-        radius: Union[float, Tuple[float, float]] = 2,
-        shape: Union[int, List[int]] = 5,
-        value: Union[int, float, str] = 0,
-        method: str = 'l2',
+        radius: tx.Union[float, tx.Tuple[float, float]] = 2,
+        shape: cct.NumberOrSequence[int] = 5,
+        value: tx.Union[int, float, str] = 0,
+        method: tx.Literal['conv', 'l1', 'l2'] = 'l2',
         *,
-        shared: Union[str, bool] = False,
-        shared_field: str = None,
+        shared: cct.SharedT = False,
+        shared_field: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """

@@ -61,7 +61,7 @@ class GaussianNoiseTransform(NonFinalTransform):
         self,
         sigma: cct.VectorLike = 0.1,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -111,8 +111,8 @@ class RandomGaussianNoiseTransform(RandomizedTransform):
         self,
         sigma: cct.SamplerOrBound[float] = 0.1,
         *,
-        shared: cct.SharedType = False,
-        shared_noise: tx.Optional[cct.SharedType] = None,
+        shared: cct.SharedT = False,
+        shared_noise: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """
@@ -176,7 +176,7 @@ class ChiNoiseTransform(NonFinalTransform):
         sigma: cct.VectorLike = 0.1,
         nb_channels: int = 2,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -242,8 +242,8 @@ class RandomChiNoiseTransform(RandomizedTransform):
         sigma: cct.SamplerOrBound[float] = 0.1,
         nb_channels: cct.SamplerOrBound[int] = 8,
         *,
-        shared: cct.SharedType = False,
-        shared_noise: tx.Optional[cct.SharedType] = None,
+        shared: cct.SharedT = False,
+        shared_noise: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """
@@ -349,7 +349,7 @@ class GFactorTransform(NonFinalTransform):
         vmax: float = 1.5,
         order: int = 3,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -408,7 +408,7 @@ class GammaNoiseTransform(NonFinalTransform):
         sigma: cct.VectorLike = 0.1,
         mean: cct.VectorLike = 1,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -470,8 +470,8 @@ class RandomGammaNoiseTransform(RandomizedTransform):
         sigma: cct.SamplerOrBound[float] = 0.1,
         mean: cct.SamplerOrBound[float] = Fixed(1.0),
         *,
-        shared: cct.SharedType = False,
-        shared_noise: tx.Optional[cct.SharedType] = None,
+        shared: cct.SharedT = False,
+        shared_noise: tx.Optional[cct.SharedT] = None,
         **kwargs
     ) -> None:
         """

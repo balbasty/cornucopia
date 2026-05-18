@@ -101,3 +101,4 @@ pygments_lang_class = true
 generic = true
 [project.markdown_extensions.toc]
 toc_depth = 2
+[project.markdown_extensions.attr_list]

@@ -283,7 +283,7 @@ class RandomMulTransform(RandomizedTransform):
         self,
         value: tx.Union[Sampler, float, tx.Tuple[float, float]] = (0.5, 2),
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -314,7 +314,7 @@ class RandomAddTransform(RandomizedTransform):
         self,
         value: tx.Union[Sampler, float, tx.Tuple[float, float]] = 1,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -346,7 +346,7 @@ class RandomAddMulTransform(RandomizedTransform):
         slope: tx.Union[Sampler, float, tx.Tuple[float, float]] = 1,
         offset: tx.Union[Sampler, float, tx.Tuple[float, float]] = 0.5,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -426,7 +426,7 @@ class BaseFieldTransform(NonFinalTransform):
         slice: tx.Optional[int] = None,
         thickness: tx.Optional[int] = None,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -647,7 +647,7 @@ class RandomMulFieldTransform(NonFinalTransform):
         order: int = 3,
         symmetric: tx.Union[bool, float] = False,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
@@ -722,7 +722,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         thickness: tx.Union[Sampler, int] = 32,
         shape_through: tx.Optional[tx.Union[Sampler, int]] = None,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
@@ -831,7 +831,7 @@ class RandomAddFieldTransform(NonFinalTransform):
         vmax: tx.Union[Sampler, float] = 1,
         order: tx.Union[Sampler, int] = 3,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         shared_field: tx.Union[str, bool, None] = None,
         **kwargs
     ) -> None:
@@ -978,7 +978,7 @@ class GammaTransform(NonFinalTransform):
         vmin: tx.Optional[float] = None,
         vmax: tx.Optional[float] = None,
         *,
-        shared: cct.SharedType = False,
+        shared: cct.SharedT = False,
         **kwargs
     ) -> None:
         """
@@ -1045,8 +1045,8 @@ class RandomGammaTransform(NonFinalTransform):
         self,
         gamma: tx.Union[Sampler, float, tx.Tuple[float, float]] = (0.5, 2),
         *,
-        shared: cct.SharedType = False,
-        shared_minmax: tx.Optional[cct.SharedType] = None,
+        shared: cct.SharedT = False,
+        shared_minmax: tx.Optional[cct.SharedT] = None,
         **kwargs
     ):
         """
@@ -1089,7 +1089,7 @@ class ZTransform(NonFinalTransform):
 
     def __init__(
         self, mu: float = 0, sigma: float = 1,
-        *, shared: cct.SharedType = False, **kwargs
+        *, shared: cct.SharedT = False, **kwargs
     ):
         """
         Parameters
