@@ -86,6 +86,11 @@ show_overloads = true
 overloads_only = true
 
 [project.markdown_extensions.admonition]
+[project.markdown_extensions.toc]
+toc_depth = 2
+[project.markdown_extensions.markdown_grid_tables]
+[project.markdown_extensions.attr_list]
+
 # [project.markdown_extensions.pymdownx.blocks.admonition]
 [project.markdown_extensions.pymdownx.details]
 [project.markdown_extensions.pymdownx.superfences]
@@ -99,6 +104,3 @@ pygments_lang_class = true
 [project.markdown_extensions.pymdownx.snippets]
 [project.markdown_extensions.pymdownx.arithmatex]
 generic = true
-[project.markdown_extensions.toc]
-toc_depth = 2
-[project.markdown_extensions.attr_list]

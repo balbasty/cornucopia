@@ -109,13 +109,16 @@ class ApplyElasticTransform(FinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+        ----------------
+        returns : [list or dict of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the displacement field
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the displacement field
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -260,17 +263,20 @@ class ElasticTransform(NonFinalTransform):
             If `nearest_if_label=True`, the entire label map will be
             resampled at once using nearest-neighbour interpolation.
 
-
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the displacement field
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same transform to all images/channels
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the displacement field
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
@@ -433,18 +439,22 @@ class RandomElasticTransform(NonFinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_flow
+            Apply the same random flow to all images/channels.
+            Default: same as shared
+        returns : [list or dict of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the displacement field
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Whether to share random parameters across tensors and/or channels
-        shared_flow : {'channels', 'tensors', 'channels+tensors', '', None}
-            Whether to share random field across tensors and/or channels.
-            By default: same as `shared`
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the displacement field
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.dmax = Uniform.make(make_range(0, dmax))
@@ -519,13 +529,15 @@ class ApplyAffineTransform(FinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+        ----------------
+        returns : [list or dict of] str
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'matrix': The affine matrix
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -631,15 +643,18 @@ class AffineTransform(NonFinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] str
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'matrix': The affine matrix
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same transform to all images/channels
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
@@ -799,18 +814,21 @@ class RandomAffineTransform(NonFinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_matrix
+            Apply the same random matrix to all images/channels.
+            Default: same as shared
+        returns : [list or dict of] str
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'matrix': The affine matrix
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Whether to share random parameters across tensors and/or channels
-        shared_matrix : {'channels', 'tensors', 'channels+tensors', '', None}
-            Whether to share matrices across tensors and/or channels.
-            By default: same as `shared`
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.translations = Uniform.make(make_range(translations))
@@ -891,14 +909,16 @@ class ApplyAffineElasticTransform(FinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
+        ----------------
+        returns : [list or dict of] str
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the nonlinear field
-            - 'matrix': The affine matrix
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the nonlinear field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -1024,16 +1044,19 @@ class AffineElasticTransform(NonFinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] str
 
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the nonlinear field
-            - 'matrix': The affine matrix
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same transform to all images/channels
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the nonlinear field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.patch = patch
@@ -1225,19 +1248,22 @@ class RandomAffineElasticTransform(NonFinalTransform):
             resampled at once using nearest-neighbour interpolation.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'controls', 'matrix'}
-
-            - 'input': The input image
-            - 'output': The deformed image
-            - 'flow': The displacement field
-            - 'controls': The control points of the nonlinear field
-            - 'matrix': The affine matrix
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same hyperparameters to all images/channels
-        shared_flow : {'channels', 'tensors', 'channels+tensors', '', None}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_flow
             Apply the same random flow to all images/channels.
             Default: same as shared
+        returns : [list or dict of] str
+
+            - `'input'`: The input image
+            - `'output'`: The deformed image
+            - `'flow'`: The displacement field
+            - `'controls'`: The control points of the nonlinear field
+            - `'matrix'`: The affine matrix
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.dmax = Uniform.make(make_range(0, dmax))
@@ -1327,15 +1353,17 @@ class ApplyAffinePair(FinalTransform):
             The second transform to apply to the input image
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
+        ----------------
+        returns : [list or dict of] str
 
-            - 'input': Input image
-            - 'left': First transformed image
-            - 'right': Second transformed image
-            - 'flow': Displacement field that warps right to left
-            - 'matrix': Affine matrix that warps right to left
+            - `'input'`: Input image
+            - `'left'`: First transformed image
+            - `'right'`: Second transformed image
+            - `'flow'`: Displacement field that warps right to left
+            - `'matrix'`: Affine matrix that warps right to left
                         (i.e., maps left coordinates to right coordinates)
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.left = left
@@ -1379,15 +1407,20 @@ class MakeAffinePair(NonFinalTransform):
             An instantiated transform.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'left', 'right', 'flow', 'matrix'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] str
 
-            - 'input': Input image
-            - 'left': First transformed image
-            - 'right': Second transformed image
-            - 'flow': Displacement field that warps right to left
-            - 'matrix': Affine matrix that warps right to left
+            - `'input'`: Input image
+            - `'left'`: First transformed image
+            - `'right'`: Second transformed image
+            - `'flow'`: Displacement field that warps right to left
+            - `'matrix'`: Affine matrix that warps right to left
                         (i.e., maps left coordinates to right coordinates)
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=True, returns=returns, **kwargs)
         self.subtransform = transform or RandomAffineTransform()
@@ -1434,12 +1467,14 @@ class ApplySlicewiseAffineTransform(FinalTransform):
 
         Other Parameters
         ----------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+        returns : [list or dict of] str
 
-            - 'input': First transformed image
-            - 'output': Second transformed image
-            - 'flow': Displacement field
-            - 'matrix': Stacked affine matrices (one per slice)
+            - `'input'`: First transformed image
+            - `'output'`: Second transformed image
+            - `'flow'`: Displacement field
+            - `'matrix'`: Stacked affine matrices (one per slice)
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.flow = flow
@@ -1603,15 +1638,18 @@ class SlicewiseAffineTransform(NonFinalTransform):
             Additional isotropic subsampling
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] str
 
-            - 'input': First transformed image
-            - 'output': Second transformed image
-            - 'flow': Displacement field
-            - 'matrix': Stacked affine matrices (one per slice)
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same transform to all images/channels
+            - `'input'`: First transformed image
+            - `'output'`: Second transformed image
+            - `'flow'`: Displacement field
+            - `'matrix'`: Stacked affine matrices (one per slice)
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         if unit not in ('fov', 'vox'):
@@ -1868,18 +1906,21 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             Padding mode
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'flow', 'matrix'}
-
-            - 'input': First transformed image
-            - 'output': Second transformed image
-            - 'flow': Displacement field
-            - 'matrix': Stacked affine matrices (one per slice)
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same parameters to all images/channels
-        shared_matrix : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same affine matrix to all images/channels.
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_matrix
+            Apply the same affine matrix to all images/channels.
             Default: same as `shared`.
+        returns : [list or dict of] str
+
+            - `'input'`: First transformed image
+            - `'output'`: Second transformed image
+            - `'flow'`: Displacement field
+            - `'matrix'`: Stacked affine matrices (one per slice)
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.translations = Uniform.make(make_range(translations))

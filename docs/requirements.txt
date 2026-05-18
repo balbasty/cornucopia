@@ -3,3 +3,4 @@
 # mkdocs-jupyter
 zensical>=0.0.11
 mkdocstrings[python]>=1.0.0
+markdown-grid-tables

@@ -75,6 +75,11 @@ class OpConstTransform(FinalTransform):
             Arithmetic operation
         value_name : str
             Name used when returning the rhs value
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.value = value
@@ -139,6 +144,11 @@ class FillValueTransform(FinalTransform):
             Name used when returning the mask
         value_name : str
             Name used when returning the rhs value
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.mask = mask
@@ -177,6 +187,11 @@ class ReturnValueTransform(FinalTransform):
             right-hand side of the operation
         value_name : str
             Name used when returning the rhs value
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.value = value
@@ -214,6 +229,11 @@ class AddMulTransform(FinalTransform):
             Affine slope
         offset : number or tensor
             Affine offset
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.slope = slope
@@ -253,6 +273,11 @@ class ClipTransform(FinalTransform):
             Min value
         vmax : number or tensor, optional
             Max value
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.vmin = vmin
@@ -291,8 +316,14 @@ class RandomMulTransform(RandomizedTransform):
         ----------
         value : Sampler | [pair of] float
             Bound for multiplicative value
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Apply same transform to all images/channels
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(
             MulValueTransform,
@@ -322,8 +353,14 @@ class RandomAddTransform(RandomizedTransform):
         ----------
         value : Sampler | [pair of] float
             Bound for additive value
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Apply same transform to all images/channels
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(
             AddValueTransform,
@@ -357,8 +394,14 @@ class RandomAddMulTransform(RandomizedTransform):
             Bound for slope
         offset : Sampler | [pair of] float
             Bound for offset
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Apply same transform to all images/channels
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(
             AddMulTransform,
@@ -386,6 +429,11 @@ class SplineUpsampleTransform(FinalTransform):
         prefilter : bool
             Spline prefiltering
             (True for interpolation, False for spline evaluation)
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.order = order
@@ -447,10 +495,16 @@ class BaseFieldTransform(NonFinalTransform):
             Slice thickness, if slicewise.
             Note that `shape` will be scaled along the slice direction
             so that the number of nodes is approximately preserved.
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
         returns : [list or dict of] {'input', 'output', 'field'}
-            Which tensor(s) to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply the same field to all channels
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
 
         """
         super().__init__(shared=shared, **kwargs)
@@ -667,14 +721,17 @@ class RandomMulFieldTransform(NonFinalTransform):
             If True, it will take values in `(1-vmax, 1+vmax)`.
 
         Other Parameters
-        ------------------
-        returns : [list or dict of] {'input', 'output', 'field'}
-            Which tensor(s) to return
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_field
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
+        returns : [list or dict of] {'input', 'output', 'field'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.vmax = Uniform.make(make_range(0, vmax))
@@ -744,12 +801,17 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
             along the slice direction. If None, same as `shape`.
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_field
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
+        returns : [list or dict of] {'input', 'output', 'field'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         if shape_through is not None:
@@ -848,12 +910,17 @@ class RandomAddFieldTransform(NonFinalTransform):
             Spline order
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Whether to share random parameters across tensors and/or channels
-        shared_field : {'channels', 'tensors', 'channels+tensors', ''} | bool | None
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_field
             Whether to share random field across tensors and/or channels.
             By default: same as `shared`
+        returns : [list or dict of] {'input', 'output', 'field'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.vmin = Uniform.make(make_range(vmin, 0))
@@ -911,6 +978,13 @@ class GammaFinalTransform(FinalTransform):
             Minimum value for the transform
         vmax : number | (C,) list[number] | (C,) tensor
             Maximum value for the transform
+
+        Other Parameters
+        ----------------
+        returns : [list or dict of] {'input', 'output', 'vmin', 'vmax', 'gamma'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.gamma = gamma
@@ -991,14 +1065,16 @@ class GammaTransform(NonFinalTransform):
             Value to use as the minimum (default: x.min())
         vmax : float | None
             Value to use as the maximum (default: x.max())
-        returns : [list or dict] {'input', 'output', 'vmin', 'vmax', 'gamma'}
-            Which tensors to return
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Use the same vmin/vmax for all channels
-
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [list or dict of] {'input', 'output', 'vmin', 'vmax', 'gamma'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.gamma = kwargs.pop('value', gamma)
@@ -1056,12 +1132,17 @@ class RandomGammaTransform(NonFinalTransform):
             Sampler or range for the exponent value
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply same gamma for all images/channels
-        shared_minmax : {'channels', 'tensors', 'channels+tensors', '', None}
-            Use the same vmin/vmax for all channels. Default: same as `shared`.
-
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        shared_minmax
+            Use the same vmin/vmax for all channels.
+            Default: same as `shared`.
+        returns : [list or dict of] {'input', 'output', 'vmin', 'vmax', 'gamma'}
+            See [`Transform`][cornucopia.base.Transform] for details.
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.gamma = Uniform.make(kwargs.pop('value', gamma))
@@ -1100,9 +1181,12 @@ class ZTransform(NonFinalTransform):
             Target standard deviation. If None, keep the input sd.
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Use the same mean/sigma for all images/channels
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.mu = mu
@@ -1157,6 +1241,14 @@ class QuantileTransform(NonFinalTransform):
             Clip values outside (vmin, vmax)
         max_samples : int
             Maximum number of pixels to use for quantile estimation (for speed)
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.pmin = pmin
@@ -1220,6 +1312,14 @@ class MinMaxTransform(NonFinalTransform):
             Upper target value
         clip : bool
             Clip values outside (vmin, vmax)
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.vmin = vmin

@@ -1,6 +1,6 @@
 """This module contains transforms that operate in k-space (Fourier space)."""
 __all__ = [
-    'ApplyArrayCoilTransform',
+    'ArrayCoilCombinationTransform',
     'ArrayCoilTransform',
     'SumOfSquaresTransform',
     'IntraScanMotionFinalTransform',
@@ -29,7 +29,7 @@ from . import ctx
 from . import typing as cct
 
 
-class ApplyArrayCoilTransform(FinalTransform):
+class ArrayCoilCombinationTransform(FinalTransform):
     """Apply coil sensitivities to an image and combine across coils."""
 
     def __init__(self, sens: Tensor, **kwargs) -> None:
@@ -40,14 +40,20 @@ class ApplyArrayCoilTransform(FinalTransform):
             Complex coil sensitivities
 
         Other Parameters
-        ------------------
-        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
-            Default is 'uncombined'.
+        ----------------
+        returns : [(list | dict) of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
+            Default is `'uncombined'`.
 
-            - 'sos': Sum of square combined (magnitude) image
-            - 'uncombined': Uncombined (complex) coil images
-            - 'sens': Uncombined (complex) coil sensitivities
-            - 'netsens': Net (magnitude) coil sensitivity
+            | Value          | Description                              |
+            | -------------- | ---------------------------------------- |
+            | `'sos'`        | Sum of square combined (magnitude) image |
+            | `'uncombined'` | Uncombined (complex) coil images         |
+            | `'sens'`       | Uncombined (complex) coil sensitivities  |
+            | `'netsens'`    | Net (magnitude) coil sensitivity         |
+
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.sens = sens
@@ -59,14 +65,14 @@ class ApplyArrayCoilTransform(FinalTransform):
         sos = sqrt_(square_(uncombined.abs()).sum(0))[None]
         return prepare_output(
             dict(input=x, sos=sos, output=uncombined,
-                    uncombined=uncombined, netsens=netsens, sens=sens),
+                 uncombined=uncombined, netsens=netsens, sens=sens),
             self.returns)
 
 
 class ArrayCoilTransform(NonFinalTransform):
     """Generate and apply random coil sensitivities (real or complex)"""
 
-    Final = Next = ApplyArrayCoilTransform
+    Final = Next = ArrayCoilCombinationTransform
     """The transform type returned by `make_final`."""
 
     def __init__(
@@ -100,17 +106,23 @@ class ArrayCoilTransform(NonFinalTransform):
             Number of control points for the underlying smooth component.
 
         Other Parameters
-        ------------------
-        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens'}
-            Default is 'uncombined'.
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [(list | dict) of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
+            Default is `'uncombined'`.
 
-            - 'sos': Sum of square combined (magnitude) image
-            - 'uncombined': Uncombined (complex) coil images
-            - 'sens': Uncombined (complex) coil sensitivities
-            - 'netsens': Net (magnitude) coil sensitivity
+            | Value          | Description                              |
+            | -------------- | ---------------------------------------- |
+            | `'sos'`        | Sum of square combined (magnitude) image |
+            | `'uncombined'` | Uncombined (complex) coil images         |
+            | `'sens'`       | Uncombined (complex) coil sensitivities  |
+            | `'netsens'`    | Net (magnitude) coil sensitivity         |
 
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Whether to share the sensitivities across channels/tensors
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
         self.ncoils = ncoils
@@ -174,7 +186,6 @@ class SumOfSquaresTransform(FinalTransform):
         return sqrt_(square_(abs_(x)).sum(0, keepdim=True))
 
 
-
 class IntraScanMotionFinalTransform(FinalTransform):
     """Apply pre-computed intra-scan motion"""
 
@@ -206,6 +217,25 @@ class IntraScanMotionFinalTransform(FinalTransform):
             position. This typically happens in "3D" acquisitions.
             If False, motion happens along the slice direction ("2D"
             acquisition).
+
+        Other Parameters
+        ----------------
+        returns : [(list | dict) of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
+            Default is `'sos'`.
+
+            | Value          | Description                              | Shape         |
+            | -------------- | ---------------------------------------- | ------------- |
+            | `'sos'`        | Sum of square combined (magnitude) image | `(C,X,Y,Z)`   |
+            | `'uncombined'` | Uncombined (complex) coil images         | `(K,X,Y,Z)`   |
+            | `'sens'`       | Uncombined (complex) coil sensitivities  | `(K,X,Y,Z)`   |
+            | `'netsens'`    | Net (magnitude) coil sensitivity         | `(1,X,Y,Z)`   |
+            | `'flow'`       | Displacement field in each shot          | `(N,3,X,Y,Z)` |
+            | `'matrix'`     | Rigid matrix in each shot                | `(N,4,4)`     |
+            | `'pattern'`    | Frequencies acquired in each shot        | `(N,X)`       |
+
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.motion = motion
@@ -339,20 +369,26 @@ class IntraScanMotionTransform(NonFinalTransform):
             A transform that generates a set of complex sensitivity profiles
 
         Other Parameters
-        ------------------
-        returns : [(list | dict) of] {'input', 'sos', 'uncombined', 'sens', 'netsens', 'flow', 'matrix', 'pattern'}
-            Default is 'sos'
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns : [(list | dict) of] str
+            See [`Transform`][cornucopia.base.Transform] for details.
+            Default is `'sos'`.
 
-            - 'sos': Sum of square combined (magnitude) image `(C, X, Y, Z)`
-            - 'uncombined': Uncombined (complex) coil images `(K, X, Y, Z)`
-            - 'sens': Uncombined (complex) coil sensitivities `(K, X, Y, Z)`
-            - 'netsens': Net (magnitude) coil sensitivity `(1, X, Y, Z)`
-            - 'flow': Displacement field in each shot `(N, 3, X, Y, Z)`
-            - 'matrix': Rigid matrix in each shot `(N, 4, 4)`
-            - 'pattern': Frequencies acquired in each shot `(N, X)`
+            | Value          | Description                              | Shape         |
+            | -------------- | ---------------------------------------- | ------------- |
+            | `'sos'`        | Sum of square combined (magnitude) image | `(C,X,Y,Z)`   |
+            | `'uncombined'` | Uncombined (complex) coil images         | `(K,X,Y,Z)`   |
+            | `'sens'`       | Uncombined (complex) coil sensitivities  | `(K,X,Y,Z)`   |
+            | `'netsens'`    | Net (magnitude) coil sensitivity         | `(1,X,Y,Z)`   |
+            | `'flow'`       | Displacement field in each shot          | `(N,3,X,Y,Z)` |
+            | `'matrix'`     | Rigid matrix in each shot                | `(N,4,4)`     |
+            | `'pattern'`    | Frequencies acquired in each shot        | `(N,X)`       |
 
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Whether to share the parameters across channels/tensors
+        append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
 
         """  # noqa: E501
         super().__init__(shared=shared, **kwargs)
@@ -454,7 +490,8 @@ class SmallIntraScanMotionTransform(IntraScanMotionTransform):
 
         Other Parameters
         ----------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
+        shared, append, prefix, include, exclude, consume
+            See [`IntraScanMotionTransform`][cornucopia.kspace.IntraScanMotionTransform] for details.
         """
         super().__init__(translations=translations, rotations=rotations,
                          shared=shared, shots=2, axis=axis, **kwargs)

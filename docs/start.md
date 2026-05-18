@@ -4,14 +4,91 @@ icon: fontawesome/solid/rocket
 
 # Getting started
 
-## Import
+## Import {#import}
 
 Let's start with importing cornucopia:
 ```python
 import cornucopia as cc
 ```
 
-## Overview
+## Common principles {#principles}
+
+!!! tip "Cornucopia uses an object-oriented model."
+
+    Transforms are **first instantiated**, and **then applied** to a tensor:
+    !!! example
+        ```python
+        xform = cc.ElasticTransform()
+        deformed = xform(image)
+        ```
+    See the section
+    [**Overview**](#overview) on this page.
+
+!!! tip "All transforms take tensors with *one channel dimension* and *no batch dimension*"
+
+    Their shape must be `[C, X, Y, Z]` or `[C, X, Y]`.
+
+    See the section [**Overview**](#overview) on this page.
+
+!!! tip "All transforms accept **positional or keyword** arguments."
+
+    !!! example
+        ```python
+        image, label = xform(image, label)
+        image, label = xform(img=image, lab=label)
+        ```
+
+    See the section [**Nested structures of tensors**](#nested) on this page.
+
+!!! tip "Arguments can be **nested structures of tensors**"
+
+    !!! example
+        ```python
+        output = xform({"images": [img1, img2], "labels": [lab1, lab]})
+        ```
+
+    See the section [**Nested structures of tensors**](#nested) on this page.
+
+!!! tip "The interaction between a transform and its arguments can be controlled."
+
+    Users can control how transforms interact with the arguments on which
+    they act using the attributes `include`, `exclude`, `consume`, and `returns`.
+
+    See [`Transform`][cornucopia.base.Transform] and the section
+    [**Apply different transforms to different tensors**](#map) on this page.
+
+!!! tip "Transforms are _final_, _non-final_ and/or _special_."
+
+    A [`Transform`][cornucopia.base.Transform] can be a
+    [`FinalTransform`][cornucopia.base.FinalTransform],
+    [`NonFinalTransform`][cornucopia.base.NonFinalTransform], or
+    [`SpecialTransform`][cornucopia.base.SpecialTransform].
+
+    - Final transforms are fully deterministic and are applied in the same
+      way to each input.
+    - Non-final tranforms generate a final transform. It may either be
+      because their parameters interact with the shape or content of a tensor,
+      or because some of their parameters are randomized.
+    - Special transforms act on other transforms. They never directly
+      inherit from [`FinalTransform`][cornucopia.base.FinalTransform], but
+      can still be deterministic if the transforms that they act on are
+      themselves final. They may or may not also inherit from
+      [`NonFinalTransform`][cornucopia.base.NonFinalTransform].
+
+!!! tip "Non-final transforms can share their parameters across channels and/or tensors"
+
+    This can be controlled by their `shared` attribute, whose default
+    value depends on each transform:
+
+    - For some of them, sharing does not make sense. For example, new
+      Gaussian noise should be sampled for each tensor and each channel.
+    - For others, sharing is more intuitive. For example geometric
+      transforms, or transforms that modify the field of view are shared
+      by default.
+
+    Cornucopia uses sensible defaults for each transform.
+
+## Overview {#overview}
 
 Transforms are simply Pytorch modules that expect tensors with a channel but
 no batch dimension (e.g., `[C, X, Y, Z]`).
@@ -62,7 +139,7 @@ to re-sample noise in each channel). In general, `shared` can take the values:
 - `""` or `False`: a different set of parameteres is sampled for each
   channel of each tensor.
 
-## Random transforms
+## Random transforms {#random}
 
 We offer utilities to randomly activate the application of a transform,
 or randomly choose a transform to apply from a set of transforms:
@@ -82,7 +159,7 @@ img = (gauss | chi)(img)                           # -> SwitchTransform
 img = cc.ctx.switch({gauss: 0.5, chi: 0.5})(img)   # -> SwitchTransform
 ```
 
-## Sequences of transforms
+## Sequences of transforms {#sequence}
 
 Transforms can be composed together using the `SequentialTransform` class,
 or by simply adding them together:
@@ -100,7 +177,7 @@ seq = cc.ElasticTransform() + cc.GaussianNoiseTransform()
 img = seq(img)
 ```
 
-## Randomized parameters
+## Randomized parameters {#randomized}
 
 Better augmentation can be obtained if the parameters of a random transform
 (_e.g._, Gaussian noise variance) are themselves sampled from a prior
@@ -117,7 +194,7 @@ hypernoise = cc.ctx.randomize(cc.GaussianNoise, cc.Uniform(0, 10))
 img = hypernoise(img)
 ```
 
-## Nested structures of tensors
+## Nested structures of tensors {#nested}
 
 Last but not least, transforms accept any nested collection
 (`list`, `tuple`, `dict`) of tensors, applies the transform to each
@@ -155,7 +232,7 @@ img1, lab1 = dat['image'], dat['label']
 # etc.
 ```
 
-## Apply different transforms to different tensors
+## Apply different transforms to different tensors {#map}
 
 It is then possible to take advantage of positional arguments, keywords
 and/or dictionaries to apply some transforms to a subset of inputs.
@@ -201,7 +278,7 @@ trf = cc.SequentialTranform([geom, cc.ctx.exclude(noise, "label")])
 img, lab = trf(image=img, label=lab)
 ```
 
-## Batching
+## Batching {#batch}
 
 Because cornucopia transforms are implemented in pure PyTorch, they can be run
 **on the CPU or GPU**, and benefit greatly from being run on the GPU.

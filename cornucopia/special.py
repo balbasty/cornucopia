@@ -44,13 +44,15 @@ from .baseutils import recursive_cat
 class BatchedTransform(nn.Module):
     """Apply a transform to a batch
 
-    !!! example
-        Functional call:
+    !!! note "[`ctx.batch`][cornucopia.ctx.batch] is an alias for [`BatchedTransform`][cornucopia.special.BatchedTransform]"
+
+    !!! example "Functional call"
         ```python
         batched_transform = cc.ctx.batch(transform)
         img, lab = batched_transform(img, lab)  # input shapes: [B, C, X, Y, Z]
         ```
-        Object call:
+
+    !!! example "Object call"
         ```python
         batched_transform = cc.BatchedTransform(transform)
         img, lab = batched_transform(img, lab)  # input shapes: [B, C, X, Y, Z]

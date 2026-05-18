@@ -43,20 +43,20 @@ class Transform(nn.Module, ABC):
             Which tensors to return. Can be a nested structure.
             Most transforms accept `'input'` and `'output'` as valid
             returns. The default is `'output'`.
-        append : bool, default=False
+        append : bool
             Append the (structure of) returned tensors to the parent
             structure.
-        prefix : bool or str, default=True
+        prefix : bool | str
             If `append` and parent is a dict, prefix the returned key
             before inserting it in the output dictionary.
             If `True`, the prefix is the input key.
-        include : str or list[str], optional
+        include : [list of] str, optional
             List of keys to which the transform should apply.
             Default: all.
-        exclude : str or list[str], optional
+        exclude : [list of] str, optional
             List of keys to which the transform should not apply.
             Default: none.
-        consume : str or list[str], optional
+        consume : [list of] str, optional
             List of keys to remove from the output after applying the
             transform. Default: none.
 
@@ -73,11 +73,25 @@ class Transform(nn.Module, ABC):
 
     @property
     def is_final(self) -> bool:
-        """Whether the transform is final (i.e., deterministic) or not."""
+        """
+        Returns
+        -------
+        bool
+            Whether the transform is final (i.e., deterministic) or not.
+        """
         return False
 
     def get_prm(self) -> dict:
-        """Get the parameters of the transform, for use in subtransforms."""
+        """Get the parameters of the transform, for use in subtransforms.
+
+        Returns
+        -------
+        dict
+            A dictionary containing the attributes
+            `returns`, `append`, `prefix`, `include`, `exclude`, and
+            `consume`.
+
+        """
         return dict(
             returns=self.returns,
             append=self.append,
@@ -490,19 +504,7 @@ class FinalTransform(Transform):
         return self
 
 
-class IdentityTransform(FinalTransform):
-    """Identity transform"""
-
-    def xform(
-        self, x: Tensor, /, args: Arguments = NoArguments()
-    ) -> Returned:
-        return prepare_output(dict(input=x, output=x), self.returns)
-
-    def make_inverse(self) -> "IdentityTransform":
-        return self
-
-
-class SharedMixin:
+class _SharedMixin:
     """
     Mixin for transforms that have parameters (e.g. random ones)
     that may be shared across tensors and/or channels or independent
@@ -578,31 +580,65 @@ class SharedMixin:
         ], **prm).safe_make_final(x, max_depth-1)
 
 
-class NonFinalTransform(SharedMixin, Transform):
+class NonFinalTransform(_SharedMixin, Transform):
     """
     Transforms whose parameters depend on features of the input
-    transform (shape, dtype, etc)
+    transform (shape, dtype, etc).
 
-    Parameters
-    ----------
-    shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
-
-        - 'channel': the same transform is applied to all channels
-            in a tensor, but different transforms are used in different
-            tensors.
-        - 'tensors': the same transform is applied to all tensors,
-            but with a different transform for each channel.
-        - 'channels+tensors' or True: the same transform is applied
-            to all channels of all tensors.
-        - '' or False: A different transform is applied to each
-            channel and each tensor.
+    Non-final transforms implement `make_final`, and do not implement
+    `xform`. Their aim is to generate a more-specialized transform
+    at call time.
     """
     def __init__(self, *, shared: bool = False, **kwargs) -> None:
+        """
+        Parameters
+        ----------
+        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
+
+            - `'channel'`: the same transform is applied to all channels
+                in a tensor, but different transforms are used in different
+                tensors.
+            - `'tensors'`: the same transform is applied to all tensors,
+                but with a different transform for each channel.
+            - `'channels+tensors'` or `True`: the same transform is applied
+                to all channels of all tensors.
+            - `''` or `False`: A different transform is applied to each
+                channel and each tensor.
+        """
         super().__init__(**kwargs)
         self.shared = self._prepare_shared(shared)
 
 
-class SequentialTransform(SharedMixin, Transform):
+class SpecialTransform(Transform):
+    """Base class for transforms that act on other transforms.
+
+    Such transforms cannot be easily classified as "final" or "non-final",
+    because this characeteristic depends on the transforms that they embed.
+
+    They all implement `make_final`, but some may also implement a
+    "fast-track" `xform` that is applied in simple cases (e.g., when
+    the transform is not shared across tensors) for efficiency.
+
+    !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+        Added `SpecialTransform` class in `v0.5`."
+        Before this, special transforms inherited directly from `Transform`.
+    """
+    ...
+
+
+class IdentityTransform(FinalTransform):
+    """Identity transform"""
+
+    def xform(
+        self, x: Tensor, /, args: Arguments = NoArguments()
+    ) -> Returned:
+        return prepare_output(dict(input=x, output=x), self.returns)
+
+    def make_inverse(self) -> "IdentityTransform":
+        return self
+
+
+class SequentialTransform(_SharedMixin, SpecialTransform):
     """A sequence of transforms
 
     !!! example
@@ -631,21 +667,11 @@ class SequentialTransform(SharedMixin, Transform):
 
         Other Parameters
         ------------------
-        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
-
-            - 'channel': the same sequence is applied to all channels
-                in a tensor, but different transforms are used in different
-                tensors.
-            - 'tensors': the same transform is applied to all tensors,
-                but with a different transform for each channel.
-            - 'channels+tensors' or True: the same transform is applied
-                to all channels of all tensors.
-            - None or False: A different transform is applied to each
-                channel and each tensor.
-        include : str or list[str]
-            List of keys to which the transform should apply
-        exclude : str or list[str]
-            List of keys to which the transform should not apply
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         shared = kwargs.pop('shared', False)
         super().__init__(**kwargs)
@@ -727,7 +753,7 @@ class SequentialTransform(SharedMixin, Transform):
         return f'{type(self).__name__}({repr(self.transforms)})'
 
 
-class PerChannelTransform(Transform):
+class PerChannelTransform(SpecialTransform):
     """Apply a different transform to each channel"""
 
     def __init__(self, transforms: List[Transform], **kwargs) -> None:
@@ -774,8 +800,10 @@ class PerChannelTransform(Transform):
         return all(t.is_final for t in self.transforms)
 
 
-class MaybeTransform(SharedMixin, Transform):
+class MaybeTransform(_SharedMixin, SpecialTransform):
     """Randomly apply a transform
+
+    !!! note "[`ctx.maybe`][cornucopia.ctx.maybe] is an alias for [`MaybeTransform`][cornucopia.special.MaybeTransform]"
 
     !!! example "20% chance of adding noise"
         ```python
@@ -846,8 +874,10 @@ class MaybeTransform(SharedMixin, Transform):
         return s
 
 
-class SwitchTransform(SharedMixin, Transform):
+class SwitchTransform(_SharedMixin, SpecialTransform):
     """Randomly choose a transform to apply
+
+    !!! note "[`ctx.switch`][cornucopia.ctx.switch] is an alias for [`SwitchTransform`][cornucopia.special.SwitchTransform]"
 
     !!! example "Randomly apply either Gaussian or Chi noise"
         ```python
@@ -963,9 +993,11 @@ class SwitchTransform(SharedMixin, Transform):
         return s
 
 
-class IncludeKeysTransform(Transform):
+class IncludeKeysTransform(SpecialTransform):
     """
     Context manager for keys to include
+
+    !!! note "[`ctx.include`][cornucopia.ctx.include] is an alias for [`IncludeKeysTransform`][cornucopia.special.IncludeKeysTransform]"
 
     !!! example "Use as a transform"
         ```python
@@ -1057,10 +1089,12 @@ class IncludeKeysTransform(Transform):
         delattr(self, 'include')
 
 
-class ExcludeKeysTransform(Transform):
+class ExcludeKeysTransform(SpecialTransform):
     """
     Context manager for keys to exclude.
     Can also be used as a transform.
+
+    !!! note "[`ctx.exclude`][cornucopia.ctx.exclude] is an alias for [`ExcludeKeysTransform`][cornucopia.special.ExcludeKeysTransform]"
 
     !!! example "Use as a transform"
         ```python
@@ -1152,10 +1186,12 @@ class ExcludeKeysTransform(Transform):
         delattr(self, 'exclude')
 
 
-class ConsumeKeysTransform(Transform):
+class ConsumeKeysTransform(SpecialTransform):
     """
     Context manager for keys to consume.
     Can also be used as a transform.
+
+    !!! note "[`ctx.consume`][cornucopia.ctx.consume] is an alias for [`ConsumeKeysTransform`][cornucopia.special.ConsumeKeysTransform]"
 
     !!! example "Use as a transform"
         ```python
@@ -1250,10 +1286,12 @@ class ConsumeKeysTransform(Transform):
         delattr(self, 'consume')
 
 
-class SharedTransform(SharedMixin, Transform):
+class SharedTransform(_SharedMixin, SpecialTransform):
     """
     Context manager for sharing transforms across channels / tensors.
     Can also be used as a transform.
+
+    !!! note "[`ctx.shared`][cornucopia.ctx.shared] is an alias for [`SharedTransform`][cornucopia.special.SharedTransform]"
 
     !!! example "Use as a context manager (alias)"
         ```python
@@ -1271,16 +1309,16 @@ class SharedTransform(SharedMixin, Transform):
         ----------
         transform : Transform
             Transform to apply
-        mode : {'channels', 'tensors', 'channels+tensor', ''}
+        mode : {'channels', 'tensors', 'channels+tensor', ''} | bool
 
-            - 'channel': the same transform is applied to all channels
+            - `'channel'`: the same transform is applied to all channels
                 in a tensor, but different transforms are used in different
                 tensors.
-            - 'tensors': the same transform is applied to all tensors,
+            - `'tensors'`: the same transform is applied to all tensors,
                 but with a different transform for each channel.
-            - 'channels+tensors' or True: the same transform is applied
+            - `'channels+tensors'` or `True`: the same transform is applied
                 to all channels of all tensors.
-            - None or False: A different transform is applied to each
+            - `''` or `False`: A different transform is applied to each
                 channel and each tensor.
 
         """
@@ -1308,9 +1346,11 @@ class SharedTransform(SharedMixin, Transform):
         delattr(self, 'saved_mode')
 
 
-class ReturningTransform(Transform):
+class ReturningTransform(SpecialTransform):
     """
     Context manager for sharing transforms across channels / tensors
+
+    !!! note "[`ctx.returns`][cornucopia.ctx.returns] is an alias for [`ReturningTransform`][cornucopia.special.ReturningTransform]"
 
     !!! example "Use as a context manager (alias)"
         ```python
@@ -1339,9 +1379,11 @@ class ReturningTransform(Transform):
         delattr(self, 'saved_returns')
 
 
-class MappedTransform(Transform):
+class MappedTransform(SpecialTransform):
     """
     Transforms that are applied to specific positional or arguments
+
+    !!! note "[`ctx.map`][cornucopia.ctx.map] is an alias for [`MappedTransform`][cornucopia.special.MappedTransform]"
 
     !!! example
         ```python
@@ -1361,7 +1403,6 @@ class MappedTransform(Transform):
                'seg': torch.randn([3, 32, 32]).softmax(0)}
         dat = MappedTransform(img=GaussianNoise(), nested=True)(dat)
         ```
-
     """
 
     def __init__(
@@ -1457,11 +1498,11 @@ class MappedTransform(Transform):
         return f'{type(self).__name__}({s})'
 
 
-class RandomizedTransform(NonFinalTransform):
+class RandomizedTransform(SpecialTransform, NonFinalTransform):
     """
     Transform generated by randomizing some parameters of another transform.
 
-    !!! note "`ctx.randomize` is an alias for `RandomizedTransform`"
+    !!! note "[`ctx.randomize`][cornucopia.ctx.randomize] is an alias for [`RandomizedTransform`][cornucopia.special.RandomizedTransform]"
 
     !!! example "Gaussian noise with randomized variance"
         Object call

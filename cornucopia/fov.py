@@ -45,6 +45,11 @@ class FlipTransform(FinalTransform):
         ----------
         axis : [list of] int
             Axes to flip. By default, flip all spatial axes.
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.axis = axis
@@ -81,8 +86,11 @@ class RandomFlipTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply the same flip to all channels and/or tensors
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         axes = kwargs.pop('axis', axes)
         super().__init__(shared=shared, **kwargs)
@@ -115,6 +123,11 @@ class PermuteAxesTransform(FinalTransform):
         permutation : [list of] int
             Axes permutation. By default, reverse axes.
             Only applies to spatial axes, so axes are numbered [C, 0, 1, 2]
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.permutation = permutation
@@ -156,8 +169,11 @@ class RandomPermuteAxesTransform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply the same permutation to all channels and/or tensors
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
@@ -196,6 +212,11 @@ class Rot90Transform(FinalTransform):
             Rotate by -90 deg instead of 90 deg
         double : [list of] bool
             Rotate be 180 instead of 90 (`negative` is then unused)
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.axis = ensure_list(axis)
@@ -236,6 +257,11 @@ class Rot180Transform(Rot90Transform):
         ----------
         axis : [list of] int
             Rotation axis (indexing does not account for the channel axis)
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(axis, double=True, **kwargs)
 
@@ -268,8 +294,11 @@ class RandomRot90Transform(NonFinalTransform):
 
         Other Parameters
         ----------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply the same permutation to all channels and/or tensors
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
@@ -326,6 +355,11 @@ class CropPadTransform(FinalTransform):
             Boundary condition for padding
         value : number
             Padding value in case `bound='constant`
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.crop = crop
@@ -373,8 +407,12 @@ class PatchTransform(NonFinalTransform):
             Boundary condition in case padding is needed
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensor', ''} | bool
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         kwargs.setdefault('shared', shared)
         super().__init__(**kwargs)
@@ -438,12 +476,15 @@ class RandomPatchTransform(NonFinalTransform):
             Boundary condition in case padding is needed
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''} | bool
-            Extract the same patch from all channels and/or tensors
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
 
             !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                         Default for `shared` changed from `"channels"` to `True`"
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         shape = kwargs.pop('patch_size', shape)  # support legacy name
         kwargs.setdefault('shared', shared)
@@ -485,8 +526,19 @@ class CropTransform(NonFinalTransform):
             Padding unit
         side : {'pre', 'post', 'both', None}
             Side to crop
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                        Default for `shared` changed from `"channels"` to `True`"
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
-        kwargs.setdefault('shared', 'channels')
+        kwargs.setdefault('shared', True)
         super().__init__(**kwargs)
         self.cropping = cropping
         self.unit = unit
@@ -547,8 +599,19 @@ class PadTransform(NonFinalTransform):
             Boundary condition
         value : float
             Value for case `bound='constant'`
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                        Default for `shared` changed from `"channels"` to `True`"
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
-        kwargs.setdefault('shared', 'channels')
+        kwargs.setdefault('shared', True)
         super().__init__(**kwargs)
         self.padding = padding
         self.unit = unit
@@ -611,8 +674,19 @@ class PowerTwoTransform(NonFinalTransform):
             Ensure that the shape can be divided by 2 ** exponent
         bound : [list of] str
             Boundary condition for padding
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                        Default for `shared` changed from `"channels"` to `True`"
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
-        kwargs.setdefault('shared', 'channels')
+        kwargs.setdefault('shared', True)
         super().__init__(**kwargs)
         self.exponent = exponent
         self.bound = bound

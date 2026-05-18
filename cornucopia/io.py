@@ -34,6 +34,11 @@ class ToTensorTransform(FinalTransform):
             Returned data type (default: keep same)
         device : torch.device, optional
             Returned device (default: keep same)
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.dim = ndim
@@ -99,6 +104,8 @@ class LoadTransform(FinalTransform):
         field : str, default="arr_0"
             Field to load from a npz file.
             Only used by `NumpyLoader`.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(
             returns=returns,

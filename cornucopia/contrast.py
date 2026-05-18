@@ -39,6 +39,11 @@ class ContrastMixtureFinalTransform(FinalTransform):
             New means for each class.
         sigma : (K, C, C) tensor
             New covariances for each class.
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.z = z
@@ -121,9 +126,12 @@ class ContrastMixtureTransform(NonFinalTransform):
             The background class is the class with minimum mean value.
 
         Other Parameters
-        ------------------
-        shared : {'channels', 'tensors', 'channels+tensors', ''}
-            Apply the same contrast offset to all channels and/or tensors
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.keep_background = keep_background
@@ -181,6 +189,11 @@ class ContrastLookupFinalTransform(FinalTransform):
             The limits of each input bin.
         mu : (K,) tensor
             The new mean value for each bin.
+
+        Other Parameters
+        ----------------
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(**kwargs)
         self.edges = edges
@@ -217,6 +230,14 @@ class ContrastLookupTransform(NonFinalTransform):
         keep_background : bool
             Do not change background mean/cov.
             The background class is the class with minimum mean value.
+
+        Other Parameters
+        ----------------
+        shared
+            See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
+            for details.
+        returns, append, prefix, include, exclude, consume
+            See [`Transform`][cornucopia.base.Transform] for details.
         """
         super().__init__(shared=shared, **kwargs)
         self.keep_background = keep_background
