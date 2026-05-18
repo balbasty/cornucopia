@@ -13,14 +13,14 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-requires-python = ">= 3.6"
+requires-python = ">= 3.7"
 dependencies = [
-    "torch >= 1.8",
-    "numpy",
+    "torch >= 1.8",             # torch.fft
+    "numpy >= 1.20",            # numpy.typing
+    "torch-interpol >= 0.3",    # avoids torch.jit.script deprecation warning
+    "torch-distmap >= 0.3",     # avoids torch.jit.script deprecation warning
+    "typing_extensions >= 4.7", # last version that supports python 3.7
     "nibabel",
-    "torch-interpol >= 0.3",
-    "torch-distmap >= 0.3",
-    "typing_extensions",
 ]
 
 [project.urls]
