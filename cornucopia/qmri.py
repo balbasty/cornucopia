@@ -344,6 +344,7 @@ class OptimalShimTransform(NonFinalTransform):
         lam_abs: float = 1,
         lam_grad: float = 10,
         mask: tx.Union[bool, Tensor] = True,
+        isocenter: tx.Optional[cct.VectorLike[float]] = None,
         **kwargs
     ) -> None:
         """
@@ -358,6 +359,9 @@ class OptimalShimTransform(NonFinalTransform):
             Regularization factor for first order gradients
         mask : bool | Tensor
             Mask zeros/NaNs from objective functions
+        isocenter : (3|2,) tensor | [list of] float
+            Coordinates of the isocenter, in voxels.
+            Defaults to the center of the image.
 
         Other Parameters
         ------------------
@@ -368,6 +372,7 @@ class OptimalShimTransform(NonFinalTransform):
         self.lam_abs = lam_abs
         self.lam_grad = lam_grad
         self.mask = mask
+        self.isocenter = isocenter
 
     def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
@@ -379,9 +384,16 @@ class OptimalShimTransform(NonFinalTransform):
             mask = (x != 0) if self.mask else None
         elif mask is False:
             mask = None
-        shim = b0.shim(x, max_order=self.max_order, ndim=x.ndim-1, mask=mask,
-                       lam_abs=self.lam_abs, lam_grad=self.lam_grad,
-                       returns='correction').neg_()
+        shim = b0.shim(
+            x,
+            max_order=self.max_order,
+            ndim=x.ndim-1,
+            mask=mask,
+            lam_abs=self.lam_abs,
+            lam_grad=self.lam_grad,
+            isocenter=self.isocenter,
+            returns='correction'
+        ).neg_()
         return AddValueTransform(
             shim, value_name='shim', **self.get_prm()
         ).make_final(x, max_depth-1)
@@ -666,7 +678,7 @@ class ApplyB0DistortionTransform(FinalTransform):
 
         y = None
         if 'output' in required:
-            mode = 'linear'
+            mode = 'bilinear'
             if not x.dtype.is_floating_point and self.nearest_if_label:
                 mode ='nearest'
             y = warps.apply_flow(x[None], flow.movedim(1, -1), mode=mode)[0]
