@@ -494,10 +494,14 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
         mask = mask.expand(fmap.shape)
 
     # compute gradients
-    gmap = diff(fmap, ndim)
-    gmap = torch.cat([gmap, fmap.unsqueeze(-1)], -1)
-    gmap[..., :-1] *= lam_grad
-    gmap[..., -1] *= lam_abs
+    if lam_grad != 0:
+        gmap = diff(fmap, ndim)
+        gmap *= lam_grad
+        if lam_abs != 0:
+            gmap = torch.cat([gmap, fmap.unsqueeze(-1)], -1)
+            gmap[..., -1] *= lam_abs
+    else:
+        gmap = fmap.unsqueeze(-1) * lam_abs
     if mask is not None:
         gmap[mask, :] = 0
     gmap = gmap.reshape([*batch, -1])   # (*batch, k)
@@ -507,11 +511,15 @@ def shim(fmap, max_order=2, mask=None, isocenter=None, ndim=None,
     for i in range(0, max_order + 1):
         b0 = spherical_harmonics(shape, i, isocenter, **backend)
         b0 = torch.movedim(b0, -1, 0)
-        b = diff(b0, ndim)
-        b = torch.cat([b, b0.unsqueeze(-1)], -1)
+        if lam_grad != 0:
+            b = diff(b0, ndim)
+            b *= lam_grad
+            if lam_abs != 0:
+                b = torch.cat([b, b0.unsqueeze(-1)], -1)
+                b[..., -1] *= lam_abs
+        else:
+            b = b0.unsqueeze(-1) * lam_abs
         del b0
-        b[..., :-1] *= lam_grad
-        b[..., -1] *= lam_abs
         if mask is not None:
             b[mask.expand(b.shape[:-1]), :] = 0
         b = b.reshape([b.shape[0], *batch, -1])
@@ -597,15 +605,19 @@ def spherical_harmonics(shape, order=2, isocenter=None, **backend):
         return ramps
     # order == 2
     if ndim == 3:
-        basis = [ramps[..., 0] * ramps[..., 1],
-                 ramps[..., 0] * ramps[..., 2],
-                 ramps[..., 1] * ramps[..., 2],
-                 ramps[..., 0].square() - ramps[..., 1].square(),
-                 ramps[..., 0].square() - ramps[..., 2].square()]
+        basis = [
+            ramps[..., 0] * ramps[..., 1],
+            ramps[..., 0] * ramps[..., 2],
+            ramps[..., 1] * ramps[..., 2],
+            ramps[..., 0].square() - ramps[..., 1].square(),
+            ramps[..., 0].square() - ramps[..., 2].square()
+        ]
         return torch.stack(basis, -1)
     else:  # basis == 2
-        basis = [ramps[..., 0] * ramps[..., 1],
-                 ramps[..., 0].square() - ramps[..., 1].square()]
+        basis = [
+            ramps[..., 0] * ramps[..., 1],
+            ramps[..., 0].square() - ramps[..., 1].square()
+        ]
         return torch.stack(basis, -1)
 
 
