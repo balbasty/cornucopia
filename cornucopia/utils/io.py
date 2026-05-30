@@ -72,6 +72,7 @@ class BabelLoader(Loader):
 
         shape = x.shape[-3:]
         aff = torch.as_tensor(f.affine)
+        affbackend = dict(dtype=aff.dtype, device=aff.device)
         voxel_size = (aff[:3, :3] ** 2).sum(0) ** 0.5
 
         if self.to_ras is True:
@@ -93,29 +94,37 @@ class BabelLoader(Loader):
                 voxel_size = voxel_size[perm]
             else:
                 # Provided RAS voxel size
-                voxel_size = make_vector(
-                    self.to_ras, 3, dtype=aff.dtype, device=aff.device)
+                voxel_size = make_vector(self.to_ras, 3, **affbackend)
 
-            aff0 = torch.eye(4)
+            aff0 = torch.eye(4, **affbackend)
             aff0[[0, 1, 2], [0, 1, 2]] = voxel_size
             vox2vox = aff0.inverse().matmul(aff)
 
-            corners = itertools.product([False, True], repeat=self.ndim)
+            # Compute bounding box in canonical space
+            corners = itertools.product([False, True], repeat=3)
             corners = [
                 [shape[i] - 1 if top else 0 for i, top in enumerate(c)] + [1]
                 for c in corners
             ]
-            corners = np.asarray(corners).T
+            corners = torch.asarray(corners, **affbackend).T
             corners = vox2vox[:3, :].matmul(corners)
-            mx = torch.max(corners, dim=1).values.floor().to(torch.int64)
-            mn = torch.min(corners, dim=1).values.ceil().to(torch.int64)
+            mn = torch.min(corners, dim=1).values.floor().to(torch.int64)
+            mx = torch.max(corners, dim=1).values.ceil().to(torch.int64)
             shape = (mx - mn + 1).tolist()
-            offset = np.eye(4)
+            offset = torch.eye(4, **affbackend)
             offset[:3, -1] = mn
-            aff = aff0 @ offset
 
-            flow = affine_flow(aff0, shape, with_identity=True)
-            x = apply_flow(x[None], flow, has_identity=True)[0]
+            # Compute canonical affine
+            aff0 = aff0 @ offset
+
+            # Resample in canonical spaces
+            mode = 'bilinear' if x.is_floating_point() else 'nearest'
+            vox2vox = aff.inverse().matmul(aff0).to(x.device, torch.float32)
+            flow = affine_flow(vox2vox, shape, with_identity=True)
+            batch = x.shape[:-3]
+            x = x.reshape([-1, *x.shape[-3:]])
+            x = apply_flow(x[None], flow, has_identity=True, mode=mode)[0]
+            x = x.reshape([*batch, *x.shape[-3:]])
 
         # --- squeeze axes to match (C, *spatial) ---
 
