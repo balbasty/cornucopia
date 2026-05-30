@@ -27,7 +27,7 @@ import torch
 
 # internal
 from .utils.py import ensure_list
-from .utils.smart_inplace import add_, mul_, exp_
+from .utils.smart_inplace import add_, div_, mul_, exp_, square_
 
 # aliases
 _builtin_min, _builtin_max, _builitin_sum = min, max, sum
@@ -991,6 +991,121 @@ class UniformSphere(Sampler):
         if n is None or isinstance(n, int):
             return x.tolist()
         return x
+
+
+class MultivatiateNormal(Sampler):
+
+    class Parameters(Sampler.Parameters):
+
+        @property
+        def mean(self):
+            return self.mu
+
+        @property
+        def cov(self):
+            return self.sigma
+
+    def __init__(self, mu=None, sigma=None, **kwargs):
+        super().__init__(mu=mu, sigma=sigma, **kwargs)
+
+    def _use_torch(self, n):
+        return (
+            torch.is_tensor(self.mu) or
+            torch.is_tensor(self.sigma) or
+            isinstance(n, (list, tuple))
+        )
+
+    def __call__(self, n=None, **backend):
+        # prepare parameters
+        mu = torch.as_tensor(self.mu, **backend)
+        sigma = torch.as_tensor(self.sigma, **backend)
+        k = _builtin_max(sigma.shape[-1], mu.shape[-1] if mu.shape else 1)
+        mu = mu.expand(mu.shape[:-1] + (k,))
+        sigma = sigma.expand(sigma.shape[:-2] + (k, k))
+
+        # sample
+        n = tuple(ensure_list(n or []))
+        x = torch.distributions.MultivariateNormal(mu, sigma).sample(n)
+
+        # return
+        return x.tolist() if not self._use_torch(n) else x
+
+
+class SquaredExponentialGP(Sampler):
+
+    def __init__(self, mu=0, sigma=1, l=1, **kwargs):
+        super().__init__(mu=mu, sigma=sigma, l=l, **kwargs)
+
+    def __call__(self, n=None, **backend):
+        backend.setdefault('dtype', torch.get_default_dtype())
+
+        n = ensure_list(n or [])
+        k = n[-1] if n else 1
+        n = n[:-1]
+
+        # compute covariance matrix
+        l = torch.as_tensor(self.l, **backend)
+        x = torch.arange(k, **backend)
+        cov = square_(x[:, None] - x[None, :])
+        cov = div_(cov, 2*(l*l))
+        cov = exp_(cov)
+
+        # scale by sigma
+        sig = torch.as_tensor(self.sigma, **backend)[..., None, None]
+        cov *= sig
+
+        return MultivatiateNormal(mu=self.mu, sigma=cov)(n, **backend)
+
+
+class AbsoluteExponentialGP(Sampler):
+
+    def __init__(self, mu=0, sigma=1, l=1, **kwargs):
+        super().__init__(mu=mu, sigma=sigma, l=l, **kwargs)
+
+    def __call__(self, n=None, **backend):
+        backend.setdefault('dtype', torch.get_default_dtype())
+
+        n = ensure_list(n or [])
+        k = n[-1] if n else 1
+        n = n[:-1]
+
+        # compute covariance matrix
+        l = torch.as_tensor(self.l, **backend)
+        x = torch.arange(k, **backend)
+        cov = (x[:, None] - x[None, :]).abs()
+        cov = mul_(div_(cov, l), -1)
+        cov = exp_(cov)
+
+        # scale by sigma
+        sig = torch.as_tensor(self.sigma, **backend)[..., None, None]
+        cov *= sig
+
+        return MultivatiateNormal(mu=self.mu, sigma=cov)(n, **backend)
+
+
+if False:  # WIP
+    class MatternGP(Sampler):
+
+        def __init__(self, mu=0, sigma=1, l=1, nu=0.5, **kwargs):
+            super().__init__(
+                **self.Parameters.make(mu=mu, sigma=sigma, l=l, nu=nu, **kwargs)
+            )
+
+        def __call__(self, n=None, **backend):
+            n = ensure_list(n or [])
+            k = n[-1] if n else 1
+            n = n[:-1]
+
+            # compute covariance matrix
+            l = torch.as_tensor(self.l, **backend)
+            nu = torch.as_tensor(self.nu, **backend)
+            x = torch.arange(k, **backend)
+            d = (x[:, None] - x[None, :]).abs()
+            d = mul_(d, (2*nu)**0.5 / l)
+            d = d.pow(nu) * torch.special.modified_bessel_k0
+            cov = exp_(d)
+
+            return MultivatiateNormal(mu=self.mu, sigma=cov)(n, **backend)
 
 
 class TransformedSampler(Sampler):
