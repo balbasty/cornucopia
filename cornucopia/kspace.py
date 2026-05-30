@@ -145,8 +145,8 @@ class ArrayCoilTransform(NonFinalTransform):
         smooth_bias = MulFieldTransform(shape=self.shape, vmin=-1, vmax=1)
         smooth_bias = smooth_bias(fake_x)
         phase = smooth_bias[::2].atan2(smooth_bias[1::2])
-        magnitude = sqrt_(smooth_bias[0::2].square() +
-                          smooth_bias[1::2].square())
+        magnitude = sqrt_(add_(smooth_bias[0::2].square(),
+                               smooth_bias[1::2].square()))
 
         fov = torch.as_tensor(x.shape[1:], **backend)
         fwhm = self.fwhm
