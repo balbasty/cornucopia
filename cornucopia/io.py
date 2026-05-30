@@ -141,7 +141,6 @@ class LoadTransform(FinalTransform):
                                       **self.kwargs)(x)
                     except Exception as e:
                         exceptions.append(str(e))
-                        pass
 
         all_loaders = set(loader for loader_ext in loaders.values()
                           for loader in loader_ext)
