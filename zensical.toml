@@ -12,6 +12,7 @@ nav = [
     {"Random intra-scan motion" = "examples/motion.md"},
     {"Contrast augmentation" = "examples/contrast.md"},
     {"Label augmentation" = "examples/labels.md"},
+    {"Synthetic MRIs" = "examples/synth.md"},
     {"Quantitative MRIs" = "examples/qmri.md"},
     {"Random coil sensitivities" = "examples/coils.md"},
     {"Benchmark" = "examples/benchmark.md"}
