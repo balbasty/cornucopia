@@ -99,7 +99,6 @@ def test_backward_psf_slicelowres():
     r = torch.full([], 5.0, requires_grad=True)
     t = torch.full([], 0.5, requires_grad=True)
     y = LowResSliceTransform(resolution=r, thickness=t)(x)
-    print(x)
     y.sum().backward()
     assert (r.grad is not None) and (t.grad is not None)
 

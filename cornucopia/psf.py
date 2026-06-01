@@ -224,10 +224,8 @@ class LowResSliceTransform(NonFinalTransform):
             ]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
             if not noise.is_final:
-                print("make_final:", fake_x.shape, noise, max_depth)
                 noise = noise.make_final(fake_x, max_depth)
                 max_depth -= 1
-                print(noise)
 
         return self.Next(
             self.axis, self.resolution, self.thickness, noise,
