@@ -110,7 +110,9 @@ def returns_find(flag, returned, returns):
         else:
             return None
     if isinstance(returns, dict):
-        return returned.get(flag, None)
+        for key, value in returns.items():
+            if value == flag:
+                return returned.get(key, None)
     elif isinstance(returns, (list, tuple, set)):
         if flag in returns:
             return returned[returns.index(flag)]
