@@ -494,13 +494,22 @@ class HertzToPhaseTransform(FinalTransform):
 class HertzToVoxelShiftTransform(FinalTransform):
     """Converts a ΔB0 field (in Hz) into a voxel shift field Δv"""
 
-    def __init__(self, bandwidth: float = 140, **kwargs) -> None:
+    def __init__(self, bandwidth: float = 30, **kwargs) -> None:
         """
 
         Parameters
         ----------
-        bandwidth : float, default=140
-            Bandwidth, in Hz/pixel.
+        bandwidth : float
+            Bandwidth per pixel along the slow direction, in Hz/pixel.
+
+            This is the phase-encoding direction in an EPI sequence.
+            It can also be the frequency-encoding direction in a
+            non-EPI sequence, although in such cases the bandwidth per
+            pixel is much larger, and displacements are only meaningful
+            in extremely high-resolution scans.
+
+            !!! changedin "![v0.4](https://img.shields.io/badge/v0.4-yellow) \
+                        Default  changed from `140` to `30`"
 
         """
         super().__init__(**kwargs)
