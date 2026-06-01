@@ -12,7 +12,7 @@ from math import inf
 
 # dependencies
 import torch
-from torch import nn
+from torch import isin, nn
 from torch import Tensor
 
 # internal
@@ -30,7 +30,7 @@ class Transform(nn.Module, ABC):
     def __init__(
         self, *,
         returns: Union[str, List[str], Dict[str, str], None] = None,
-        append: bool = False,
+        append: Union[bool, str] = False,
         prefix: Union[bool, str] = True,
         include: Union[str, List[str], None] = None,
         exclude: Union[str, List[str], None] = None,
@@ -43,13 +43,23 @@ class Transform(nn.Module, ABC):
             Which tensors to return. Can be a nested structure.
             Most transforms accept `'input'` and `'output'` as valid
             returns. The default is `'output'`.
-        append : bool
+        append : bool | str
             Append the (structure of) returned tensors to the parent
             structure.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+                Can be a string since `v0.5`"
+                If it is a `str` and parent is a `dict`, its value will be
+                used as a separator between the prefix and the key.
+                See `prefix`.
         prefix : bool | str
-            If `append` and parent is a dict, prefix the returned key
+            If `append` and parent is a `dict`, prefix the returned key
             before inserting it in the output dictionary.
+
             If `True`, the prefix is the input key.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+                Can be a string since `v0.5`"
         include : [list of] str, optional
             List of keys to which the transform should apply.
             Default: all.
@@ -316,6 +326,12 @@ class Transform(nn.Module, ABC):
             forward = forward or self
             valid_keys = self._get_valid_keys(x)
 
+            append = self.append
+            if isinstance(append, str):
+                sep, append = append, True
+            elif append:
+                sep = "."
+
             # Initialise output dictionary with input keys and values
             # that *will not* be transformed so that they are preserved.
             y = {
@@ -341,14 +357,14 @@ class Transform(nn.Module, ABC):
                 if isinstance(value, Returned):
                     value = value.obj
 
-                    if self.append:
+                    if append:
 
                         if isinstance(y, dict) and isinstance(value, dict):
                             # Insert the returned values in the output dictionary,
                             # using a new key, so that the input value is preserved.
                             if prefix:
                                 value = {
-                                    prefix + '.' + child_key: child_value
+                                    prefix + sep + child_key: child_value
                                     for child_key, child_value in value.items()
                                 }
                             y.update(value)
