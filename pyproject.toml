@@ -3,7 +3,7 @@ name = "cornucopia"
 authors = [{name = "Yael Balbastre", email = "yael.balbastre@gmail.com"}]
 description = "An abundance of augmentation layers"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
