@@ -55,8 +55,8 @@ ScalarOrSequence = tx.Union[ScalarT_co, tx.Sequence[ScalarT_co]]
 NumberOrSequence = ScalarOrSequence[NumberT_co]
 
 # --- Tensor shapes ---
-Shape = tuple[int, ...]
-AnyShape = tuple[tx.Any, ...]
+Shape = tx.Tuple[int, ...]
+AnyShape = tx.Tuple[tx.Any, ...]
 ShapeLike = ItemOrSequence[tx.SupportsIndex]
 
 ShapeT = tx.TypeVar('ShapeT', bound=Shape, default=Shape)
