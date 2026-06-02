@@ -281,10 +281,12 @@ class RandomLowResSliceTransform(RandomizedTransform):
         """
         super().__init__(
             LowResSliceTransform,
-            dict(resolution=Uniform.make(make_range(1, resolution)),
-                 thickness=Uniform.make(make_range(thickness, 1)),
-                 axis=axis,
-                 noise=noise),
+            dict(
+                resolution=Uniform.make(make_range(1, resolution)),
+                thickness=Uniform.make(make_range(thickness, 1)),
+                axis=axis,
+                noise=noise
+            ),
             shared=shared,
             **kwargs
         )

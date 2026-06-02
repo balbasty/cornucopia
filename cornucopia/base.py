@@ -4,6 +4,7 @@ __all__ = [
     'NonFinalTransform',
 ]
 # stdlib
+from copy import copy
 import inspect
 import random
 from abc import ABC, abstractmethod
@@ -734,8 +735,14 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
     def _forward_impl(self, *args, **kwargs):
         x = Arguments(*args, **kwargs)
         for trf in self:
-            with IncludeKeysTransform(trf, self.include), \
-                 ExcludeKeysTransform(trf, self.exclude):
+            # NOTE:
+            #   I do not propagate `returns`, as I don't think it makes
+            #   sense for sequences.
+            with (
+                IncludeKeysTransform(trf, self.include),
+                ExcludeKeysTransform(trf, self.exclude),
+                ConsumeKeysTransform(trf, self.consume)
+            ):
                 x = trf(x)
         return x
 
@@ -791,6 +798,22 @@ class PerChannelTransform(SpecialTransform):
             return self
         trf = []
         for i, t in enumerate(self.transforms):
+            if (
+                self.include is not None or
+                self.exclude or self.consume or self.returns
+            ):
+                # NOTE
+                #   We cannot use context managers because they exit on
+                #   return. Instead, we make a shallow copy of the
+                #   transform and change its options. It is not an issue
+                #   in most cases, as `make_final` often creates a new
+                #   transform, but can be one when `max_depth < 2`.
+                t = copy(t)
+                t.exclude = IncludeKeysTransform.combine(self.include, t.include)
+                t.include = ExcludeKeysTransform.combine(self.exclude, t.exclude)
+                t.consume = ConsumeKeysTransform.combine(self.consume, t.consume)
+                if self.returns:
+                    t.returns = self.returns
             t = t.safe_make_final(x[i:i+1], max_depth-1, args=args)
             trf.append(t)
         prm = dict(self.get_prm())
@@ -806,7 +829,8 @@ class PerChannelTransform(SpecialTransform):
             with (
                 ReturningTransform(t, self.returns),
                 IncludeKeysTransform(t, self.include),
-                ExcludeKeysTransform(t, self.exclude)
+                ExcludeKeysTransform(t, self.exclude),
+                ConsumeKeysTransform(t, self.consume)
             ):
                 results.append(t(x[i:i+1]))
         return Returned(recursive_cat(results))
@@ -875,13 +899,22 @@ class MaybeTransform(_SharedMixin, SpecialTransform):
             return self
         if self.throw_dice():
             trf = self.subtransform
-            with (
-                IncludeKeysTransform(trf, self.include),
-                ExcludeKeysTransform(trf, self.exclude)
-            ):
-                return trf.safe_make_final(x, max_depth-1, args=args)
+            if self.include is not None or self.exclude or self.consume:
+                # NOTE
+                # * I do not use context managers as they exit on return.
+                #   Context managers would work in most cases, as
+                #   `make_final` often creates a new transform, but it
+                #   can be a problem when `max_depth<2`. Better safe
+                #   than sorry,
+                # * I do not propagate `returns`. I think it should be
+                #   dealt with by the subtransform.
+                trf = copy(trf)
+                trf.include = IncludeKeysTransform._combine(self.include, trf.include)
+                trf.exclude = ExcludeKeysTransform._combine(self.exclude, trf.exclude)
+                trf.consume = ConsumeKeysTransform._combine(self.consume, trf.consume)
+            return trf.safe_make_final(x, max_depth-1, args=args)
         else:
-            return IdentityTransform()
+            return IdentityTransform(consume=self.consume)
 
     def __repr__(self) -> str:
         s = f'{repr(self.subtransform)}?'
@@ -975,11 +1008,16 @@ class SwitchTransform(_SharedMixin, SpecialTransform):
             return self
         t = self.transforms[self.throw_dice()]
         t = t.safe_make_final(x, max_depth-1, args=args)
-        with (
-            IncludeKeysTransform(t, self.include),
-            ExcludeKeysTransform(t, self.exclude)
-        ):
-            return t
+        if self.include is not None or self.exclude or self.consume:
+            # NOTE
+            #   We cannot use the context manager because it exits on
+            #   return. Instead, we make a shallow copy of the transform
+            #   and change its options.
+            t = copy(t)
+            t.include = IncludeKeysTransform._combine(self.include, t.include)
+            t.exclude = ExcludeKeysTransform._combine(self.exclude, t.exclude)
+            t.consume = ConsumeKeysTransform._combine(self.consume, t.consume)
+        return t
 
     def __or__(self, other: Transform) -> "SwitchTransform":
         if (isinstance(other, SwitchTransform)
@@ -1089,15 +1127,24 @@ class IncludeKeysTransform(SpecialTransform):
             with IncludeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
+    @classmethod
+    def _combine(self, *includes, union: bool = True) -> List[str]:
+        new_include, *includes = includes
+        if union:
+            for include in includes:
+                if include is not None:
+                    if new_include is None:
+                        new_include = []
+                    new_include.extend(include)
+        if new_include is not None:
+            new_include = list(set(new_include))
+        return new_include
+
     def __enter__(self) -> Transform:
-        self.include = self.transform.include
-        self.transform.include = self.keys
-        if self.union and self.include is not None:
-            if self.transform.include is not None:
-                self.transform.include = \
-                    self.transform.include + self.include
-            else:
-                self.transform.include = self.include
+        old_include = self.transform.include
+        new_include = self.keys
+        new_include = self._combine(new_include, old_include, union=self.union)
+        self.transform.include, self.include = new_include, old_include
         return self.transform
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -1186,15 +1233,24 @@ class ExcludeKeysTransform(SpecialTransform):
             with ExcludeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
+    @classmethod
+    def _combine(self, *excludes, union: bool = True) -> List[str]:
+        new_exclude, *excludes = excludes
+        if union:
+            for exclude in excludes:
+                if exclude is not None:
+                    if new_exclude is None:
+                        new_exclude = []
+                    new_exclude.extend(exclude)
+        if new_exclude is not None:
+            new_exclude = list(set(new_exclude))
+        return new_exclude
+
     def __enter__(self) -> Transform:
-        self.exclude = self.transform.exclude
-        self.transform.exclude = self.keys
-        if self.union and self.exclude:
-            if self.transform.exclude is not None:
-                self.transform.exclude = \
-                    self.transform.exclude + self.exclude
-            else:
-                self.transform.exclude = self.exclude
+        old_exclude = self.transform.exclude
+        new_exclude = self.keys
+        new_exclude = self._combine(new_exclude, old_exclude, union=self.union)
+        self.transform.exclude, self.exclude = new_exclude, old_exclude
         return self.transform
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -1286,15 +1342,24 @@ class ConsumeKeysTransform(SpecialTransform):
             with ConsumeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
+    @classmethod
+    def _combine(self, *consumes, union: bool = True) -> List[str]:
+        new_consume, *consumes = consumes
+        if union:
+            for consume in consumes:
+                if consume is not None:
+                    if new_consume is None:
+                        new_consume = []
+                    new_consume.extend(consume)
+        if new_consume is not None:
+            new_consume = list(set(new_consume))
+        return new_consume
+
     def __enter__(self) -> Transform:
-        self.consume = self.transform.consume
-        self.transform.consume = self.keys
-        if self.union and self.consume:
-            if self.transform.consume is not None:
-                self.transform.consume = \
-                    self.transform.consume + self.consume
-            else:
-                self.transform.consume = self.consume
+        old_consume = self.transform.consume
+        new_consume = self.keys
+        new_consume = self._combine(new_consume, old_consume, union=self.union)
+        self.transform.consume, self.consume = new_consume, old_consume
         return self.transform
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -1458,13 +1523,19 @@ class MappedTransform(SpecialTransform):
 
     def forward(self, *args, **kwargs) -> Returned:
 
-        if self.include is not None or self.exclude:
+        if self.include is not None or self.exclude or self.consume:
             def wrap(f: Callable) -> Callable:
                 if not f:
                     return f
                 def ff(*a, **k):
-                    with IncludeKeysTransform(f, self.include), \
-                         ExcludeKeysTransform(f, self.exclude):
+                    # NOTE
+                    #   I do not propagate `returns`. I think it should
+                    #   be dealt with by the subtransforms.
+                    with (
+                        IncludeKeysTransform(f, self.include),
+                        ExcludeKeysTransform(f, self.exclude),
+                        ConsumeKeysTransform(f, self.consume)
+                    ):
                         return f(*a, **k)
                 return ff
         else:
@@ -1613,19 +1684,40 @@ class RandomizedTransform(SpecialTransform, NonFinalTransform):
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return self.make_per_channel(x, max_depth, args=args)
+
         args = []
         kwargs = {}
+
         if isinstance(self.sample, (list, tuple)):
-            args += [f() if isinstance(f, Sampler) else f for f in self.sample]
+            args += [
+                f() if isinstance(f, Sampler) else f
+                for f in self.sample
+            ]
+
         elif hasattr(self.sample, 'items'):
-            kwargs.update({k: f() if isinstance(f, Sampler) else f
-                           for k, f in self.sample.items()})
+            kwargs.update({
+                k: f() if isinstance(f, Sampler) else f
+                for k, f in self.sample.items()
+            })
+
         else:
-            args += [self.sample() if isinstance(self.sample, Sampler)
-                     else self.sample]
+            args += [
+                f() if isinstance(f, Sampler) else f
+                for f in (self.sample,)
+            ]
+
         if self.ksample:
-            kwargs.update({k: f() if isinstance(f, Sampler) else f
-                           for k, f in self.ksample.items()})
+            kwargs.update({
+                k: f() if isinstance(f, Sampler) else f
+                for k, f in self.ksample.items()
+            })
+
+        # Propagate general options (include, exclude),
+        # unless they are already set by sample/ksample.
+        for key, value in self.get_prm().items():
+            kwargs.setdefault(key, value)
+
+        # Build transform with fixed parameters, and recurse.
         xform = self.subtransform(*args, **kwargs)
         xform = xform.safe_make_final(x, max_depth-1, args=args)
         return xform
