@@ -513,10 +513,10 @@ class Transform(nn.Module, ABC):
         """
         Generate the next (i.e., more final) version(s) of the transform.
 
-        * To completely finalize a transform, call `unroll(x, max_depth=inf)`
-          or `final()`.
-        * To get the the next version of a transform, call
-          unroll(x, max_depth=1)` or `next()`.
+        * To completely finalize a transform,
+          call `unroll(x, max_depth=inf)` or `final()`.
+        * To get the the next version of a transform,
+          call `unroll(x, max_depth=1)` or `next()`.
 
         !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
             Added `unroll` method in `v0.5`."
