@@ -334,8 +334,16 @@ class TupleArg(Arg, Sequence):
 class Args(tuple, Arguments):
     """Tuple of arguments: `*args`"""
 
+    def __new__(cls, *args):
+        # Call tuple directly to avoid conflict betweet tuple.__new__
+        # (which expects a single arg) and Arguments.__new__
+        return tuple.__new__(cls, args)
+
     def __init__(self, *args):
-        super().__init__(args)
+        # Call tuple directly to avoid conflict betweet tuple.__new__
+        # (which expects a single arg) and Arguments.__init__ (which
+        # expects no arg)
+        tuple.__init__(args)
 
     def unwrap(self):
         return tuple(self)
