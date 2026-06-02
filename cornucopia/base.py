@@ -178,7 +178,7 @@ class Transform(nn.Module, ABC):
 
         # Arguments are passed to `_Forward.__init__` and `_Forward.__call__`.
         # The former is preserved as is in the `_Forward` object, and passed
-        # to each `xform` or `make_final` call, while the latter is
+        # to each `xform` or `unroll` call, while the latter is
         # recursively unwrapped and processed by `_Forward.__call__`.
         return self._Forward(self, args, **self.get_prm())(x)
 
@@ -257,7 +257,7 @@ class Transform(nn.Module, ABC):
             # ---- Now we're working with a single tensor (or str) ----
 
             # Apply the transform to the input tensor
-            y = self.transform.safe_xform(x, args=self.args)
+            y = self.transform.xform(x, args=self.args)
 
             # Most transforms return a well-formatted `Returned` object,
             # which contain all possible outputs of a transform, mapped
@@ -407,22 +407,13 @@ class Transform(nn.Module, ABC):
             else:
                 return y
 
-    def safe_xform(
-        self, x: Tensor, /,
-        args: Arguments = NoArguments(),
-    ) -> Returned:
-        # Wrapper that calls `xform`, but only passes `args` if the
-        # `xform` method accepts it, to avoid errors with legacy `xform`.
-        if 'args' in inspect.signature(self.xform).parameters:
-            return self.xform(x, args=args)
-        else:
-            return self.xform(x)
-
     def xform(
         self, x: Tensor, /,
         args: Arguments = NoArguments(),
     ) -> Returned:
-        """Apply the transform to a tensor
+        """Apply the transform to a tensor.
+
+        Non-final transforms do not implement this method in general.
 
         Parameters
         ----------
@@ -437,36 +428,106 @@ class Transform(nn.Module, ABC):
         y : Returned | (C_out, *spatial_out) tensor
             A single output tensor, or a `Returned` object containing
             multiple output tensors and their corresponding keys.
-
         """
-        raise NotImplementedError("This transform does not implement `xform`.")
+        # Wrapper that calls `_xform`, but only passes `args` if the
+        # method accepts it, to avoid errors with legacy implementations.
+        if 'args' in inspect.signature(self._xform).parameters:
+            return self._xform(x, args=args)
+        else:
+            return self._xform(x)
 
-    def safe_make_final(
+    def _xform(
         self, x: Tensor, /,
-        max_depth: int = inf,
         args: Arguments = NoArguments(),
     ) -> Returned:
-        # Wrapper that calls `make_final`, but only passes `args` if the
-        # `make_final` method accepts it.
-        if 'args' in inspect.signature(self.make_final).parameters:
-            return self.make_final(x, max_depth, args=args)
-        else:
-            return self.make_final(x, max_depth)
+        raise NotImplementedError("This transform does not implement `xform`.")
 
-    def make_final(
+    def final(
+        self,
+        x: Tensor, /,
+        args: Arguments = NoArguments(),
+        **kwargs
+    ) -> "FinalTransform":
+        """
+        Generate the final version of the transform.
+
+        Some transforms save the output type of this function in their
+        `Final` attribute.
+
+        !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+            Added `final` method in `v0.5`."
+            Before this, one had to use `make_final(x, max_depth=inf)`.
+
+        Parameters
+        ----------
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
+        args: Arguments, optional
+            The original inputs arguments to the transform, in case
+            they are needed.
+
+        Returns
+        -------
+        FinalTransform
+            A final version of the transform.
+        """
+        return self.unroll(x, max_depth=inf, args=args, **kwargs)
+
+    def next(
+        self,
+        x: Tensor, /,
+        args: Arguments = NoArguments(),
+        **kwargs
+    ) -> "FinalTransform":
+        """
+        Generate the next version of the transform.
+
+        Some transforms save the output type of this function in their
+        `Next` attribute.
+
+        !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+            Added `next` method in `v0.5`."
+            Before this, one had to use `make_final(x, max_depth=1)`.
+
+        Parameters
+        ----------
+        x : tensor
+            A single input tensor, with shape `(C, *shape)`.
+        args: Arguments, optional
+            The original inputs arguments to the transform, in case
+            they are needed.
+
+        Returns
+        -------
+        Transform
+            A more specialized version of the transform.
+        """
+        return self.unroll(x, max_depth=1, args=args, **kwargs)
+
+    def unroll(
         self, x: Tensor, /,
         max_depth: int = inf,
         args: Arguments = NoArguments(),
+        **kwargs
     ) -> "Transform":
         """
-        Generate a final (i.e., deterministic) version of the transform.
+        Generate the next (i.e., more final) version(s) of the transform.
+
+        * To completely finalize a transform, call `unroll(x, max_depth=inf)`
+          or `final()`.
+        * To get the the next version of a transform, call
+          unroll(x, max_depth=1)` or `next()`.
+
+        !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+            Added `unroll` method in `v0.5`."
+            Before this, it was named `make_final`.
 
         Parameters
         ----------
         x : tensor
             A single input tensor, with shape `(C, *shape)`.
         max_depth : int | {inf}
-            Maximum depth to apply `make_final` recursively.
+            Maximum depth to apply `unroll` recursively.
             If not `inf`, the resulting transform may not be fully final.
             Default: no limit.
         args: Arguments, optional
@@ -476,13 +537,35 @@ class Transform(nn.Module, ABC):
         Returns
         -------
         Transform
-            A final version of the transform.
+            A more specialized version of the transform.
         """
+        if max_depth == 0:
+            # This is always valid, so let's catch it
+            return self
+        # Wrapper that calls `_unroll`, but only passes `args` if the
+        # method accepts it.
+        if 'args' in inspect.signature(self._unroll).parameters:
+            return self._unroll(x, max_depth, args=args, **kwargs)
+        else:
+            return self._unroll(x, max_depth, **kwargs)
+
+    def make_final(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+        **kwargs
+    ) -> "Transform":
+        # Deprecated, but keep it for backward compatibility
+        return self.unroll(x, max_depth=max_depth, args=args, **kwargs)
+
+    def _unroll(
+        self, x: Tensor, /,
+        max_depth: int = inf,
+        args: Arguments = NoArguments(),
+    ) -> "Transform":
         if self.is_final or max_depth == 0:
             return self
-        raise NotImplementedError(
-            "This transform does not implement `make_final`."
-        )
+        raise NotImplementedError("This transform does not implement `unroll`")
 
     def inverse(self, *a, **k) -> "FinalTransform":
         """Apply the inverse transform recursively
@@ -517,7 +600,7 @@ class FinalTransform(Transform):
     def is_final(self) -> bool:
         return True
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = inf,
         args: Arguments = NoArguments(),
@@ -540,7 +623,7 @@ class _SharedMixin:
             shared = ''
         return shared
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, args: Arguments = NoArguments(),
     ) -> Returned:
         template = x
@@ -553,15 +636,15 @@ class _SharedMixin:
         # the top-level parameters of a transformation may be shared
         # (e.g., the number of control points in a bias field), but not
         # the lower level ones (e.g., the values of the control points).
-        transformation = self.safe_make_final(template, 1, args=args)
+        transformation = self.next(template, args=args)
         if transformation is self:
             # Avoid infinite recursion. This should not happen.
             raise ValueError(
-                f"The transform is not final, but calling `make_final` "
+                f"The transform is not final, but calling `next` "
                 f"returned itself. Transform: {self}"
             )
         # Apply the final transform to all channels
-        return transformation.safe_xform(x, args=args)
+        return transformation.xform(x, args=args)
 
     def forward(self, *a, **k) -> Returned:
         return self._shared_forward(*a, **k)
@@ -580,7 +663,7 @@ class _SharedMixin:
                 # Get the first channel only, to compute the final transform.
                 first_tensor = first_tensor[:1]
             # Compute the next form of this transform...
-            transform = self.safe_make_final(first_tensor, 1, args=args)
+            transform = self.next(first_tensor, args=args)
             # ...and apply it to all tensors.
             return transform(*a, **k)
 
@@ -596,9 +679,9 @@ class _SharedMixin:
         prm = dict(self.get_prm())
         prm.pop('shared', None)
         return PerChannelTransform([
-            self.safe_make_final(x[i:i+1], max_depth, args=args, **kwargs)
+            self.unroll(x[i:i+1], max_depth, args=args, **kwargs)
             for i in range(len(x))
-        ], **prm).safe_make_final(x, max_depth-1)
+        ], **prm).unroll(x, max_depth-1)
 
 
 class NonFinalTransform(_SharedMixin, Transform):
@@ -606,7 +689,7 @@ class NonFinalTransform(_SharedMixin, Transform):
     Transforms whose parameters depend on features of the input
     transform (shape, dtype, etc).
 
-    Non-final transforms implement `make_final`, and do not implement
+    Non-final transforms implement `unroll`, and do not implement
     `xform`. Their aim is to generate a more-specialized transform
     at call time.
     """
@@ -636,7 +719,7 @@ class SpecialTransform(Transform):
     Such transforms cannot be easily classified as "final" or "non-final",
     because this characeteristic depends on the transforms that they embed.
 
-    They all implement `make_final`, but some may also implement a
+    They all implement `unroll`, but some may also implement a
     "fast-track" `xform` that is applied in simple cases (e.g., when
     the transform is not shared across tensors) for efficiency.
 
@@ -650,7 +733,7 @@ class SpecialTransform(Transform):
 class IdentityTransform(FinalTransform):
     """Identity transform"""
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, args: Arguments = NoArguments()
     ) -> Returned:
         return prepare_output(dict(input=x, output=x), self.returns)
@@ -699,7 +782,7 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
         self.shared = self._prepare_shared(shared)
         self.transforms = transforms
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = inf,
         args: Arguments = NoArguments()
@@ -711,7 +794,7 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
         # x = VirtualTensor.from_any(x, compute_stats=True)
         trf = []
         for t in self:
-            t = t.safe_make_final(x, max_depth=max_depth-1, args=args)
+            t = t.unroll(x, max_depth=max_depth-1, args=args)
             x = t(x)
             args = Arguments(x)
             trf.append(t)
@@ -727,7 +810,7 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
 
     def forward(self, *a, **k) -> Returned:
         # If the entire sequence is shared across tensors, we use the
-        # behavior from `SharedMixin`, which is to call `make_final` on
+        # behavior from `SharedMixin`, which is to call `unroll` on
         # the first valid tensor, and apply the resulting transform to all
         # tensors.
         # Finalizing a sequence of transforms is a bit tricky, but sequences
@@ -750,10 +833,10 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
                 x = trf(x)
         return x
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, args: Arguments = NoArguments()
     ) -> Returned:
-        # This should only be called when a Layer's `make_final` returns
+        # This should only be called when a Layer's `unroll` returns
         # a `SequentialTransform` (i.e., it is created implictly under
         # the hood, not explicitly by the user).
         # In such cases, `shared=False` and hopefully we can just fallback
@@ -793,7 +876,7 @@ class PerChannelTransform(SpecialTransform):
         super().__init__(**kwargs)
         self.transforms = transforms
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = inf,
         args: Arguments = NoArguments()
@@ -810,7 +893,7 @@ class PerChannelTransform(SpecialTransform):
                 #   We cannot use context managers because they exit on
                 #   return. Instead, we make a shallow copy of the
                 #   transform and change its options. It is not an issue
-                #   in most cases, as `make_final` often creates a new
+                #   in most cases, as `unroll` often creates a new
                 #   transform, but can be one when `max_depth < 2`.
                 t = copy(t)
                 t.exclude = IncludeKeysTransform.combine(self.include, t.include)
@@ -818,14 +901,14 @@ class PerChannelTransform(SpecialTransform):
                 t.consume = ConsumeKeysTransform.combine(self.consume, t.consume)
                 if self.returns:
                     t.returns = self.returns
-            t = t.safe_make_final(x[i:i+1], max_depth-1, args=args)
+            t = t.unroll(x[i:i+1], max_depth-1, args=args)
             trf.append(t)
         prm = dict(self.get_prm())
         prm.pop('shared', None)
         trf = PerChannelTransform(trf, **prm)
         return trf
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, args: Arguments = NoArguments()
     ) -> Returned:
         results = []
@@ -894,7 +977,7 @@ class MaybeTransform(_SharedMixin, SpecialTransform):
     def throw_dice(self) -> bool:
         return random.random() > 1 - self.prob
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = float('inf'),
         args: Arguments = NoArguments()
@@ -907,7 +990,7 @@ class MaybeTransform(_SharedMixin, SpecialTransform):
                 # NOTE
                 # * I do not use context managers as they exit on return.
                 #   Context managers would work in most cases, as
-                #   `make_final` often creates a new transform, but it
+                #   `unroll` often creates a new transform, but it
                 #   can be a problem when `max_depth<2`. Better safe
                 #   than sorry,
                 # * I do not propagate `returns`. I think it should be
@@ -916,7 +999,7 @@ class MaybeTransform(_SharedMixin, SpecialTransform):
                 trf.include = IncludeKeysTransform._combine(self.include, trf.include)
                 trf.exclude = ExcludeKeysTransform._combine(self.exclude, trf.exclude)
                 trf.consume = ConsumeKeysTransform._combine(self.consume, trf.consume)
-            return trf.safe_make_final(x, max_depth-1, args=args)
+            return trf.unroll(x, max_depth-1, args=args)
         else:
             return IdentityTransform(consume=self.consume)
 
@@ -1003,7 +1086,7 @@ class SwitchTransform(_SharedMixin, SpecialTransform):
                 return k
         return len(self.transforms) - 1
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = float('inf'),
         args: Arguments = NoArguments()
@@ -1011,7 +1094,7 @@ class SwitchTransform(_SharedMixin, SpecialTransform):
         if max_depth == 0:
             return self
         t = self.transforms[self.throw_dice()]
-        t = t.safe_make_final(x, max_depth-1, args=args)
+        t = t.unroll(x, max_depth-1, args=args)
         if self.include is not None or self.exclude or self.consume:
             # NOTE
             #   We cannot use the context manager because it exits on
@@ -1113,7 +1196,7 @@ class IncludeKeysTransform(SpecialTransform):
         with self as transform:
             return transform.forward(*a, **k)
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = float('inf'),
         args: Arguments = NoArguments()
@@ -1121,13 +1204,13 @@ class IncludeKeysTransform(SpecialTransform):
         if max_depth == 0:
             return self
         with self as trf:
-            final_trf = trf.safe_make_final(x, max_depth, args=args)
+            final_trf = trf.unroll(x, max_depth, args=args)
             with IncludeKeysTransform(final_trf) as final_final_trf:
                 return final_final_trf
 
     def make_inverse(self) -> Transform:
         with self as trf:
-            inv_trf = trf.safe_make_inverse()
+            inv_trf = trf.make_inverse()
             with IncludeKeysTransform(inv_trf) as final_inv_trf:
                 return final_inv_trf
 
@@ -1219,7 +1302,7 @@ class ExcludeKeysTransform(SpecialTransform):
         with self as transform:
             return transform.forward(*a, **k)
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = float('inf'),
         args: Arguments = NoArguments()
@@ -1227,7 +1310,7 @@ class ExcludeKeysTransform(SpecialTransform):
         if max_depth == 0:
             return self
         with self as trf:
-            final_trf = trf.safe_make_final(x, max_depth, args=args)
+            final_trf = trf.unroll(x, max_depth, args=args)
             with ExcludeKeysTransform(final_trf) as final_final_trf:
                 return final_final_trf
 
@@ -1328,7 +1411,7 @@ class ConsumeKeysTransform(SpecialTransform):
         with self as transform:
             return transform.forward(*a, **k)
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = float('inf'),
         args: Arguments = NoArguments()
@@ -1336,7 +1419,7 @@ class ConsumeKeysTransform(SpecialTransform):
         if max_depth == 0:
             return self
         with self as trf:
-            final_trf = trf.safe_make_final(x, max_depth, args=args)
+            final_trf = trf.unroll(x, max_depth, args=args)
             with ConsumeKeysTransform(final_trf) as final_final_trf:
                 return final_final_trf
 
@@ -1679,7 +1762,7 @@ class RandomizedTransform(SpecialTransform, NonFinalTransform):
         self.ksample = ksample
         self.subtransform = transform
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /,
         max_depth: int = inf,
         args: Arguments = NoArguments()
@@ -1723,7 +1806,7 @@ class RandomizedTransform(SpecialTransform, NonFinalTransform):
 
         # Build transform with fixed parameters, and recurse.
         xform = self.subtransform(*args, **kwargs)
-        xform = xform.safe_make_final(x, max_depth-1, args=args)
+        xform = xform.unroll(x, max_depth-1, args=args)
         return xform
 
     def __repr__(self) -> str:

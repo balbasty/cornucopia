@@ -96,7 +96,7 @@ class OpConstTransform(FinalTransform):
             name = 'value'
         super().__setattr__(name, value)
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         value = self.value
         if torch.is_tensor(value):
             value = value.to(x)
@@ -156,7 +156,7 @@ class FillValueTransform(FinalTransform):
         self.mask_name = mask_name
         self.value_name = value_name
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         mask, value = self.mask, self.value
         mask = mask.to(x.device)
         if torch.is_tensor(value):
@@ -208,7 +208,7 @@ class ReturnValueTransform(FinalTransform):
             name = 'value'
         super().__setattr__(name, value)
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         dtype = self.dtype or x.dtype
         return torch.as_tensor(self.value, dtype=dtype, device=x.device)
 
@@ -239,7 +239,7 @@ class AddMulTransform(FinalTransform):
         self.slope = slope
         self.offset = offset
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         slope, offset = self.slope, self.offset
         if torch.is_tensor(slope):
             slope = slope.to(x)
@@ -283,7 +283,7 @@ class ClipTransform(FinalTransform):
         self.vmin = vmin
         self.vmax = vmax
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         vmin, vmax = self.vmin, self.vmax
         if torch.is_tensor(vmin):
             vmin = vmin.to(x)
@@ -302,7 +302,7 @@ class RandomMulTransform(RandomizedTransform):
     """
 
     Final = Next = MulValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -339,7 +339,7 @@ class RandomAddTransform(RandomizedTransform):
     """
 
     Final = Next = AddValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -376,7 +376,7 @@ class RandomAddMulTransform(RandomizedTransform):
     """
 
     Final = Next = AddMulTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -439,7 +439,7 @@ class SplineUpsampleTransform(FinalTransform):
         self.order = order
         self.prefilter = prefilter
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         fullshape = x.shape[1:]
         if self.order == 1:
             mode = ('trilinear' if len(fullshape) == 3 else
@@ -461,7 +461,7 @@ class BaseFieldTransform(NonFinalTransform):
     """Base class for transforms that sample a smooth field"""
 
     Final = Next = AddValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     value_name: str = 'field'
 
@@ -587,7 +587,7 @@ class BaseFieldTransform(NonFinalTransform):
             )
         return b
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -675,24 +675,24 @@ class BaseFieldTransform(NonFinalTransform):
 
         return self.Next(
             b, value_name=self.value_name, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class MulFieldTransform(BaseFieldTransform):
     """Smooth multiplicative (bias) field"""
 
     Final = Next = MulValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
 
 class RandomMulFieldTransform(NonFinalTransform):
     """Random multiplicative bias field transform"""
 
     Next = MulFieldTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = MulValueTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -740,7 +740,7 @@ class RandomMulFieldTransform(NonFinalTransform):
         self.symmetric = symmetric
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         vmax, shape, order = self.vmax, self.shape, self.order
         shared_field = self.shared_field
         if isinstance(vmax, Sampler):
@@ -758,17 +758,17 @@ class RandomMulFieldTransform(NonFinalTransform):
             vmin, vmax = mid - vmax, mid + vmax
         return MulFieldTransform(
             shape, vmin, vmax, order, shared=shared_field, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomSlicewiseMulFieldTransform(NonFinalTransform):
     """Random multiplicative bias field transform, per slice or slab"""
 
     Next = MulFieldTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = MulValueTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -824,7 +824,7 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         self.shape_through = shape_through
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -873,14 +873,14 @@ class RandomSlicewiseMulFieldTransform(NonFinalTransform):
         return MulFieldTransform(
             shape, 0, vmax, order, slice, thickness,
             shared=shared_field, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class AddFieldTransform(BaseFieldTransform):
     """Smooth additive (bias) field"""
 
     Final = Next = AddValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
 
 class RandomAddFieldTransform(NonFinalTransform):
@@ -929,7 +929,7 @@ class RandomAddFieldTransform(NonFinalTransform):
         self.order = Fixed.make(order)
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         vmin, vmax, shape, order = self.vmin, self.vmax, self.shape, self.order
         shared_field = self.shared_field
         if isinstance(vmin, Sampler):
@@ -944,7 +944,7 @@ class RandomAddFieldTransform(NonFinalTransform):
             shared_field = self.shared
         return AddFieldTransform(
             shape, vmin, vmax, order, shared=shared_field, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class GammaFinalTransform(FinalTransform):
@@ -1001,7 +1001,7 @@ class GammaFinalTransform(FinalTransform):
             vmax = vmax.detach().tolist()
         return f"{type(self).__name__}(gamma={gamma}, vmin={vmin}, vmax={vmax})"
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         vmin = torch.as_tensor(self.vmin, dtype=x.dtype, device=x.device)
         vmax = torch.as_tensor(self.vmax, dtype=x.dtype, device=x.device)
         gamma = torch.as_tensor(self.gamma, dtype=x.dtype, device=x.device)
@@ -1044,7 +1044,7 @@ class GammaTransform(NonFinalTransform):
     """
 
     Final = Next = GammaFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1081,7 +1081,7 @@ class GammaTransform(NonFinalTransform):
         self.vmin = vmin
         self.vmax = vmax
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -1103,7 +1103,7 @@ class GammaTransform(NonFinalTransform):
             vmax = self.vmax
         return self.Next(
             self.gamma, vmin, vmax, **self.get_prm()
-        ).make_final(max_depth-1)
+        ).unroll(max_depth-1)
 
 
 class RandomGammaTransform(NonFinalTransform):
@@ -1112,10 +1112,10 @@ class RandomGammaTransform(NonFinalTransform):
     """
 
     Next = GammaTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = GammaFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -1148,7 +1148,7 @@ class RandomGammaTransform(NonFinalTransform):
         self.gamma = Uniform.make(kwargs.pop('value', gamma))
         self.shared_minmax = self._prepare_shared(shared_minmax)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         gamma = self.gamma
         if isinstance(gamma, Sampler):
             gamma = gamma()
@@ -1157,7 +1157,7 @@ class RandomGammaTransform(NonFinalTransform):
             shared_minmax = self.shared
         return GammaTransform(
             gamma, shared=shared_minmax, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ZTransform(NonFinalTransform):
@@ -1166,7 +1166,7 @@ class ZTransform(NonFinalTransform):
     """
 
     Final = Next = AddMulTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self, mu: float = 0, sigma: float = 1,
@@ -1192,7 +1192,7 @@ class ZTransform(NonFinalTransform):
         self.mu = mu
         self.sigma = sigma
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared:
@@ -1206,14 +1206,14 @@ class ZTransform(NonFinalTransform):
         offset = mu1 - mu0 * scale
         return AddMulTransform(
             scale, offset, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class QuantileTransform(NonFinalTransform):
     """Match lower and upper quantiles to (0, 1)"""
 
     Final = Next = AddMulTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1258,7 +1258,7 @@ class QuantileTransform(NonFinalTransform):
         self.clip = clip
         self.max_samples = max_samples
 
-    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1286,18 +1286,18 @@ class QuantileTransform(NonFinalTransform):
             return SequentialTransform([
                 AddMulTransform(slope, offset, **self.get_prm()),
                 ClipTransform(self.vmin, self.vmax, **self.get_prm())
-            ]).make_final(x, max_depth-1)
+            ]).unroll(x, max_depth-1)
         else:
             return AddMulTransform(
                 slope, offset, **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)
 
 
 class MinMaxTransform(NonFinalTransform):
     """Match min and max values to (0, 1)"""
 
     Final = Next = AddMulTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self, vmin: float = 0, vmax: float = 1, clip: bool = False, **kwargs
@@ -1326,7 +1326,7 @@ class MinMaxTransform(NonFinalTransform):
         self.vmax = vmax
         self.clip = clip
 
-    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1351,8 +1351,8 @@ class MinMaxTransform(NonFinalTransform):
             return SequentialTransform([
                 AddMulTransform(slope, offset, **self.get_prm()),
                 ClipTransform(self.vmin, self.vmax, **self.get_prm())
-            ]).make_final(x, max_depth-1)
+            ]).unroll(x, max_depth-1)
         else:
             return AddMulTransform(
                 slope, offset, **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)

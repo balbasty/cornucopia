@@ -174,7 +174,7 @@ class ApplyElasticTransform(FinalTransform):
             flow -= mean_flow
         return flow
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, *, args: Arguments = NoArguments()
     ) -> Returned:
         # Get flow and controls from input or from `self`
@@ -218,7 +218,7 @@ class ElasticTransform(NonFinalTransform):
     """
 
     Final = Next = ApplyElasticTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -302,7 +302,7 @@ class ElasticTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, max_depth: int = inf, flow: bool =  True
     ) -> Transform:
         if max_depth == 0:
@@ -360,7 +360,7 @@ class ElasticTransform(NonFinalTransform):
             self.nearest_if_label,
             **self.backend,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomElasticTransform(NonFinalTransform):
@@ -383,16 +383,16 @@ class RandomElasticTransform(NonFinalTransform):
 
         # Sample a set of transforms, and apply them
         xform = RandomElasticTransform(dmax=0.2, shape=10)
-        a, b, c = [xform.make_final() for _ in range(3)]
+        a, b, c = [xform.final() for _ in range(3)]
         x, y, z = a(x), b(y), c(z)
         ```
     """
 
     Next = ElasticTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ApplyElasticTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -472,7 +472,7 @@ class RandomElasticTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -495,7 +495,7 @@ class RandomElasticTransform(NonFinalTransform):
             nearest_if_label=self.nearest_if_label,
             **self.backend,
             **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ApplyAffineTransform(FinalTransform):
@@ -569,7 +569,7 @@ class ApplyAffineTransform(FinalTransform):
             matrix = self.matrix
         return warps.affine_flow(matrix, shape).movedim(-1, 0)
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         x = x.to(**self.backend)
         flow = cast_like(self.flow, x)
         matrix = cast_like(self.matrix, x)
@@ -601,7 +601,7 @@ class AffineTransform(NonFinalTransform):
     """
 
     Final = Next = ApplyAffineTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -679,7 +679,7 @@ class AffineTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, max_depth: int = inf, flow: bool = True
     ) -> Transform:
         batch, *fullshape = x.shape
@@ -756,7 +756,7 @@ class AffineTransform(NonFinalTransform):
             flow = None
         return self.Next(
             A, flow, self.bound, **self.backend, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomAffineTransform(NonFinalTransform):
@@ -765,10 +765,10 @@ class RandomAffineTransform(NonFinalTransform):
     """
 
     Next = AffineTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ApplyAffineTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -842,7 +842,7 @@ class RandomAffineTransform(NonFinalTransform):
         self.shared_matrix = shared_matrix
         self.backend = dict(dtype=dtype, device=device)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -871,7 +871,7 @@ class RandomAffineTransform(NonFinalTransform):
             nearest_if_label=self.nearest_if_label,
             **self.backend,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ApplyAffineElasticTransform(FinalTransform):
@@ -928,7 +928,7 @@ class ApplyAffineElasticTransform(FinalTransform):
         self.nearest_if_label = nearest_if_label
         self.backend = backend
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         flow = self.flow.movedim(1, -1)
         if self.backend:
             # The transform also requests a change in device or data
@@ -982,7 +982,7 @@ class AffineElasticTransform(NonFinalTransform):
     """
 
     Final = Next = ApplyAffineElasticTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1076,7 +1076,7 @@ class AffineElasticTransform(NonFinalTransform):
             nearest_if_label, shared=shared, **self.backend,
         )
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         """
 
         Parameters
@@ -1102,15 +1102,15 @@ class AffineElasticTransform(NonFinalTransform):
             backend['dtype'] = torch.get_default_dtype()
 
         # get transformation parameters
-        A = self.affine.make_final(x, flow=False).matrix  # (D+1, D+1)
+        A = self.affine.unroll(x, flow=False).matrix  # (D+1, D+1)
         if self.steps:
             # request the blown up and exponentiated field
-            xform = self.elastic.make_final(x, flow=True)
+            xform = self.elastic.unroll(x, flow=True)
             elasticflow, controls = xform.flow, xform.controls
             # (C, D, *shape)
         else:
             # request only the spline control points
-            controls = self.elastic.make_final(x, flow=False).controls
+            controls = self.elastic.unroll(x, flow=False).controls
             elasticflow = None
 
         # 1) start from identity
@@ -1170,7 +1170,7 @@ class AffineElasticTransform(NonFinalTransform):
         return self.Next(
             flow, controls, A, self.elastic.bound, self.nearest_if_label,
             self.backend, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomAffineElasticTransform(NonFinalTransform):
@@ -1179,10 +1179,10 @@ class RandomAffineElasticTransform(NonFinalTransform):
     """
 
     Next = AffineElasticTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ApplyAffineElasticTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -1283,7 +1283,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
         self.nearest_if_label = nearest_if_label
         self.backend = dict(dtype=dtype, device=device)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1337,7 +1337,7 @@ class RandomAffineElasticTransform(NonFinalTransform):
             shared=shared_flow,
             **self.backend,
             **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ApplyAffinePair(FinalTransform):
@@ -1369,7 +1369,7 @@ class ApplyAffinePair(FinalTransform):
         self.left = left
         self.right = right
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         x1 = self.left(x)
         x2 = self.right(x)
         mat1, mat2 = self.left.matrix, self.right.matrix
@@ -1391,7 +1391,7 @@ class MakeAffinePair(NonFinalTransform):
     """
 
     Final = Next = ApplyAffinePair
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1425,14 +1425,14 @@ class MakeAffinePair(NonFinalTransform):
         super().__init__(shared=True, returns=returns, **kwargs)
         self.subtransform = transform or RandomAffineTransform()
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
-        left = self.subtransform.make_final(x)
-        right = self.subtransform.make_final(x)
+        left = self.subtransform.unroll(x)
+        right = self.subtransform.unroll(x)
         return self.Next(
             left, right, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ApplySlicewiseAffineTransform(FinalTransform):
@@ -1532,7 +1532,7 @@ class ApplySlicewiseAffineTransform(FinalTransform):
         # ^ [D, *oshape]
         return flow
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         flow = cast_like(self.flow, x)
         matrix = cast_like(self.matrix, x)
 
@@ -1582,7 +1582,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
     """Each slice samples the 3D volume using a different transform"""
 
     Final = Next = ApplySlicewiseAffineTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     _PerSliceParams = tx.Union[float, tx.Sequence[float], tx.Sequence[tx.Sequence[float]]]
     _BulkParams = tx.Union[float, tx.Sequence[float]]
@@ -1675,7 +1675,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
         self.spacing = spacing
         self.subsample = subsample
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, max_depth: int = inf, flow: bool = True
     ) -> Transform:
         if max_depth == 0:
@@ -1824,7 +1824,7 @@ class SlicewiseAffineTransform(NonFinalTransform):
         return self.Next(
             A, flow, self.slice, self.spacing, self.subsample, self.bound,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomSlicewiseAffineTransform(NonFinalTransform):
@@ -1833,10 +1833,10 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
     """
 
     Next = SlicewiseAffineTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ApplySlicewiseAffineTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     _PerSliceSampler = tx.Union[Sampler, float, tx.Sequence[float], Tensor]
     _BulkSampler = tx.Union[Sampler, float, tx.Sequence[float]]
@@ -1943,7 +1943,7 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
         self.shots = shots
         self.shared_matrix = shared_matrix
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -2065,4 +2065,4 @@ class RandomSlicewiseAffineTransform(NonFinalTransform):
             slice=slice, spacing=spacing, subsample=subsample,
             unit=self.unit, bound=self.bound,
             shared=shared_matrix, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)

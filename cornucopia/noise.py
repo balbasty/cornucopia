@@ -55,7 +55,7 @@ class GaussianNoiseTransform(NonFinalTransform):
     """Additive Gaussian noise"""
 
     Final = Next = GaussianNoiseFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class GaussianNoiseTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.sigma = sigma
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = list(x.shape)
@@ -93,19 +93,17 @@ class GaussianNoiseTransform(NonFinalTransform):
         sigma = sigma.reshape(-1, *[1]*(x.ndim-1))
         noise = torch.randn(shape, dtype=dtype, device=x.device)
         noise = mul_(noise, sigma)
-        return self.Next(
-            noise, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        return self.Next(noise, **self.get_prm()).unroll(x, max_depth-1)
 
 
 class RandomGaussianNoiseTransform(RandomizedTransform):
     """Additive Gaussian noise with random standard deviation"""
 
     Next = GaussianNoiseTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = GaussianNoiseFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -152,7 +150,7 @@ class ChiNoiseFinalTransform(FinalTransform):
         super().__init__(**kwargs)
         self.noise = noise
 
-    def xform(self, x):
+    def _xform(self, x):
         noise = self.noise.to(x)
         y = sqrt_(add_(x.square(), noise.square()))
         return prepare_output(
@@ -169,7 +167,7 @@ class ChiNoiseTransform(NonFinalTransform):
     """
 
     Final = Next = ChiNoiseFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -198,7 +196,7 @@ class ChiNoiseTransform(NonFinalTransform):
         self.sigma = sigma
         self.nb_channels = nb_channels
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -225,17 +223,17 @@ class ChiNoiseTransform(NonFinalTransform):
 
         return self.Next(
             noise, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomChiNoiseTransform(RandomizedTransform):
     """Additive Chi noise with random standard deviation and channels"""
 
     Next = ChiNoiseTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ChiNoiseFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -308,16 +306,16 @@ class GFactorFinalTransform(NonFinalTransform):
     def is_final(self) -> bool:
         return self.noisetrf.is_final and self.gfactor.is_final
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0 or self.is_final:
             return self
         return type(self)(
-            self.noisetrf.make_final(x, max_depth-1),
-            self.gfactor.make_final(x, max_depth-1),
-        ).make_final(x, max_depth-1)
+            self.noisetrf.unroll(x, max_depth-1),
+            self.gfactor.unroll(x, max_depth-1),
+        ).unroll(x, max_depth-1)
 
-    def xform(self, x: Tensor) -> Tensor:
-        noisetrf = self.noisetrf.make_final(x)
+    def _xform(self, x: Tensor) -> Tensor:
+        noisetrf = self.noisetrf.unroll(x)
         with ctx.returns(noisetrf, 'noise'):
             noise = noisetrf(x)
         with ctx.returns(self.gfactor, ['output', 'field']):
@@ -339,7 +337,7 @@ class GFactorTransform(NonFinalTransform):
     """Noise with spatially varying variance"""
 
     Final = Next = GFactorFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -379,14 +377,14 @@ class GFactorTransform(NonFinalTransform):
             shape, vmin=vmin, vmax=vmax, order=order, shared=shared
         )
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         return self.Next(
-            self.noise.make_final(x, max_depth-1),
-            self.gfactor.make_final(x, max_depth-1),
+            self.noise.unroll(x, max_depth-1),
+            self.gfactor.unroll(x, max_depth-1),
             **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class GammaNoiseFinalTransform(MulValueTransform):
@@ -401,7 +399,7 @@ class GammaNoiseTransform(NonFinalTransform):
     """Multiplicative Gamma noise"""
 
     Final = Next = GammaNoiseFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -430,7 +428,7 @@ class GammaNoiseTransform(NonFinalTransform):
         self.mean = mean
         self.sigma = sigma
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = list(x.shape)
@@ -453,17 +451,17 @@ class GammaNoiseTransform(NonFinalTransform):
         # ^ rsample() allows backprop, whereas sample() does not
         return self.Next(
             noise, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomGammaNoiseTransform(RandomizedTransform):
     """Multiplicative Gamma noise with random standard deviation and mean"""
 
     Next = GammaNoiseTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = GammaNoiseFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,

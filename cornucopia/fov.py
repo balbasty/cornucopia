@@ -55,7 +55,7 @@ class FlipTransform(FinalTransform):
         super().__init__(**kwargs)
         self.axis = axis
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         axis = self.axis
         if axis is None:
             axis = list(range(1, x.ndim))
@@ -70,7 +70,7 @@ class RandomFlipTransform(NonFinalTransform):
     """Randomly flip one or more axes."""
 
     Final = Next = FlipTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -97,19 +97,19 @@ class RandomFlipTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return PerChannelTransform(
-                [self.make_final(x[i:i+1], max_depth) for i in range(len(x))],
+                [self.unroll(x[i:i+1], max_depth) for i in range(len(x))],
                 **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)
         axes = self.axes or range(1, x.ndim)
         if not isinstance(axes, Sampler):
             rand_axes = RandKFrom(ensure_list(axes))
         rand_axes = rand_axes()
-        return FlipTransform(rand_axes).make_final(x, max_depth-1)
+        return FlipTransform(rand_axes).unroll(x, max_depth-1)
 
 
 class PermuteAxesTransform(FinalTransform):
@@ -133,7 +133,7 @@ class PermuteAxesTransform(FinalTransform):
         super().__init__(**kwargs)
         self.permutation = permutation
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         permutation = self.permutation
         if permutation is None:
             permutation = list(reversed(range(x.dim()-1)))
@@ -153,7 +153,7 @@ class RandomPermuteAxesTransform(NonFinalTransform):
     """Randomly permute axes."""
 
     Final = Next = PermuteAxesTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -179,19 +179,19 @@ class RandomPermuteAxesTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.axes = axes
 
-    def make_final(self, x: Tensor, max_depth: float = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: float = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return PerChannelTransform(
-                [self.make_final(x[i:i+1], max_depth) for i in range(len(x))],
+                [self.unroll(x[i:i+1], max_depth) for i in range(len(x))],
                 **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)
         axes = list(self.axes or range(x.ndim-1))
         shuffle(axes)
         return PermuteAxesTransform(
             axes, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class Rot90Transform(FinalTransform):
@@ -224,7 +224,7 @@ class Rot90Transform(FinalTransform):
         self.negative = ensure_list(negative, len(self.axis))
         self.double = ensure_list(double, len(self.axis))
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         # this implementation is suboptimal. We should fuse all transpose
         # and all flips into a single "transpose + flip" operation so that
         # a single allocation happens. This will be fine for now.
@@ -271,7 +271,7 @@ class RandomRot90Transform(NonFinalTransform):
     """Random set of 90 transforms."""
 
     Final = Next = Rot90Transform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -306,14 +306,14 @@ class RandomRot90Transform(NonFinalTransform):
         self.max_rot = RandInt.make(make_range(1, max_rot))
         self.negative = negative
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return PerChannelTransform(
-                [self.make_final(x[i:i+1], max_depth) for i in range(len(x))],
+                [self.unroll(x[i:i+1], max_depth) for i in range(len(x))],
                 **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)
         ndim = x.ndim - 1
         max_rot = self.max_rot
         if isinstance(max_rot, Sampler):
@@ -331,7 +331,7 @@ class RandomRot90Transform(NonFinalTransform):
             if self.negative else [False] * max_rot
         return Rot90Transform(
             axes, negative, **self.get_prm()
-        ).make_final(max_depth-1)
+        ).unroll(max_depth-1)
 
 
 class CropPadTransform(FinalTransform):
@@ -368,7 +368,7 @@ class CropPadTransform(FinalTransform):
         self.bound = bound
         self.value = value
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         crop = tuple([Ellipsis, *self.crop])
         x = x[crop]
         x = pad(x, self.pad, mode=self.bound, value=self.value)
@@ -386,7 +386,7 @@ class PatchTransform(NonFinalTransform):
     """Extract a patch from the volume"""
 
     Final = Next = CropPadTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -425,7 +425,7 @@ class PatchTransform(NonFinalTransform):
         self.center = center
         self.bound = bound
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -446,7 +446,7 @@ class PatchTransform(NonFinalTransform):
             padding.extend([pad_first, pad_last])
         return CropPadTransform(
             crop, padding, bound=self.bound, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomPatchTransform(NonFinalTransform):
@@ -458,10 +458,10 @@ class RandomPatchTransform(NonFinalTransform):
     """
 
     Next = PatchTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = CropPadTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -497,7 +497,7 @@ class RandomPatchTransform(NonFinalTransform):
         self.shape = shape
         self.bound = bound
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         shape = x.shape[1:]
@@ -507,7 +507,7 @@ class RandomPatchTransform(NonFinalTransform):
         center = [Uniform(mn, mx)() for mn, mx in zip(min_center, max_center)]
         return PatchTransform(
             patch_size, center, self.bound, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class CropTransform(NonFinalTransform):
@@ -549,7 +549,7 @@ class CropTransform(NonFinalTransform):
         self.unit = unit
         self.side = side
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -571,14 +571,14 @@ class CropTransform(NonFinalTransform):
                         for c0, c1 in zip(cropping[::2], cropping[1::2])]
         return CropPadTransform(
             cropping, [0]*(2*ndim), **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class PadTransform(NonFinalTransform):
     """Pad a tensor by some amount"""
 
     Final = Next = CropPadTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -624,7 +624,7 @@ class PadTransform(NonFinalTransform):
         self.bound = bound
         self.value = value
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.dim() - 1
@@ -653,17 +653,17 @@ class PadTransform(NonFinalTransform):
         return CropPadTransform(
             [slice(None)]*ndim, padding, bound=self.bound, value=self.value,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class PowerTwoTransform(NonFinalTransform):
     """Pad the volume such that the tensor shape can be divided by 2**x"""
 
     Next = PatchTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = CropPadTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -696,7 +696,7 @@ class PowerTwoTransform(NonFinalTransform):
         self.exponent = exponent
         self.bound = bound
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         shape = x.shape[1:]
@@ -704,4 +704,4 @@ class PowerTwoTransform(NonFinalTransform):
         bigshape = [max(2 ** e, s) for e, s in zip(exponent, shape)]
         return PatchTransform(
             bigshape, bound=self.bound, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)

@@ -75,7 +75,7 @@ class OneHotFinalTransform(FinalTransform):
         self.keep_background = keep_background
         self.dtype = dtype
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         if len(x) != 1:
             raise ValueError('Cannot one-hot multi-channel tensors')
         x = x[0]
@@ -101,7 +101,7 @@ class OneHotTransform(NonFinalTransform):
     """Transform a volume of integer labels into a one-hot representation"""
 
     Final = Next = OneHotFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     _InpLabel = cct.ItemOrSequence[tx.Union[int, str]]
 
@@ -134,7 +134,7 @@ class OneHotTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.dtype = dtype
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -169,13 +169,13 @@ class OneHotTransform(NonFinalTransform):
 
         return self.Next(
             label_map, self.keep_background, self.dtype, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ArgMaxTransform(FinalTransform):
     """Take the argmax along the channel dimension"""
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         return x.argmax(0)[None]
 
 
@@ -204,9 +204,9 @@ class RelabelFinalTransform(FinalTransform):
         super().__init__(**kwargs)
         self.labels = labels
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         if self.labels is None:
-            return self.make_final(x)(x)
+            return self.unroll(x)(x)
         assert self.labels is not None
         y = torch.zeros_like(x)
         for out, inp in enumerate(self.labels):
@@ -232,7 +232,7 @@ class RelabelTransform(NonFinalTransform):
     """
 
     Final = Next = RelabelFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -248,7 +248,7 @@ class RelabelTransform(NonFinalTransform):
         super().__init__(**kwargs)
         self.labels = labels
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if self.is_final:
             return self
         labels = self.labels
@@ -256,7 +256,7 @@ class RelabelTransform(NonFinalTransform):
             labels = x.unique().tolist()[1:]
         return self.Next(
             labels, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class GaussianMixtureFinalTransform(FinalTransform):
@@ -292,7 +292,7 @@ class GaussianMixtureFinalTransform(FinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         mu, sigma = self.mu, self.sigma
         ndim = x.ndim - 1
 
@@ -341,7 +341,7 @@ class GaussianMixtureTransform(NonFinalTransform):
     """Sample from a Gaussian mixture with known cluster assignment"""
 
     Next = Final = GaussianMixtureFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -377,7 +377,7 @@ class GaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         nk = len(x) if x.is_floating_point() else x.unique().numel()
@@ -390,7 +390,7 @@ class GaussianMixtureTransform(NonFinalTransform):
         return self.Next(
             mu, sigma, self.fwhm, self.background, self.dtype,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomGaussianMixtureTransform(NonFinalTransform):
@@ -399,10 +399,10 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
     """
 
     Next = GaussianMixtureTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = GaussianMixtureFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -435,7 +435,7 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
         self.background = background
         self.dtype = dtype
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if ('channels' in self.shared
@@ -456,7 +456,7 @@ class RandomGaussianMixtureTransform(NonFinalTransform):
         return GaussianMixtureTransform(
             mu, sigma, fwhm, self.background, self.dtype,
             shared=self.shared, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SmoothLabelMap(NonFinalTransform):
@@ -494,7 +494,7 @@ class SmoothLabelMap(NonFinalTransform):
         self.shape = shape
         self.soft = soft
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
 
@@ -537,17 +537,17 @@ class SmoothLabelMap(NonFinalTransform):
                 maxprob = torch.where(mask, b1, maxprob)
         return self.Next(
             b, dtype=b.dtype, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomSmoothLabelMap(NonFinalTransform):
     """Generate a random label map with random hyper-parameters"""
 
     Next = SmoothLabelMap
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ReturnValueTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -583,7 +583,7 @@ class RandomSmoothLabelMap(NonFinalTransform):
         self.soft = Fixed.make(soft)
         self.shared_field = self._prepare_shared(shared_field)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) == 1:
@@ -600,7 +600,7 @@ class RandomSmoothLabelMap(NonFinalTransform):
             shared_field = self.shared
         return self.Next(
             nb_classes, shape, soft, shared=shared_field, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class ErodeLabelTransform(FinalTransform):
@@ -638,7 +638,7 @@ class ErodeLabelTransform(FinalTransform):
         self.method = method
         self.new_labels = new_labels
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         if self.new_labels is not False:
             return self._apply_newlabels(x)
 
@@ -763,7 +763,7 @@ class DilateLabelTransform(FinalTransform):
         self.radius = ensure_list(radius, min(len(self.labels), 1))
         self.method = method
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         max_radius = max(self.radius)
         if self.method == 'conv':
             def dist(x, r):
@@ -812,7 +812,7 @@ class RandomErodeLabelTransform(NonFinalTransform):
     """
 
     Final = Next = ErodeLabelTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -854,7 +854,7 @@ class RandomErodeLabelTransform(NonFinalTransform):
         self.method = Fixed(method)
         self.new_labels = Fixed(new_labels)
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -883,7 +883,7 @@ class RandomErodeLabelTransform(NonFinalTransform):
 
         return ErodeLabelTransform(
             labels, radius, method, new_labels, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomDilateLabelTransform(NonFinalTransform):
@@ -892,7 +892,7 @@ class RandomDilateLabelTransform(NonFinalTransform):
     """
 
     Final = Next = DilateLabelTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -929,7 +929,7 @@ class RandomDilateLabelTransform(NonFinalTransform):
         self.radius = Uniform.make(make_range(0, radius))
         self.method = Fixed(method)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -956,7 +956,7 @@ class RandomDilateLabelTransform(NonFinalTransform):
 
         return DilateLabelTransform(
             labels, radius, method, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 
@@ -1000,13 +1000,13 @@ class SmoothMorphoLabelFinalTransform(FinalTransform):
             return self.fields.is_final
         return True
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         fields = self.fields
         if isinstance(fields, Transform):
             if not fields.is_final:
-                fields = fields.make_final(x, max_depth-1)
+                fields = fields.unroll(x, max_depth-1)
             else:
                 dtype = x.dtype
                 if not dtype.is_floating_point:
@@ -1021,9 +1021,9 @@ class SmoothMorphoLabelFinalTransform(FinalTransform):
         return type(self)(
             fields, self.labels, self.min_radius, self.max_radius,
             self.method, **self.get_prm()
-        ).make_final(x, max(0, max_depth-1))
+        ).unroll(x, max(0, max_depth-1))
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         max_abs_radius = 1 + int(pymath.ceil(max(
             max(map(abs, self.min_radius)),
             max(map(abs, self.max_radius))
@@ -1114,7 +1114,7 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
     """
 
     Final = Next = SmoothMorphoLabelFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1151,13 +1151,13 @@ class SmoothMorphoLabelTransform(NonFinalTransform):
         self.shape = shape
         self.method = method
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         return self.Next(
             AddFieldTransform(self.shape, shared=self.shared), self.labels,
             self.min_radius, self.max_radius, self.method, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomSmoothMorphoLabelTransform(NonFinalTransform):
@@ -1166,10 +1166,10 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
     """
 
     Next = SmoothMorphoLabelTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = SmoothMorphoLabelFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -1219,7 +1219,7 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
         self.method = Fixed(method)
         self.shared_fields = shared_fields
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> None:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> None:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -1258,7 +1258,7 @@ class RandomSmoothMorphoLabelTransform(NonFinalTransform):
         return SmoothMorphoLabelTransform(
             labels, min_radius, max_radius, shape, method,
             shared=shared_fields, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 
@@ -1303,13 +1303,13 @@ class SmoothShallowLabelFinalTransform(FinalTransform):
         self.background_labels = background_labels
         self.method = method
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         fields = self.fields
         if isinstance(fields, Transform):
             if not fields.is_final:
-                fields = fields.make_final(x, max_depth-1)
+                fields = fields.unroll(x, max_depth-1)
             else:
                 dtype = x.dtype
                 if not dtype.is_floating_point:
@@ -1324,9 +1324,9 @@ class SmoothShallowLabelFinalTransform(FinalTransform):
         return type(self)(
             fields, self.labels, self.min_radius, self.max_radius,
             self.method, **self.get_prm()
-        ).make_final(x, max(0, max_depth-1))
+        ).unroll(x, max(0, max_depth-1))
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         if self.method == 'l1':
             def dist(x):
                 return distmap.l1_signed_transform(
@@ -1418,7 +1418,7 @@ class SmoothShallowLabelTransform(NonFinalTransform):
     """Make labels "empty", with a border of a given size."""
 
     Final = Next = SmoothShallowLabelFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1457,14 +1457,14 @@ class SmoothShallowLabelTransform(NonFinalTransform):
         self.max_width = ensure_list(max_width, min(len(self.labels), 1))
         self.method = method
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         xform = AddFieldTransform(self.shape, shared=self.shared)
         return self.Next(
             xform, self.labels, self.max_width, self.min_width,
             self.background_labels, self.method, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomSmoothShallowLabelTransform(NonFinalTransform):
@@ -1473,10 +1473,10 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
     """
 
     Next = SmoothShallowLabelTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = SmoothShallowLabelFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -1524,7 +1524,7 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
         self.method = method
         self.shared_fields = shared_fields
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' in self.shared and len(x) > 1:
@@ -1566,14 +1566,14 @@ class RandomSmoothShallowLabelTransform(NonFinalTransform):
         return SmoothShallowLabelTransform(
             labels, max_width, min_width, shape, background_labels, method,
             shared=shared_fields, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class BernoulliTransform(NonFinalTransform):
     """Randomly mask voxels"""
 
     Next = Final = MulValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1598,7 +1598,7 @@ class BernoulliTransform(NonFinalTransform):
         super().__init__(shared=shared, **kwargs)
         self.prob = prob
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         batch, *shape = x.shape
@@ -1611,14 +1611,14 @@ class BernoulliTransform(NonFinalTransform):
         return MulValueTransform(
             pmap <= self.prob,
             value_name='noise', **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SmoothBernoulliTransform(NonFinalTransform):
     """Randomly mask voxels"""
 
     Final = Next = MulValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1651,7 +1651,7 @@ class SmoothBernoulliTransform(NonFinalTransform):
         self.prob = prob
         self.shared_noise = self._prepare_shared(shared_noise)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -1681,14 +1681,14 @@ class SmoothBernoulliTransform(NonFinalTransform):
         return MulValueTransform(
             pmap >= self.prob,
             value_name='noise', **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class BernoulliDiskTransform(NonFinalTransform):
     """Randomly mask voxels in balls at random locations"""
 
     Final = Next = FillValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1722,7 +1722,7 @@ class BernoulliDiskTransform(NonFinalTransform):
         self.value = value
         self.method = method
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -1760,14 +1760,14 @@ class BernoulliDiskTransform(NonFinalTransform):
 
         return FillValueTransform(
             mask, value, mask_name='disks', **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SmoothBernoulliDiskTransform(NonFinalTransform):
     """Randomly mask voxels in balls at random locations"""
 
     Final = Next = FillValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -1819,7 +1819,7 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
         )
         self.value = value
 
-    def make_final(self, x, max_depth=float('inf')):
+    def _unroll(self, x, max_depth=float('inf')):
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -1869,4 +1869,4 @@ class SmoothBernoulliDiskTransform(NonFinalTransform):
 
         return FillValueTransform(
             mask, value, mask_name='disks', **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)

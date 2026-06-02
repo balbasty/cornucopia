@@ -52,7 +52,7 @@ class ContrastMixtureFinalTransform(FinalTransform):
         self.mu = mu
         self.sigma = sigma
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         z = self.z.to(x)
         mu0 = self.mu0.to(x)
         sigma0 = self.sigma0.to(x)
@@ -105,7 +105,7 @@ class ContrastMixtureTransform(NonFinalTransform):
     """
 
     Final = Next = ContrastMixtureFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -137,14 +137,14 @@ class ContrastMixtureTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.nk = nk
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         z, mu0, sigma0, _ = fit_gmm(x, self.nk)
         mu, sigma = self._make_parameters(mu0, sigma0)
         return self.Next(
             z, mu0, sigma0, mu, sigma, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
     def _make_parameters(self, old_mu, old_sigma):
         backend = dict(dtype=old_mu.dtype, device=old_mu.device)
@@ -199,7 +199,7 @@ class ContrastLookupFinalTransform(FinalTransform):
         self.edges = edges
         self.mu = mu
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         edges, mu = self.edges.to(x), self.mu.to(x)
         mu0 = (edges[:-1] + edges[1:]) / 2
         nk = len(mu)
@@ -217,7 +217,7 @@ class ContrastLookupTransform(NonFinalTransform):
     """
 
     Final = Next = ContrastLookupFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(self, nk=16, keep_background=True,
                  *, shared=False, **kwargs):
@@ -243,18 +243,18 @@ class ContrastLookupTransform(NonFinalTransform):
         self.keep_background = keep_background
         self.nk = nk
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
             return PerChannelTransform(
-                [self.make_final(x[i:i+1], max_depth) for i in range(len(x))],
+                [self.unroll(x[i:i+1], max_depth) for i in range(len(x))],
                 **self.get_prm()
-            ).make_final(x, max_depth-1)
+            ).unroll(x, max_depth-1)
 
         vmin, vmax = x.min(), x.max()
         edges = torch.linspace(vmin, vmax, self.nk+1)
         new_mu = torch.rand(self.nk).to(x) * (vmax - vmin) + vmin
         return self.Next(
             edges, new_mu, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)

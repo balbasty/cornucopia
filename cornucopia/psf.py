@@ -54,7 +54,7 @@ class SmoothTransform(FinalTransform):
         super().__init__(**kwargs)
         self.fwhm = fwhm
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         return smoothnd(x, fwhm=make_vector(self.fwhm, x.dim()-1))
 
 
@@ -62,7 +62,7 @@ class RandomSmoothTransform(RandomizedTransform):
     """Apply Gaussian smoothing with random FWHM"""
 
     Final = Next = SmoothTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -122,20 +122,20 @@ class LowResSliceFinalTransform(FinalTransform):
             for s, f in zip(ishape, factor)
         ]
 
-    def make_final(self, x, /, max_depth: int = inf) -> Transform:
+    def _unroll(self, x, /, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         noise = None
         if self.noise:
             oshape = self._get_smallshape(x)
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
-            noise = self.noise.make_final(fake_x, max_depth-1)
+            noise = self.noise.unroll(fake_x, max_depth-1)
             max_depth -= 1
         return type(self)(
             self.axis, self.resolution, self.thickness, noise, **self.get_prm()
         )
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         ndim = x.dim() - 1
         mode = ('trilinear' if ndim == 3 else
                 'bilinear' if ndim == 2 else
@@ -171,7 +171,7 @@ class LowResSliceTransform(NonFinalTransform):
     """
 
     Final = Next = LowResSliceFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -207,7 +207,7 @@ class LowResSliceTransform(NonFinalTransform):
         self.axis = axis
         self.thickness = thickness
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -224,23 +224,23 @@ class LowResSliceTransform(NonFinalTransform):
             ]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
             if not noise.is_final:
-                noise = noise.make_final(fake_x, max_depth)
+                noise = noise.unroll(fake_x, max_depth)
                 max_depth -= 1
 
         return self.Next(
             self.axis, self.resolution, self.thickness, noise,
             **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomLowResSliceTransform(RandomizedTransform):
     """Random low-resolution slice direction, with Gaussian profile"""
 
     Next = LowResSliceTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = LowResSliceFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -291,7 +291,7 @@ class RandomLowResSliceTransform(RandomizedTransform):
             **kwargs
         )
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -309,10 +309,10 @@ class RandomLowResSliceTransform(RandomizedTransform):
             axis = axis()
         noise = self.sample['noise']
         # if noise:
-        #     noise = noise.make_final(x, max_depth-1)
+        #     noise = noise.unroll(x, max_depth-1)
         return LowResSliceTransform(
             resolution, thickness, axis, noise, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class LowResFinalTransform(FinalTransform):
@@ -341,7 +341,7 @@ class LowResFinalTransform(FinalTransform):
         self.resolution = resolution
         self.noise = noise
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         ndim = x.dim() - 1
         mode = ('trilinear' if ndim == 3 else
                 'bilinear' if ndim == 2 else
@@ -373,7 +373,7 @@ class LowResTransform(NonFinalTransform):
     """Model a lower-resolution image"""
 
     Final = Next = LowResFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -399,7 +399,7 @@ class LowResTransform(NonFinalTransform):
         self.resolution = resolution
         self.noise = noise
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         noise = None
@@ -412,20 +412,20 @@ class LowResTransform(NonFinalTransform):
                 for s, f in zip(x.shape[1:], factor)
             ]
             fake_x = x.new_zeros([]).expand([len(x), *oshape])
-            noise = self.noise.make_final(fake_x, max_depth-1)
+            noise = self.noise.unroll(fake_x, max_depth-1)
         return self.Next(
             self.resolution, noise, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomLowResTransform(RandomizedTransform):
     """Random lower-resolution image"""
 
     Next = LowResTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = LowResFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,

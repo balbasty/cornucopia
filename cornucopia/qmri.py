@@ -56,10 +56,10 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
     """
 
     Next = GaussianMixtureTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = GaussianMixtureFinalTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -112,7 +112,7 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         self.label_bone = label_bone
         self.dtype = dtype
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -182,7 +182,7 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
 
         return GaussianMixtureTransform(
             mu, sigma, fwhm, dtype=self.dtype, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SusceptibilityToFieldmapTransform(FinalTransform):
@@ -240,7 +240,7 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         self.mask_air = mask_air
         self.voxel_size = voxel_size
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         ndim = x.ndim - 1
 
         axis = self.axis
@@ -299,7 +299,7 @@ class ShimTransform(FinalTransform):
         self.quadratic = quadratic
         self.isocenter = isocenter
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         ndim = x.ndim - 1
         order = 1 if self.quadratic is None else 2
         nb_lin = 3 if ndim == 3 else 1
@@ -336,7 +336,7 @@ class OptimalShimTransform(NonFinalTransform):
     """
 
     Next = Final = AddValueTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -374,7 +374,7 @@ class OptimalShimTransform(NonFinalTransform):
         self.mask = mask
         self.isocenter = isocenter
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         if 'channels' not in self.shared and len(x) > 1:
@@ -396,7 +396,7 @@ class OptimalShimTransform(NonFinalTransform):
         ).neg_()
         return AddValueTransform(
             shim, value_name='shim', **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomShimTransform(NonFinalTransform):
@@ -408,10 +408,10 @@ class RandomShimTransform(NonFinalTransform):
     """
 
     Next = ShimTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = AddValueTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -438,7 +438,7 @@ class RandomShimTransform(NonFinalTransform):
         self.coefficients = Uniform.make(make_range(0, coefficients))
         self.max_order = RandInt.make(make_range(1, max_order))
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         ndim = x.ndim - 1
         batch = len(x)
         if 'channels' in self.shared:
@@ -469,7 +469,7 @@ class RandomShimTransform(NonFinalTransform):
 
         return ShimTransform(
             lin, None if order < 2 else quad, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class HertzToPhaseTransform(FinalTransform):
@@ -487,7 +487,7 @@ class HertzToPhaseTransform(FinalTransform):
         super().__init__(**kwargs)
         self.te = te
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         return (2 * math.pi * self.te) * x
 
 
@@ -515,7 +515,7 @@ class HertzToVoxelShiftTransform(FinalTransform):
         super().__init__(**kwargs)
         self.bandwidth = bandwidth
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         return x / self.bandwidth
 
 
@@ -629,7 +629,7 @@ class ApplyB0DistortionTransform(FinalTransform):
         """Make a flow field from the voxel displacement map"""
         return self._make_flow(vdm, self.axis)
 
-    def xform(
+    def _xform(
         self, x: Tensor, /, *, args: Arguments = NoArguments()
     ) -> Returned:
         """Deform the input tensor
@@ -709,7 +709,7 @@ class B0DistortionTransform(NonFinalTransform):
     """
 
     Final = Next = ApplyB0DistortionTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -787,7 +787,7 @@ class B0DistortionTransform(NonFinalTransform):
         if device:
             self.backend["device"] = device
 
-    def make_final(
+    def _unroll(
         self, x: Tensor, /, max_depth: int = inf,
         *, vdm: bool = True, flow: bool = True
     ) -> Transform:
@@ -848,17 +848,17 @@ class B0DistortionTransform(NonFinalTransform):
             flow, vdm, controls,
             self.axis, self.order, self.bound, self.nearest_if_label,
             **self.backend, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class RandomB0DistortionTransform(FinalTransform):
     """Randomized elastic distortion along a single dimension."""
 
     Next = B0DistortionTransform
-    """The transform type returned by `make_final(..., max_depth=1)`."""
+    """The transform type returned by `next`."""
 
     Final = ApplyB0DistortionTransform
-    """The transform type returned by `make_final(..., max_depth=inf)`."""
+    """The transform type returned by `final`."""
 
     def __init__(
         self,
@@ -933,7 +933,7 @@ class RandomB0DistortionTransform(FinalTransform):
             self.backend["device"] = device
 
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         ndim = x.ndim - 1
@@ -957,7 +957,7 @@ class RandomB0DistortionTransform(FinalTransform):
             nearest_if_label=self.nearest_if_label, axis=axis,
             **self.backend,
             **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class GradientEchoTransform(FinalTransform):
@@ -1041,7 +1041,7 @@ class GradientEchoTransform(FinalTransform):
 
         return self.Parameters(pd, t1, t2, mt, b1)
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         """
         Parameters
         ----------
@@ -1081,7 +1081,7 @@ class ReturnGradientEchoParameters(ReturnValueTransform):
     def __init__(self, param, **kwargs):
         super().__init__(param, **kwargs, value_name='param')
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         dtype = x.dtype
         if not dtype.is_floating_point:
             dtype = torch.get_default_dtype()
@@ -1113,7 +1113,7 @@ class GMMGradientEchoTransform(FinalTransform):
         self.fwd = fwd
         self.mask = mask
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         y = self.prm(x)
         y = self.fwd(y)
         if self.mask is not None:
@@ -1128,7 +1128,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
     """
 
     Final = Next = GMMGradientEchoTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     Parameters = namedtuple(
         'Parameters',
@@ -1221,7 +1221,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
         if self.b1 is not None:
             b1 = self.b1
             if isinstance(b1, Transform):
-                b1 = b1.make_final(x)
+                b1 = b1.unroll(x)
                 b1 = b1(x.new_ones([], dtype=dtype).expand(x.shape))
             elif isinstance(self.b1, Sampler):
                 b1 = b1()
@@ -1230,7 +1230,7 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
 
         return self.Parameters(tr, te, alpha, pd, t1, t2, mt, b1, sigma, fwhm)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
         n = len(x) if x.dtype.is_floating_point else x.max() + 1
@@ -1285,4 +1285,4 @@ class RandomGMMGradientEchoTransform(NonFinalTransform):
             GradientEchoTransform(tr, te, alpha, b1=None, mt=None,
                                   **self.get_prm()),
             MulValueTransform(mask),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)

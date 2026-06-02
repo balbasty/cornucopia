@@ -58,7 +58,7 @@ class ArrayCoilCombinationTransform(FinalTransform):
         super().__init__(**kwargs)
         self.sens = sens
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         sens = self.sens.to(x.device)
         uncombined = x * sens
         netsens = sqrt_(square_(sens.abs()).sum(0))[None]
@@ -73,7 +73,7 @@ class ArrayCoilTransform(NonFinalTransform):
     """Generate and apply random coil sensitivities (real or complex)"""
 
     Final = Next = ArrayCoilCombinationTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -133,7 +133,7 @@ class ArrayCoilTransform(NonFinalTransform):
         self.shape = shape
         self.sos = sos
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -176,13 +176,13 @@ class ArrayCoilTransform(NonFinalTransform):
         sens = mul_(exp_(1j * phase), magnitude)
         return self.Next(
             sens, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SumOfSquaresTransform(FinalTransform):
     """Compute the sum-of-squares across coils/channels"""
 
-    def xform(self, x: Tensor) -> Tensor:
+    def _xform(self, x: Tensor) -> Tensor:
         return sqrt_(square_(abs_(x)).sum(0, keepdim=True))
 
 
@@ -244,7 +244,7 @@ class IntraScanMotionFinalTransform(FinalTransform):
         self.axis = axis
         self.freq = freq
 
-    def xform(self, x: Tensor) -> Returned:
+    def _xform(self, x: Tensor) -> Returned:
         motions = self.motion
         patterns = self.patterns.to(x.device)
 
@@ -319,7 +319,7 @@ class IntraScanMotionTransform(NonFinalTransform):
     """Model intra-scan motion"""
 
     Final = Next = IntraScanMotionFinalTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -442,14 +442,14 @@ class IntraScanMotionTransform(NonFinalTransform):
             pattern = self.pattern
         return pattern.to(device, torch.bool)
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         # compute number of motion shots
         shots = min(self.shots, x.shape[self.axis])
 
         # sample motion parameters for each shot
         motion = []
         for shot in range(shots):
-            motion_trf = self.motion.make_final(x)
+            motion_trf = self.motion.unroll(x)
             motion.append(motion_trf)
 
         # compute sampling pattern
@@ -458,11 +458,11 @@ class IntraScanMotionTransform(NonFinalTransform):
         # sample coil sensitivities
         sens = None
         if self.coils:
-            sens = self.coils.make_final(x)
+            sens = self.coils.unroll(x)
 
         return self.Next(
             motion, pattern, sens, self.axis, self.freq, **self.get_prm()
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
 
 
 class SmallIntraScanMotionTransform(IntraScanMotionTransform):

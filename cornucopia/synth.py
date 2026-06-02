@@ -348,7 +348,7 @@ class ApplySynthFromLabelTransform(FinalTransform):
             self.gmm.is_final
         )
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0 or self.is_final:
             return self
 
@@ -362,48 +362,48 @@ class ApplySynthFromLabelTransform(FinalTransform):
         )
 
         while not layers['load'].is_final and max_depth > 0:
-            layers['load'] = layers['load'].make_final(x, max_depth)
+            layers['load'] = layers['load'].unroll(x, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
         lab = layers['load'](x)
         while not layers['deform'].is_final and max_depth > 0:
-            layers['deform'] = layers['deform'].make_final(lab, max_depth)
+            layers['deform'] = layers['deform'].unroll(lab, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
         dfm = layers['deform'](lab)
         while not layers['preproc'].is_final and max_depth > 0:
-            layers['preproc'] = layers['preproc'].make_final(dfm, max_depth)
+            layers['preproc'] = layers['preproc'].unroll(dfm, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
         gen = layers['preproc'](dfm)
         while not layers['gmm'].is_final and max_depth > 0:
-            layers['gmm'] = layers['gmm'].make_final(gen, max_depth)
+            layers['gmm'] = layers['gmm'].unroll(gen, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
         img = layers['gmm'](gen)
         while not layers['intensity'].is_final and max_depth > 0:
-            layers['intensity'] = layers['intensity'].make_final(img, max_depth)
+            layers['intensity'] = layers['intensity'].unroll(img, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
         while not layers['postproc'].is_final and max_depth > 0:
-            layers['postproc'] = layers['postproc'].make_final(dfm, max_depth)
+            layers['postproc'] = layers['postproc'].unroll(dfm, max_depth)
             max_depth -= 1
         if max_depth == 0:
             return type(self)(**layers, **self.get_prm())
 
-        return type(self)(**layers, **self.get_prm()).make_final(x, max_depth-1)
+        return type(self)(**layers, **self.get_prm()).unroll(x, max_depth-1)
 
-    def xform(self, lab: Tensor) -> Returned:
+    def _xform(self, lab: Tensor) -> Returned:
         lab = self.load(lab)
         dfm = self.deform(lab)
         gen = self.preproc(dfm)
@@ -456,7 +456,7 @@ class SynthFromLabelTransform(NonFinalTransform):
     """  # noqa: E501
 
     Final = Next = ApplySynthFromLabelTransform
-    """The transform type returned by `make_final`."""
+    """The transform type returned by `unroll`, `next` and `final`."""
 
     def __init__(
         self,
@@ -679,7 +679,7 @@ class SynthFromLabelTransform(NonFinalTransform):
             order=order,
         )
 
-    def make_final(self, x: Tensor, max_depth: int = inf) -> Transform:
+    def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
 
@@ -705,4 +705,4 @@ class SynthFromLabelTransform(NonFinalTransform):
             preproc,
             self.postproc_labels,
             **self.get_prm(),
-        ).make_final(x, max_depth-1)
+        ).unroll(x, max_depth-1)
