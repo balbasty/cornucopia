@@ -27,7 +27,6 @@ independent of the downstream learning framework (pytorch, tensorflow, jax, ...)
 - `nibabel`
 - `torch-interpol`
 - `torch-distmap`
-```
 
 ### Pip (release)
 
