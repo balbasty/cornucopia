@@ -41,7 +41,7 @@ from .special import RandomizedTransform, SequentialTransform
 from .random import Sampler, Uniform, RandInt, Fixed, make_range
 from .utils.py import ensure_list, positive_index
 from .utils.smart_inplace import add_, mul_, div_, pow_
-from .utils.compat import clamp
+from .utils.compat import clamp, clamp_
 from . import typing as cct
 
 # typing
@@ -1019,7 +1019,7 @@ class GammaFinalTransform(FinalTransform):
 
         den = vmax - vmin
         num = x - vmin
-        num.clamp_(1e-5 * den, (1.0 - 1e-5) * den)
+        num = clamp_(num, 1e-5 * den, (1.0 - 1e-5) * den)
         y = div_(num, add_(den, 1e-5))
         y = pow_(y, gamma)
         if gamma.requires_grad:
