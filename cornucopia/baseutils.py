@@ -242,8 +242,12 @@ class Arguments:
                 return NoArguments()
         return super().__new__(cls)
 
+    def __init__(self, *args, **kwargs):
+        pass
+
     def __str__(self):
         return repr(self)
+
 
 class NoArguments(Arguments):
     """Wrapper when no arguments where passed."""
@@ -392,7 +396,14 @@ class Args(tuple, Arguments):
 class Kwargs(dict, Arguments):
     """Dict-like, except that unzipping works on values instead of keys"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, *args, **kwargs):
+        if args:
+            # Catch case where Arguments(...) was called on a Kwargs.
+            # In this case, we want to keep the Kwargs as is, and not
+            # call __init__ again.
+            if kwargs or len(args) != 1 or not isinstance(args[0], Kwargs):
+                raise ValueError("Wrong instantiation")
+            return
         super().__init__(**kwargs)
 
     def unwrap(self):
@@ -416,6 +427,13 @@ class ArgsAndKwargs(Arguments):
     """Iterator across both args and kwargs"""
 
     def __init__(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], ArgsAndKwargs):
+            # Catch case where Arguments(...) was called on a ArgsAndKwargs.
+            # In this case, we want to keep the ArgsAndKwargs as is, and not
+            # call __init__ again.
+            if kwargs:
+                raise ValueError("Wrong instantiation")
+            return
         self.args = Args(*args)
         self.kwargs = Kwargs(**kwargs)
 

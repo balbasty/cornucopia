@@ -50,6 +50,23 @@ class Transform(nn.Module, ABC):
             Append the (structure of) returned tensors to the parent
             structure.
 
+            !!! warning
+                This option does not keep the input tensors in the returned
+                structure! To preserve the input tensors, you should
+                use `append` in conjunction with `returns`.
+
+                !!! example
+                    ```python
+                    # With lists
+                    trf = MyTransform(returns=['input', 'output'], append=True)
+                    x1, y1, x2, y2 = trf([x1, x2])
+
+                    # With dicts
+                    trf = MyTransform(returns={'x': 'input', 'y': 'output'}, append=True, prefix=True)
+                    out = trf({'path1': x1, 'path2': x2})
+                    assert out.keys() == {'path1.x', 'path1.y', 'path2.x', 'path2.y'}
+                    ```
+
             !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                 Can be a string since `v0.5`"
                 If it is a `str` and parent is a `dict`, its value will be
@@ -207,7 +224,9 @@ class Transform(nn.Module, ABC):
         """
         # We wrap positional and keywork arguments in special classes
         # to differentiate from inputs that are lists or dicts.
+        print(self.__class__, tuple(type(aa) for aa in a), {k: type(v) for k, v in k.items()})
         x = args = Arguments(*a, **k)
+        print("->", type(x))
 
         if not args:
             # If no input arguments, return None.
@@ -383,12 +402,13 @@ class Transform(nn.Module, ABC):
         ) -> list:
             """Apply forward pass to elements of a list"""
             forward = forward or self
+            append = self.append and not isinstance(self.append, str)
             y = []
             for elem in x:
                 elem = forward(elem)
                 if isinstance(elem, Returned):
                     elem = elem.obj
-                    if self.append:
+                    if append:
                         if isinstance(elem, dict):
                             y.extend(elem.values())
                             continue
@@ -469,7 +489,7 @@ class Transform(nn.Module, ABC):
                             continue
 
                 # We insert the returned value (whether it is a single tensor,
-                # or a nested strucutre of tensors) it in the output dictionary,
+                # or a nested structure of tensors) it in the output dictionary,
                 # in place of the input value.
                 if isinstance(y, dict):
                     y[key] = value
@@ -477,6 +497,13 @@ class Transform(nn.Module, ABC):
                     y.append(value)
 
             if isinstance(y, dict):
+
+                # Consume keys
+                for key in list(y.keys()):
+                    if self._is_consumed(key):
+                        y.pop(key)
+
+                # Convert to dictionary subtype
                 return type(x)(y)
             else:
                 return y
