@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 
 # dependencies
 import torch
+import typing_extensions as tx
 
 # internal
 from .utils.indexing import guess_shape
@@ -89,7 +90,7 @@ def prepare_output(results, returns):
     return Returned(results)
 
 
-def return_requires(returns) -> set[str]:
+def return_requires(returns) -> tx.Set[str]:
     """Return all requires fields in a flat structure"""
     if returns is None:
         return {'output'}
