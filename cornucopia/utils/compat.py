@@ -1,7 +1,6 @@
-from typing import Optional
 import torch
-
-Tensor = torch.Tensor
+from torch import Tensor
+from typing_extensions import Optional
 
 
 torch_version = torch.__version__

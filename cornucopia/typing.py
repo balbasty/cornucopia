@@ -48,8 +48,9 @@ NumberOrTensor = tx.Union[NumberT_co, Tensor]
 VectorLike = tx.Union[ScalarT_co, tx.Sequence[ScalarT_co], Tensor]
 
 # --- Common transform parameters ---
-IncludeKeyT = ItemOrSequence[str]
-ExcludeKeyT = ItemOrSequence[str]
+IncludeT = ItemOrSequence[str]
+ExcludeT = ItemOrSequence[str]
+ConsumeT = ItemOrSequence[str]
 SharedStrT = tx.Literal["channels+tensors", "channels", "tensors", ""]
 SharedT = tx.Union[SharedStrT, bool]
 ReturnsStrT = tx.Union[tx.Literal['input', 'output'], str]
@@ -58,6 +59,8 @@ ReturnsT = tx.Union[
     tx.Sequence[ReturnsStrT],
     tx.Mapping[str, ReturnsStrT]
 ]
+AppendT = tx.Union[bool, str]
+PrefixT = tx.Union[bool, str]
 
 # --- Samplers ---
 SamplerOrBound = tx.Union[Sampler, tx.Tuple[NumberT, NumberT], NumberT]

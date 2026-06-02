@@ -4,25 +4,25 @@ __all__ = [
     'NonFinalTransform',
 ]
 # stdlib
-from copy import copy
 import inspect
 import random
-from abc import ABC, abstractmethod
-from typing import Callable, Dict, Iterator, List, Optional, Union
+from abc import ABC
+from copy import copy
 from math import inf
 
 # dependencies
 import torch
-from torch import isin, nn
-from torch import Tensor
+import typing_extensions as tx
+from torch import nn, Tensor
 
 # internal
 from .random import Sampler
 from .utils.py import ensure_list, cumsum
 from .baseutils import (
-    Arguments, Arg, Args, Kwargs, ArgsAndKwargs, NoArguments, Returned, VirtualTensor,
+    Arguments, Args, Kwargs, ArgsAndKwargs, NoArguments, Returned,
     get_first_element, prepare_output, UNSET, recursive_cat,
 )
+from . import typing as cct
 
 
 class Transform(nn.Module, ABC):
@@ -30,12 +30,12 @@ class Transform(nn.Module, ABC):
 
     def __init__(
         self, *,
-        returns: Union[str, List[str], Dict[str, str], None] = None,
-        append: Union[bool, str] = False,
-        prefix: Union[bool, str] = True,
-        include: Union[str, List[str], None] = None,
-        exclude: Union[str, List[str], None] = None,
-        consume: Union[str, List[str], None] = None,
+        returns: tx.Union[str, tx.Sequence[str], tx.Mapping[str, str], None] = None,
+        append: tx.Union[bool, str] = False,
+        prefix: tx.Union[bool, str] = True,
+        include: tx.Optional[cct.IncludeT] = None,
+        exclude: tx.Optional[cct.ExcludeT] = None,
+        consume: tx.Optional[cct.ConsumeT] = None,
     ):
         """
         Parameters
@@ -190,15 +190,15 @@ class Transform(nn.Module, ABC):
             self.prm = prm
 
         @property
-        def include(self) -> Optional[List[str]]:
+        def include(self) -> tx.Optional[tx.Sequence[str]]:
             return self.prm.get('include')
 
         @property
-        def exclude(self) -> Optional[List[str]]:
+        def exclude(self) -> tx.Optional[tx.Sequence[str]]:
             return self.prm.get('exclude')
 
         @property
-        def consume(self) -> Optional[List[str]]:
+        def consume(self) -> tx.Optional[tx.Sequence[str]]:
             return self.prm.get('consume')
 
         @property
@@ -206,14 +206,18 @@ class Transform(nn.Module, ABC):
             return self.prm.get('append', False)
 
         @property
-        def prefix(self) -> Union[bool, str]:
+        def prefix(self) -> tx.Union[bool, str]:
             return self.prm.get('prefix', True)
 
         @property
-        def returns(self) -> Optional[Union[str, List[str], Dict[str, str]]]:
+        def returns(self) -> tx.Optional[tx.Union[
+            str, tx.Sequence[str], tx.Mapping[str, str]
+        ]]:
             return self.prm.get('returns')
 
-        def __call__(self, x: Union[Tensor, List, Dict, Arguments]):
+        def __call__(
+            self, x: tx.Union[Tensor, tx.Sequence, tx.Mapping, Arguments]
+        ) -> tx.Union[Tensor, tx.Sequence, tx.Mapping, Arguments]:
             if isinstance(x, NoArguments):
                 return None
 
@@ -292,7 +296,7 @@ class Transform(nn.Module, ABC):
             # ---- Now we're working with a `Returned` object ----
             return y
 
-        def _get_valid_keys(self, x: Dict[str, str]) -> List[str]:
+        def _get_valid_keys(self, x: tx.Mapping[str, str]) -> tx.Sequence[str]:
             valid_keys = x.keys()
             if self.include is not None:
                 valid_keys = [k for k in valid_keys if k in self.include]
@@ -301,7 +305,7 @@ class Transform(nn.Module, ABC):
             return valid_keys
 
         def _forward_list(
-            self, x: list, forward: Optional[Callable] = None
+            self, x: list, forward: tx.Optional[tx.Callable] = None
         ) -> list:
             """Apply forward pass to elements of a list"""
             forward = forward or self
@@ -321,8 +325,8 @@ class Transform(nn.Module, ABC):
             return type(x)(y)
 
         def _forward_dict(
-            self, x: dict, forward: Optional[Callable] = None
-        ) -> Union[dict, list]:
+            self, x: dict, forward: tx.Optional[tx.Callable] = None
+        ) -> tx.Union[dict, list]:
             """Apply forward pass to elements of a dict"""
             forward = forward or self
             valid_keys = self._get_valid_keys(x)
@@ -675,7 +679,7 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
 
     """
 
-    def __init__(self, transforms: List[Transform], **kwargs) -> None:
+    def __init__(self, transforms: tx.Sequence[Transform], **kwargs) -> None:
         """
         Parameters
         ----------
@@ -762,11 +766,11 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
     def __len__(self) -> int:
         return len(self.transforms)
 
-    def __iter__(self) -> Iterator[Transform]:
+    def __iter__(self) -> tx.Iterator[Transform]:
         for t in self.transforms:
             yield t
 
-    def __getitem__(self, item: Union[int, slice]) -> Transform:
+    def __getitem__(self, item: tx.Union[int, slice]) -> Transform:
         if isinstance(item, slice):
             return SequentialTransform(self.transforms[item])
         else:
@@ -779,7 +783,7 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
 class PerChannelTransform(SpecialTransform):
     """Apply a different transform to each channel"""
 
-    def __init__(self, transforms: List[Transform], **kwargs) -> None:
+    def __init__(self, transforms: tx.Sequence[Transform], **kwargs) -> None:
         """
         Parameters
         ----------
@@ -953,10 +957,10 @@ class SwitchTransform(_SharedMixin, SpecialTransform):
 
     def __init__(
         self,
-        transforms: List[Transform],
-        prob: Union[float, List[float]] = 0,
+        transforms: tx.Sequence[Transform],
+        prob: cct.ScalarOrSequence[float] = 0,
         *,
-        shared: bool = True,
+        shared: cct.SharedT = True,
         **kwargs
     ) -> None:
         """
@@ -982,7 +986,7 @@ class SwitchTransform(_SharedMixin, SpecialTransform):
         self.transforms = list(transforms)
         self.prob = prob or []
 
-    def _make_prob(self) -> List[float]:
+    def _make_prob(self) -> tx.Sequence[float]:
         prob = ensure_list(self.prob, len(self.transforms), default=0)
         sumprob = sum(prob)
         if not sumprob:
@@ -1085,7 +1089,7 @@ class IncludeKeysTransform(SpecialTransform):
     def __init__(
         self,
         transform: Transform,
-        keys: Union[List[str], str],
+        keys: cct.IncludeT,
         union: bool = True
     ) -> None:
         """
@@ -1128,7 +1132,7 @@ class IncludeKeysTransform(SpecialTransform):
                 return final_inv_trf
 
     @classmethod
-    def _combine(self, *includes, union: bool = True) -> List[str]:
+    def _combine(self, *includes, union: bool = True) -> tx.Sequence[str]:
         new_include, *includes = includes
         if union:
             for include in includes:
@@ -1191,7 +1195,7 @@ class ExcludeKeysTransform(SpecialTransform):
     def __init__(
         self,
         transform: Transform,
-        keys: Union[List[str], str],
+        keys: cct.ExcludeT,
         union: bool = True
     ) -> None:
         """
@@ -1234,7 +1238,7 @@ class ExcludeKeysTransform(SpecialTransform):
                 return final_inv_trf
 
     @classmethod
-    def _combine(self, *excludes, union: bool = True) -> List[str]:
+    def _combine(self, *excludes, union: bool = True) -> tx.Sequence[str]:
         new_exclude, *excludes = excludes
         if union:
             for exclude in excludes:
@@ -1300,7 +1304,7 @@ class ConsumeKeysTransform(SpecialTransform):
     def __init__(
         self,
         transform: Transform,
-        keys: Union[List[str], str],
+        keys: cct.ConsumeT,
         union: bool = True
     ) -> None:
         """
@@ -1343,7 +1347,7 @@ class ConsumeKeysTransform(SpecialTransform):
                 return final_inv_trf
 
     @classmethod
-    def _combine(self, *consumes, union: bool = True) -> List[str]:
+    def _combine(self, *consumes, union: bool = True) -> tx.Sequence[str]:
         new_consume, *consumes = consumes
         if union:
             for consume in consumes:
@@ -1383,7 +1387,7 @@ class SharedTransform(_SharedMixin, SpecialTransform):
     """
 
     def __init__(
-        self, transform: Transform, mode: Union[str, bool] = UNSET
+        self, transform: Transform, mode: cct.SharedT = UNSET
     ) -> None:
         """
         Parameters
@@ -1444,7 +1448,7 @@ class ReturningTransform(SpecialTransform):
     def __init__(
         self,
         transform: Transform,
-        returns: Union[str, List[str], Dict[str, str], None] = None
+        returns: tx.Optional[cct.ReturnsT] = None
     ) -> None:
         super().__init__()
         self.transform = transform
@@ -1490,7 +1494,7 @@ class MappedTransform(SpecialTransform):
         self,
         *mapargs,
         nested: bool = False,
-        default: Optional[Transform] = None,
+        default: tx.Optional[Transform] = None,
         **mapkwargs
     ) -> None:
         """
@@ -1524,7 +1528,7 @@ class MappedTransform(SpecialTransform):
     def forward(self, *args, **kwargs) -> Returned:
 
         if self.include is not None or self.exclude or self.consume:
-            def wrap(f: Callable) -> Callable:
+            def wrap(f: tx.Callable) -> tx.Callable:
                 if not f:
                     return f
                 def ff(*a, **k):
@@ -1539,7 +1543,7 @@ class MappedTransform(SpecialTransform):
                         return f(*a, **k)
                 return ff
         else:
-            def wrap(f: Callable) -> Callable:
+            def wrap(f: tx.Callable) -> tx.Callable:
                 return f
 
         # If the input is a wrapped `Arguments`, unwrap it and recurse.
@@ -1631,7 +1635,7 @@ class RandomizedTransform(SpecialTransform, NonFinalTransform):
         sample: tuple = tuple(),
         ksample: dict = dict(),
         *,
-        shared: Union[bool, str] = False,
+        shared: tx.Union[bool, str] = False,
         **kwargs
     ) -> "RandomizedTransform":
         assert cls is RandomizedTransform
@@ -1651,7 +1655,7 @@ class RandomizedTransform(SpecialTransform, NonFinalTransform):
         sample: tuple = tuple(),
         ksample: dict = dict(),
         *,
-        shared: Union[bool, str] = False,
+        shared: tx.Union[bool, str] = False,
         **kwargs
     ) -> None:
         """

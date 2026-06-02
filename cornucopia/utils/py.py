@@ -1,6 +1,11 @@
+# stdlib
 from types import GeneratorType as generator
-from typing import List
+
+# dependencies
 import torch
+from typing_extensions import List
+
+# internals
 from .version import torch_version
 
 

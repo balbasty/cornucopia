@@ -20,10 +20,10 @@ import math
 import random
 from abc import ABC, abstractmethod
 from numbers import Number
-from typing import Any, Callable, Protocol, Sequence, overload
 
 # external
 import torch
+import typing_extensions as tx
 
 # internal
 from .utils.py import ensure_list
@@ -110,24 +110,24 @@ class Sampler(ABC):
     def __init__(self, **theta):
         self.theta = self.Parameters(**theta)
 
-    @overload
+    @tx.overload
     @classmethod
     def make(cls, other: 'Sampler') -> 'Sampler':
         """Pass-through factory: return the same sampler"""
 
-    @overload
+    @tx.overload
     @classmethod
     def make(cls, other: dict) -> 'Sampler':
         """Keyword factory: return `cls(**other)`"""
 
-    @overload
+    @tx.overload
     @classmethod
     def make(cls, other: tuple) -> 'Sampler':
         """Positional factory: return `cls(*other)`"""
 
-    @overload
+    @tx.overload
     @classmethod
-    def make(cls, other: Any) -> 'Sampler':
+    def make(cls, other: tx.Any) -> 'Sampler':
         """Fallback factory: return `cls(other)`"""
 
     @classmethod
@@ -169,16 +169,16 @@ class Sampler(ABC):
         else:
             return super().__setattr__(item, value)
 
-    @overload
+    @tx.overload
     def __call__(self) -> Number: ...
 
-    @overload
-    def __call__(self, n: int) -> Sequence[Number]: ...
+    @tx.overload
+    def __call__(self, n: int) -> tx.Sequence[Number]: ...
 
-    @overload
+    @tx.overload
     def __call__(
         self,
-        n: Sequence[int],
+        n: tx.Sequence[int],
         *,
         dtype=None,
         device=None,
@@ -355,16 +355,16 @@ class Fixed(Sampler):
 
         var = fwhm = std
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, std=0): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, var=0): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, fwhm=0): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, min, max=None): ...
 
     def __init__(self, value=None, **kwargs):
@@ -503,22 +503,22 @@ class Uniform(Sampler):
                 return list(map(_fwhm, zip(self.min, self.max)))
             return _fwhm((self.min, self.max))
 
-    @overload
+    @tx.overload
     def __init__(self): ...
 
-    @overload
+    @tx.overload
     def __init__(self, max): ...
 
-    @overload
+    @tx.overload
     def __init__(self, min, max): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, fwhm=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, std): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, var): ...
 
     def __init__(self, *args, **kwargs):
@@ -595,13 +595,13 @@ class RandInt(Sampler):
                 return list(map(_fwhm, zip(self.min, self.max)))
             return _fwhm((self.min, self.max))
 
-    @overload
+    @tx.overload
     def __init__(self): ...
 
-    @overload
+    @tx.overload
     def __init__(self, max): ...
 
-    @overload
+    @tx.overload
     def __init__(self, min, max): ...
 
     def __init__(self, *args, **kwargs):
@@ -758,16 +758,16 @@ class Normal(Sampler):
                 return [s * math.sqrt(8 * math.log(2)) for s in self.sigma]
             return self.sigma * math.sqrt(8 * math.log(2))
 
-    @overload
+    @tx.overload
     def __init__(self, mu=0, sigma=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, std=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, var): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, fwhm): ...
 
     def __init__(self, mu=None, sigma=None, **kwargs):
@@ -910,25 +910,25 @@ class LogNormal(Sampler):
                 return list(map(math.exp, self.mu))
             return math.exp(self.mu)
 
-    @overload
+    @tx.overload
     def __init__(self, mu=0, sigma=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, logmean, logstd=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, logmean, logvar): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, logmean, logfwhm): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, std=1): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, var): ...
 
-    @overload
+    @tx.overload
     def __init__(self, *, mean, fwhm): ...
 
     def __init__(self, mu=None, sigma=None, **kwargs):
@@ -1122,7 +1122,7 @@ class TransformedSampler(Sampler):
         A value-wise transformation
     """
 
-    Transform = Callable[[float], float]
+    Transform = tx.Callable[[float], float]
 
     def __init__(self, sampler: Sampler, transform: Transform):
         super().__init__()
@@ -1152,10 +1152,10 @@ class CombinedSamplers(Sampler):
 
     """
 
-    class Transform(Protocol):
+    class Transform(tx.Protocol):
         def __call__(self, *args: float) -> float: ...
 
-    def __init__(self, samplers: Sequence[Sampler], transform: Transform):
+    def __init__(self, samplers: tx.Sequence[Sampler], transform: Transform):
         super().__init__()
         self.samplers = samplers
         self.transform = transform
@@ -1397,15 +1397,15 @@ pow = PowerOfSamplers
 """Alias for [`PowerOfSamplers`][cornucopia.random.PowerOfSamplers]"""
 
 
-@overload
+@tx.overload
 def make_range(max, *, min=0, offset=0) -> Uniform: ...
 
 
-@overload
+@tx.overload
 def make_range(min, *, max, offset=0) -> Uniform: ...
 
 
-@overload
+@tx.overload
 def make_range(min, max, *, offset=0) -> Uniform: ...
 
 

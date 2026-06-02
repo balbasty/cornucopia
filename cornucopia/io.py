@@ -3,16 +3,17 @@ __all__ = ['ToTensorTransform', 'LoadTransform']
 # stdlib
 import os.path
 from os import PathLike
-from typing import Optional, Union, List
 from pathlib import Path
 
 # dependencies
 import torch
 from torch import Tensor
+import typing_extensions as tx
 
 # internals
 from .base import FinalTransform
 from .utils.io import loaders
+from . import typing as cct
 
 
 class ToTensorTransform(FinalTransform):
@@ -20,9 +21,9 @@ class ToTensorTransform(FinalTransform):
 
     def __init__(
         self,
-        ndim: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
+        ndim: tx.Optional[int] = None,
+        dtype: tx.Optional[torch.dtype] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
         **kwargs
     ) -> None:
         """
@@ -73,14 +74,16 @@ class LoadTransform(FinalTransform):
 
     def __init__(
         self,
-        ndim: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
+        ndim: tx.Optional[int] = None,
+        dtype: tx.Optional[torch.dtype] = None,
         *,
-        device: Optional[Union[torch.device, str]] = None,
-        returns: Optional[List[str]] = None,
-        append: bool = False,
-        include: Optional[List[str]] = None,
-        exclude: Optional[List[str]] = None,
+        device: tx.Optional[cct.TorchDevice] = None,
+        returns: tx.Optional[cct.ReturnsT] = None,
+        append: cct.AppendT = False,
+        prefix: cct.PrefixT = False,
+        include: tx.Optional[cct.IncludeT] = None,
+        exclude: tx.Optional[cct.ExcludeT] = None,
+        consume: tx.Optional[cct.ConsumeT] = None,
         **kwargs
     ) -> None:
         """
@@ -110,15 +113,17 @@ class LoadTransform(FinalTransform):
         super().__init__(
             returns=returns,
             append=append,
+            prefix=prefix,
             include=include,
             exclude=exclude,
+            consume=consume,
         )
         self.ndim = ndim
         self.dtype = dtype
         self.device = device
         self.kwargs = kwargs
 
-    def xform(self, x: Union[str, Tensor]) -> Tensor:
+    def xform(self, x: tx.Union[str, Tensor]) -> Tensor:
         try:
             return torch.as_tensor(x, dtype=self.dtype, device=self.device)
         except Exception:

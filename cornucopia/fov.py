@@ -21,10 +21,10 @@ import math
 from math import inf
 from numbers import Number
 from random import shuffle
-from typing import List, Optional, Union
 
 # dependencies
 from torch import Tensor
+import typing_extensions as tx
 
 # internals
 from .base import Transform
@@ -32,13 +32,14 @@ from .base import FinalTransform, NonFinalTransform, PerChannelTransform
 from .utils.py import ensure_list
 from .utils.padding import pad
 from .random import Uniform, RandKFrom, Sampler, RandInt, make_range
+from . import typing as cct
 
 
 class FlipTransform(FinalTransform):
     """Flip one or more axes."""
 
     def __init__(
-        self, axis: Optional[Union[int, List[int]]] = None, **kwargs
+        self, axis: tx.Optional[cct.ScalarOrSequence[int]] = None, **kwargs
     ) -> None:
         """
         Parameters
@@ -73,7 +74,7 @@ class RandomFlipTransform(NonFinalTransform):
 
     def __init__(
         self,
-        axes: Union[Sampler, List[int], int, None] = None,
+        axes: tx.Union[Sampler, cct.ScalarOrSequence[int], None] = None,
         *,
         shared: bool = True,
         **kwargs
@@ -115,7 +116,7 @@ class PermuteAxesTransform(FinalTransform):
     """Permute axes"""
 
     def __init__(
-        self, permutation: Optional[List[int]] = None, **kwargs
+        self, permutation: tx.Optional[tx.Sequence[int]] = None, **kwargs
     ) -> None:
         """
         Parameters
@@ -156,7 +157,7 @@ class RandomPermuteAxesTransform(NonFinalTransform):
 
     def __init__(
         self,
-        axes: Optional[List[int]] =  None,
+        axes: tx.Optional[tx.Sequence[int]] =  None,
         *,
         shared: bool =True,
         **kwargs
@@ -198,9 +199,9 @@ class Rot90Transform(FinalTransform):
 
     def __init__(
         self,
-        axis: Union[int, List[int]] = 0,
-        negative: Union[bool, List[bool]] = False,
-        double: Union[bool, List[bool]] = False,
+        axis: cct.ScalarOrSequence[int] = 0,
+        negative: cct.ScalarOrSequence[bool] = False,
+        double: cct.ScalarOrSequence[bool] = False,
         **kwargs
     ) -> None:
         """
@@ -251,7 +252,7 @@ class Rot90Transform(FinalTransform):
 class Rot180Transform(Rot90Transform):
     """Apply a 180 deg rotation along one or several axes"""
 
-    def __init__(self, axis: Union[int, List[int]] = 0, **kwargs) -> None:
+    def __init__(self, axis: cct.ScalarOrSequence[int] = 0, **kwargs) -> None:
         """
         Parameters
         ----------
@@ -274,11 +275,11 @@ class RandomRot90Transform(NonFinalTransform):
 
     def __init__(
         self,
-        axes: Union[int, List[int], None] = None,
-        max_rot: Union[int, Sampler] = 2,
+        axes: tx.Optional[cct.ScalarOrSequence[int]] = None,
+        max_rot: cct.SamplerOrBound[int] = 2,
         negative: bool = True,
         *,
-        shared: Union[bool, str] = True,
+        shared: cct.SharedT = True,
         **kwargs
      ) -> None:
         """
@@ -338,9 +339,9 @@ class CropPadTransform(FinalTransform):
 
     def __init__(
         self,
-        crop: List[slice] = (),
-        pad: List[int] = (),
-        bound: Union[str, List[str]] = 'zero',
+        crop: tx.Sequence[slice] = (),
+        pad: tx.Sequence[int] = (),
+        bound: cct.ItemOrSequence[str] = 'zero',
         value: Number = 0,
         **kwargs
     ) -> None:
@@ -389,11 +390,11 @@ class PatchTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[int, List[int]] = 64,
-        center: Union[float, List[float]] = 0,
-        bound: Union[str, List[str]] = 'zero',
+        shape: cct.ScalarOrSequence[int] = 64,
+        center: cct.ScalarOrSequence[float] = 0,
+        bound: cct.ItemOrSequence[str] = 'zero',
         *,
-        shared: Union[str, bool] = 'channels',
+        shared: cct.SharedT = True,
         **kwargs
     ) -> None:
         """
@@ -411,6 +412,10 @@ class PatchTransform(NonFinalTransform):
         shared
             See [`NonFinalTransform`][cornucopia.base.NonFinalTransform]
             for details.
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                Default for `shared` changed from `"channels"` to `True`"
+
         returns, append, prefix, include, exclude, consume
             See [`Transform`][cornucopia.base.Transform] for details.
         """
@@ -460,10 +465,10 @@ class RandomPatchTransform(NonFinalTransform):
 
     def __init__(
         self,
-        shape: Union[int, List[int]],
-        bound: Union[str, List[str]] = 'zero',
+        shape: cct.ScalarOrSequence[int],
+        bound: cct.ItemOrSequence[str] = 'zero',
         *,
-        shared: Union[str, bool] = True,
+        shared: cct.SharedT = True,
         **kwargs
     ) -> None:
         """
@@ -510,7 +515,7 @@ class CropTransform(NonFinalTransform):
 
     def __init__(
         self,
-        cropping: Union[int, float, List[Union[int, float]]],
+        cropping: cct.ScalarOrSequence[tx.Union[int, float]],
         unit: str = 'vox',
         side: str = 'both',
         **kwargs
@@ -577,7 +582,7 @@ class PadTransform(NonFinalTransform):
 
     def __init__(
         self,
-        padding: Union[int, float, List[Union[int, float]]],
+        padding: cct.ScalarOrSequence[tx.Union[int, float]],
         unit: str = 'vox',
         side: str = 'both',
         bound: str = 'zero',
@@ -662,8 +667,8 @@ class PowerTwoTransform(NonFinalTransform):
 
     def __init__(
         self,
-        exponent: Union[int, List[int]] = 1,
-        bound: Union[str, List[str]] = 'zero',
+        exponent: cct.ScalarOrSequence[int] = 1,
+        bound: cct.ItemOrSequence[str] = 'zero',
         **kwargs
     ) -> None:
         """

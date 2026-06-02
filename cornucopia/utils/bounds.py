@@ -17,12 +17,10 @@ dst2                                                        antireflect, dirichl
 dst1                                                        antimirror               -a  0 | a b c d |  0 -d
 """  # noqa: E501
 
-# stdlib
-from typing import Tuple
-
 # dependencies
 import torch
 from torch import Tensor
+from typing_extensions import Tuple
 
 # internals
 from .version import torch_version
