@@ -187,7 +187,7 @@ class RelabelFinalTransform(FinalTransform):
         - The `labels` are mapped to the range `{1..len(labels)}`.
 
         - If an element of this list is a sublist of indices,
-            indices in the sublist are merged.
+          indices in the sublist are merged.
 
         - All labels absent from the list are mapped to `0`.
     """
