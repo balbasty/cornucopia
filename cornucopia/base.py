@@ -48,7 +48,7 @@ class Transform(nn.Module, ABC):
             Append the (structure of) returned tensors to the parent
             structure.
 
-            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                 Can be a string since `v0.5`"
                 If it is a `str` and parent is a `dict`, its value will be
                 used as a separator between the prefix and the key.
@@ -59,7 +59,7 @@ class Transform(nn.Module, ABC):
 
             If `True`, the prefix is the input key.
 
-            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                 Can be a string since `v0.5`"
         include : [list of] str, optional
             List of keys to which the transform should apply.
