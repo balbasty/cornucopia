@@ -2,24 +2,6 @@ name: Publish to PyPi
 description: Publish to PyPi
 
 on:
-  workflow_dispatch:
-    inputs:
-      python-version:
-        description: 'Python version'
-        required: false
-        default: '3.6'
-      tag:
-        description: 'Commit / Branch / Tag / SHA to checkout'
-        required: false
-        default: ''
-      test:
-        description: 'Test PyPI'
-        required: false
-        default: false
-        type: boolean
-      password:
-        required: true
-
   workflow_call:
     inputs:
       python-version:
