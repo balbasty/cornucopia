@@ -47,16 +47,18 @@ jobs:
         with:
           mamba-version: "*"
           python-version: ${{ inputs.python-version }}
-          channels: conda-forge,pytorch
+          conda-remove-defaults: true
           activate-environment: test-env
       - name: Install dependencies
         shell: bash -el {0}
         env:
           PYTORCH_VERSION: ${{ inputs.pytorch-version }}
         run: |
-          mamba install pytorch=${PYTORCH_VERSION} pytest
+          pip install "torch==${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest
+      - name: Install package
+        shell: bash -el {0}
+        run: pip install .
       - name: Test with pytest
         shell: bash -el {0}
-        run: |
-          pip install .
-          pytest
+        run: pytest
