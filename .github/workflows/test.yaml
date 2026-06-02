@@ -47,6 +47,7 @@ jobs:
         with:
           mamba-version: "*"
           python-version: ${{ inputs.python-version }}
+          channels: conda-forge
           conda-remove-defaults: true
           activate-environment: test-env
       - name: Install dependencies
