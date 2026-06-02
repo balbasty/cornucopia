@@ -539,7 +539,7 @@ class Transform(nn.Module, ABC):
         Transform
             A more specialized version of the transform.
         """
-        if max_depth == 0:
+        if max_depth <= 0:
             # This is always valid, so let's catch it
             return self
         # Wrapper that calls `_unroll`, but only passes `args` if the

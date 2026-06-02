@@ -1102,15 +1102,15 @@ class AffineElasticTransform(NonFinalTransform):
             backend['dtype'] = torch.get_default_dtype()
 
         # get transformation parameters
-        A = self.affine.unroll(x, flow=False).matrix  # (D+1, D+1)
+        A = self.affine.final(x, flow=False).matrix  # (D+1, D+1)
         if self.steps:
             # request the blown up and exponentiated field
-            xform = self.elastic.unroll(x, flow=True)
+            xform = self.elastic.final(x, flow=True)
             elasticflow, controls = xform.flow, xform.controls
             # (C, D, *shape)
         else:
             # request only the spline control points
-            controls = self.elastic.unroll(x, flow=False).controls
+            controls = self.elastic.final(x, flow=False).controls
             elasticflow = None
 
         # 1) start from identity
@@ -1428,8 +1428,8 @@ class MakeAffinePair(NonFinalTransform):
     def _unroll(self, x: Tensor, max_depth: int = inf) -> Transform:
         if max_depth == 0:
             return self
-        left = self.subtransform.unroll(x)
-        right = self.subtransform.unroll(x)
+        left = self.subtransform.final(x)
+        right = self.subtransform.final(x)
         return self.Next(
             left, right, **self.get_prm()
         ).unroll(x, max_depth-1)

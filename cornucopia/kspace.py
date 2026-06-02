@@ -449,7 +449,7 @@ class IntraScanMotionTransform(NonFinalTransform):
         # sample motion parameters for each shot
         motion = []
         for shot in range(shots):
-            motion_trf = self.motion.unroll(x)
+            motion_trf = self.motion.final(x)
             motion.append(motion_trf)
 
         # compute sampling pattern
@@ -458,7 +458,7 @@ class IntraScanMotionTransform(NonFinalTransform):
         # sample coil sensitivities
         sens = None
         if self.coils:
-            sens = self.coils.unroll(x)
+            sens = self.coils.final(x)
 
         return self.Next(
             motion, pattern, sens, self.axis, self.freq, **self.get_prm()

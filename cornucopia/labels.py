@@ -206,7 +206,7 @@ class RelabelFinalTransform(FinalTransform):
 
     def _xform(self, x: Tensor) -> Tensor:
         if self.labels is None:
-            return self.unroll(x)(x)
+            return self.final(x)(x)
         assert self.labels is not None
         y = torch.zeros_like(x)
         for out, inp in enumerate(self.labels):
@@ -1021,7 +1021,7 @@ class SmoothMorphoLabelFinalTransform(FinalTransform):
         return type(self)(
             fields, self.labels, self.min_radius, self.max_radius,
             self.method, **self.get_prm()
-        ).unroll(x, max(0, max_depth-1))
+        ).unroll(x, max_depth-1)
 
     def _xform(self, x: Tensor) -> Returned:
         max_abs_radius = 1 + int(pymath.ceil(max(
@@ -1324,7 +1324,7 @@ class SmoothShallowLabelFinalTransform(FinalTransform):
         return type(self)(
             fields, self.labels, self.min_radius, self.max_radius,
             self.method, **self.get_prm()
-        ).unroll(x, max(0, max_depth-1))
+        ).unroll(x, max_depth-1)
 
     def _xform(self, x: Tensor) -> Returned:
         if self.method == 'l1':

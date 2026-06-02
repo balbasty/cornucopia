@@ -315,7 +315,7 @@ class GFactorFinalTransform(NonFinalTransform):
         ).unroll(x, max_depth-1)
 
     def _xform(self, x: Tensor) -> Tensor:
-        noisetrf = self.noisetrf.unroll(x)
+        noisetrf = self.noisetrf.final(x)
         with ctx.returns(noisetrf, 'noise'):
             noise = noisetrf(x)
         with ctx.returns(self.gfactor, ['output', 'field']):
