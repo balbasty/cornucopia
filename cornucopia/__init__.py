@@ -27,7 +27,7 @@ image pairs with a random affine deformation between them::
     # Unpile everything
     img1, img2 = img_and_seg['img']
     seg1, seg2 = img_and_seg['seg']
-    flow = flow_and_mat['flow'
+    flow = flow_and_mat['flow']
 
 """
 
