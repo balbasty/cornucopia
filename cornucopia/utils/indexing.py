@@ -1,7 +1,17 @@
-import torch
-import numpy as np
+# stdlib
 import itertools
+
+# dependencies
+import torch
+
+# internals
 from .py import ensure_list, prod, cumprod
+
+# optionals
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 
 class oob_slice:
