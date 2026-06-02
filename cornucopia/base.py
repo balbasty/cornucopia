@@ -6,8 +6,10 @@ __all__ = [
 # stdlib
 import inspect
 import random
+import re
 from abc import ABC
 from copy import copy
+from fnmatch import fnmatch
 from math import inf
 
 # dependencies
@@ -61,18 +63,24 @@ class Transform(nn.Module, ABC):
 
             !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                 Can be a string since `v0.5`"
-        include : [list of] str, optional
+        include : [list of] str | re.Pattern, optional
             List of keys to which the transform should apply.
             Default: all.
-        exclude : [list of] str, optional
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                Can be a regex or glob pattern since `v0.5`"
+        exclude : [list of] str | re.Pattern, optional
             List of keys to which the transform should not apply.
             Default: none.
-        consume : [list of] str, optional
+
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
+                Can be a regex or glob pattern since `v0.5`"
+        consume : [list of] str | re.Pattern, optional
             List of keys to remove from the output after applying the
             transform. Default: none.
 
             !!! addedin "![v0.5](https://img.shields.io/badge/v0.5-green) \
-                Added in `v0.5`"
+                Added in `v0.5`. Can be a regex or glob pattern."
         """
         super().__init__()
         self.returns = returns
@@ -111,6 +119,36 @@ class Transform(nn.Module, ABC):
             exclude=self.exclude,
             consume=self.consume
         )
+
+    def _is_included(self, key: str) -> bool:
+        if self.include is None:
+            return True
+        for pattern in self.include:
+            if isinstance(pattern, re.Pattern):
+                return bool(pattern.match(key))
+            else:
+                return fnmatch(key, pattern)
+        return False
+
+    def _is_excluded(self, key: str) -> bool:
+        if self.exclude is None:
+            return False
+        for pattern in self.exclude:
+            if isinstance(pattern, re.Pattern):
+                return bool(pattern.match(key))
+            else:
+                return fnmatch(key, pattern)
+        return False
+
+    def _is_consumed(self, key: str) -> bool:
+        if self.consume is None:
+            return False
+        for pattern in self.consume:
+            if isinstance(pattern, re.Pattern):
+                return bool(pattern.match(key))
+            else:
+                return fnmatch(key, pattern)
+        return False
 
     def __enter__(self) -> "Transform":
         # On most tranfsorms, this does nothing but return the transform
@@ -296,12 +334,48 @@ class Transform(nn.Module, ABC):
             # ---- Now we're working with a `Returned` object ----
             return y
 
+        def _is_included(self, key: str) -> bool:
+            if self.include is None:
+                return True
+            for pattern in self.include:
+                if isinstance(pattern, re.Pattern):
+                    return bool(pattern.match(key))
+                else:
+                    return fnmatch(key, pattern)
+            return False
+
+        def _is_excluded(self, key: str) -> bool:
+            if self.exclude is None:
+                return False
+            for pattern in self.exclude:
+                if isinstance(pattern, re.Pattern):
+                    return bool(pattern.match(key))
+                else:
+                    return fnmatch(key, pattern)
+            return False
+
+        def _is_consumed(self, key: str) -> bool:
+            if self.consume is None:
+                return False
+            for pattern in self.consume:
+                if isinstance(pattern, re.Pattern):
+                    return bool(pattern.match(key))
+                else:
+                    return fnmatch(key, pattern)
+            return False
+
         def _get_valid_keys(self, x: tx.Mapping[str, str]) -> tx.Sequence[str]:
             valid_keys = x.keys()
             if self.include is not None:
-                valid_keys = [k for k in valid_keys if k in self.include]
+                valid_keys = [
+                    k for k in valid_keys
+                    if self._is_included(k)
+                ]
             if self.exclude:
-                valid_keys = [k for k in valid_keys if k not in self.exclude]
+                valid_keys = [
+                    k for k in valid_keys
+                    if not self._is_excluded(k)
+                ]
             return valid_keys
 
         def _forward_list(
@@ -342,7 +416,7 @@ class Transform(nn.Module, ABC):
             y = {
                 key: value
                 for key, value in x.items()
-                if key not in valid_keys and key not in self.consume
+                if key not in valid_keys and not self._is_consumed(key)
             }
 
             # For each input item, apply the transform and save its outputs
