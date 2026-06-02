@@ -1,5 +1,5 @@
-name: Test package and publish
-description: Test package and publish
+name: Test on push
+description: Test on push
 
 on:
   push:
