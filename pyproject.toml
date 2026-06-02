@@ -13,7 +13,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 
-requires-python = ">= 3.7"
+requires-python = ">= 3.8"
 dependencies = [
     "torch >= 1.8",             # torch.fft
     "torch-interpol >= 0.3",    # avoids torch.jit.script deprecation warning
