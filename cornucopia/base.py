@@ -926,11 +926,10 @@ class SequentialTransform(_SharedMixin, SpecialTransform):
             # NOTE:
             #   I do not propagate `returns`, as I don't think it makes
             #   sense for sequences.
-            with (
-                IncludeKeysTransform(trf, self.include),
-                ExcludeKeysTransform(trf, self.exclude),
-                ConsumeKeysTransform(trf, self.consume)
-            ):
+            with \
+                IncludeKeysTransform(trf, self.include), \
+                ExcludeKeysTransform(trf, self.exclude), \
+                ConsumeKeysTransform(trf, self.consume):
                 x = trf(x)
         return x
 
@@ -1014,12 +1013,11 @@ class PerChannelTransform(SpecialTransform):
     ) -> Returned:
         results = []
         for i, t in enumerate(self.transforms):
-            with (
-                ReturningTransform(t, self.returns),
-                IncludeKeysTransform(t, self.include),
-                ExcludeKeysTransform(t, self.exclude),
-                ConsumeKeysTransform(t, self.consume)
-            ):
+            with \
+                ReturningTransform(t, self.returns), \
+                IncludeKeysTransform(t, self.include), \
+                ExcludeKeysTransform(t, self.exclude), \
+                ConsumeKeysTransform(t, self.consume):
                 results.append(t(x[i:i+1]))
         return Returned(recursive_cat(results))
 
@@ -1719,11 +1717,10 @@ class MappedTransform(SpecialTransform):
                     # NOTE
                     #   I do not propagate `returns`. I think it should
                     #   be dealt with by the subtransforms.
-                    with (
-                        IncludeKeysTransform(f, self.include),
-                        ExcludeKeysTransform(f, self.exclude),
-                        ConsumeKeysTransform(f, self.consume)
-                    ):
+                    with \
+                        IncludeKeysTransform(f, self.include), \
+                        ExcludeKeysTransform(f, self.exclude), \
+                        ConsumeKeysTransform(f, self.consume):
                         return f(*a, **k)
                 return ff
         else:
