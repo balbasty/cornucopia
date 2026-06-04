@@ -66,8 +66,8 @@ def test_backward_qmri_tofieldmap():
     y = SusceptibilityToFieldmapTransform(
         field_strength=b,
         larmor=f,
-        s0=s0,
-        s1=s1,
+        chi0=s0,
+        delta=s1,
         voxel_size=v,
     )(x)
     y.sum().backward()
@@ -107,7 +107,7 @@ def test_backward_qmri_shim(size):
     x = SusceptibilityToFieldmapTransform(
         field_strength=b,
         larmor=f,
-        s0=s0,
+        chi0=s0,
         voxel_size=v,
     )(x)
     if x.ndim == 3:
@@ -158,7 +158,7 @@ def test_backward_qmri_shim_optimal():
     x = SusceptibilityToFieldmapTransform(
         field_strength=b,
         larmor=f,
-        s0=s0,
+        chi0=s0,
         voxel_size=v,
     )(x)
     y = OptimalShimTransform()(x)
