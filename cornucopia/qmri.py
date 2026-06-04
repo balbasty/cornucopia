@@ -293,16 +293,14 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         if isinstance(axis, int):
             axis = 1 + ((x.ndim - 1 + axis) if axis < 0 else axis)
 
-        if not x.dtype.is_floating_point:
-            field = b0.mask_to_fieldmap(
-                x, zaxis=axis, ndim=x.ndim-1, vx=self.voxel_size,
-                delta=self.delta, chi0=self.chi0, mode=self.mode
-            )
-        else:
-            field = b0.chi_to_fieldmap(
-                x, zaxis=axis, ndim=x.ndim-1, vx=self.voxel_size,
-                 delta=True, chi0=self.chi0, mode=self.mode,
-            )
+        delta = self.delta
+        if x.dtype.is_floating_point:
+            delta = True
+
+        field = b0.chi_to_fieldmap(
+            x, zaxis=axis, ndim=x.ndim-1, vx=self.voxel_size,
+            delta=delta, chi0=self.chi0, mode=self.mode,
+        )
 
         if self.mask_air:
             field.masked_fill_(x == 0, 0)

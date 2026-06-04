@@ -561,6 +561,7 @@ def greens_marques(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
             x = square_(dot(g0, xaxis))
             r = add_(r, x)
 
+    r = r.clamp_min_(1e-8)
     g = div_(z, r)
     g[tuple(center)] = 0
 
