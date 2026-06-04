@@ -18,7 +18,7 @@ from torch import fft
 # internal
 from .warps import identity as identity_grid, cartesian_grid
 from .py import prod, make_vector
-from .smart_inplace import mul_, div_
+from .smart_inplace import add_, mul_, div_, square_, sub_
 
 
 r"""
@@ -37,28 +37,33 @@ Absolute MR susceptibility values.
 References
 ----------
 1.  "Perturbation Method for Magnetic Field Calculations of
-       Nonconductive Objects"
-      Mark Jenkinson, James L. Wilson, and Peter Jezzard
-      MRM, 2004
-      https://onlinelibrary.wiley.com/doi/epdf/10.1002/mrm.20194
-2.  "Susceptibility mapping of air, bone, and calcium in the head"
-      Sagar Buch, Saifeng Liu, Yongquan Ye, Yu-Chung Norman Cheng,
-      Jaladhar Neelavalli, and E. Mark Haacke
-      MRM, 2014
-3.  "Whole-brain susceptibility mapping at high field: A comparison
-       of multiple- and single-orientation methods"
-      Sam Wharton, and Richard Bowtell
-      NeuroImage, 2010
-4.  "Quantitative susceptibility mapping of human brain reflects
-       spatial variation in tissue composition"
-      Wei Li, Bing Wua, and Chunlei Liu
-      NeuroImage 2011
-5.  "Human brain atlas for automated region of interest selection in
-       quantitative susceptibility mapping: Application to determine iron
-       content in deep gray matter structures"
-      Issel Anne L.Lim, Andreia V. Faria, Xu Li, Johnny T.C.Hsu,
-      Raag D.Airan, Susumu Mori, Peter C.M. van Zijl
-      NeuroImage, 2013
+     Nonconductive Objects"
+    Mark Jenkinson, James L. Wilson, and Peter Jezzard
+    MRM, 2004
+    https://doi.org/10.1002/mrm.20194
+2.  "Application of a Fourier-Based Method for Rapid Calculation of
+     Field Inhomogeneity Due to Spatial Variation of Magnetic Susceptibility"
+    Jose P. Marques, and Richard Bowtell
+    CMR B, 2005
+    https://doi.org/10.1002/cmr.b.20034
+3.  "Susceptibility mapping of air, bone, and calcium in the head"
+    Sagar Buch, Saifeng Liu, Yongquan Ye, Yu-Chung Norman Cheng,
+    Jaladhar Neelavalli, and E. Mark Haacke
+    MRM, 2014
+4.  "Whole-brain susceptibility mapping at high field: A comparison
+     of multiple- and single-orientation methods"
+    Sam Wharton, and Richard Bowtell
+    NeuroImage, 2010
+5.  "Quantitative susceptibility mapping of human brain reflects
+     spatial variation in tissue composition"
+    Wei Li, Bing Wua, and Chunlei Liu
+    NeuroImage 2011
+6.  "Human brain atlas for automated region of interest selection in
+     quantitative susceptibility mapping: Application to determine iron
+     content in deep gray matter structures"
+    Issel Anne L.Lim, Andreia V. Faria, Xu Li, Johnny T.C.Hsu,
+    Raag D.Airan, Susumu Mori, Peter C.M. van Zijl
+    NeuroImage, 2013
 """
 mr_chi = {
     'air': 0.4,         # Jenkinson (Buch: 0.35)
@@ -73,14 +78,14 @@ mr_chi = {
 #             the convolution kernel is real + symmetric -> rfft or hfft
 
 
-def fieldmap_to_shift(delta, bandwidth=140):
+def fieldmap_to_shift(delta, bandwidth=30):
     """Convert fieldmap to voxel shift map
 
     Parameters
     ----------
     delta : tensor
         Fieldmap (Hz)
-    bandwidth : float, default=140
+    bandwidth : float, default=30
         Bandwidth (Hz/pixel)
 
     Returns
@@ -91,8 +96,21 @@ def fieldmap_to_shift(delta, bandwidth=140):
     return delta / bandwidth
 
 
-def labels_to_chi(label_map, label_dict=None,
-                  reference='air', dtype=None):
+def _label2chi(label):
+    if label in mr_chi:
+        return mr_chi[label]
+    elif label in jenkinson_chi:
+        return jenkinson_chi[label]
+    elif label in buch_chi_delta_water:
+        return mr_chi['water'] + buch_chi_delta_water[label]
+    elif label in li_chi_delta_water:
+        return mr_chi['water'] + li_chi_delta_water[label]
+    elif label in wharton_chi_delta_water:
+        return mr_chi['water'] + wharton_chi_delta_water[label]
+    return mr_chi['water']
+
+
+def labels_to_chi(label_map, label_dict=None, dtype=None):
     """Synthesize a susceptibility map from labels
 
     Parameters
@@ -101,49 +119,55 @@ def labels_to_chi(label_map, label_dict=None,
         Input label map
     label_dict : dict[int, float or str], default={0: 'air', 1: 'water'}
         Dictionary mapping labels to susceptibility values or region names
-    reference : float or str, default='air'
-        Reference susceptibility
     dtype : torch.dtype
         Data type
 
     Returns
     -------
-    delta_chi : tensor
-        Delta susceptibility map, with respect to the reference (ppm)
+    chi : tensor
+        Susceptibility map (ppm)
 
     """
     if not label_dict:
         label_dict = {0: 'air', 1: 'water'}
+
     unique_labels = label_map.unique().long().tolist()
+    label_range = max(unique_labels) - min(unique_labels) + 1
 
     dtype = dtype or torch.get_default_dtype()
-    delta = torch.empty_like(label_map, dtype=dtype)
 
-    for label in unique_labels:
-        susceptibility = label_dict.get(label, 'water')
+    susceptibility = {
+        label: _label2chi(label_dict.get(label, 'water'))
+        for label in unique_labels
+    }
 
-        if susceptibility in mr_chi:
-            susceptibility = mr_chi[susceptibility]
-        elif susceptibility in jenkinson_chi:
-            susceptibility = jenkinson_chi[susceptibility]
-        elif susceptibility in buch_chi_delta_water:
-            susceptibility = buch_chi_delta_water[susceptibility] \
-                           + mr_chi['water']
-        elif susceptibility in li_chi_delta_water:
-            susceptibility = li_chi_delta_water[susceptibility] \
-                           + mr_chi['water']
-        elif susceptibility in wharton_chi_delta_water:
-            susceptibility = wharton_chi_delta_water[susceptibility] \
-                           + mr_chi['water']
+    if label_range < 2**16:
+        # Use a fast lookup table if the label range is small enough
+        # (Otherwise, the lookup table would be too large)
+
+        conversion = torch.full(
+            [label_range], mr_chi['water'],
+            dtype=dtype, device=label_map.device
+        )
+        for src, dst in susceptibility.items():
+            conversion[src] = dst
+
+        if min(unique_labels) != 0:
+            label_map = label_map.to(torch.long, copy=True)
+            label_map -= min(unique_labels)
         else:
-            susceptibility = mr_chi['water']
+            label_map = label_map.to(torch.long)
 
-        delta[label_map == label] = susceptibility
+        chi = conversion[label_map]
 
-    if isinstance(reference, str):
-        reference = mr_chi[reference]
-    delta -= reference
-    return delta
+    else:
+        # Loop through labels
+
+        chi = torch.full_like(label_map, mr_chi['water'], dtype=dtype)
+        for src, dst in susceptibility.items():
+            chi[label_map == src] = dst
+
+    return chi
 
 
 def ppm_to_hz(fmap, b0=3, freq=42.576E6):
@@ -168,16 +192,23 @@ def ppm_to_hz(fmap, b0=3, freq=42.576E6):
 
 
 def chi_to_fieldmap(
-        ds, zaxis=-1, ndim=None, s0=mr_chi['air'],
-        s1=mr_chi['water'] - mr_chi['air'], vx=1):
+    chi,
+    zaxis=-1,
+    ndim=None,
+    chi0=mr_chi['air'],
+    delta=False,
+    vx=1,
+    mode='marques',
+):
     """Generate a MR fieldmap from a MR susceptibility map.
 
     Parameters
     ----------
-    ds : (..., *spatial) tensor
-        Susceptibility delta map (delta from air susceptibility) in ppm.
-        If bool, `s1` will be used to set the value inside the mask.
-        If float, should contain quantitative delta values in ppm.
+    chi : (..., *spatial) tensor
+        Magnetic susceptibility map (ppm).
+        Each voxel should contain the magnetic susceptibility of the
+        tissue in this voxel. Voxels that contain air should have the
+        susceptibility of air (e.g., 0.4 ppm).
     zaxis : int | sequence[float], default=-1
         Direction of the main magnetic field.
         If a vector or floats, it is unit vector that encodes the direction
@@ -187,60 +218,103 @@ def chi_to_fieldmap(
         index of this dimension. I.e., `0` is equivalent to `[1, 0, 0]`.
     ndim : int, default=`ds.ndim`
         Number of spatial dimensions.
-    s0 : float, default=0.4
+    chi0 : float, default=0.4
         Susceptibility of air (ppm)
-    s1 : float, default=-9.5
-        Susceptibility of tissue minus susceptiblity of air (ppm)
-        (only used if `ds` is a boolean mask)
+    delta : bool | float, default=False
+        * If a bool, the input `chi` is relative to the susceptibility of air
+          (no need to subtract `chi0`).
+          I.e., `true_chi = chi + chi0`.
+        * If a float, the input `chi` is relative to the susceptibility of air,
+          and should be scaled by the value of delta.
+          I.e., `true_chi = chi * delta + chi0`.
     vx : [sequence of] float
         Voxel size
+    mode : {'jenkinson', 'marques'}, default='jenkinson'
+        Method to compute the Greens kernel.
 
     Returns
     -------
-    delta_b0 : tensor
+    b : tensor
         MR field map (ppm).
 
     References
     ----------
-    1. "Perturbation Method for Magnetic Field Calculations of
-           Nonconductive Objects"
-          Mark Jenkinson, James L. Wilson, and Peter Jezzard
-          MRM, 2004
-          https://onlinelibrary.wiley.com/doi/epdf/10.1002/mrm.20194
+    1.  "Perturbation Method for Magnetic Field Calculations of
+         Nonconductive Objects"
+        Mark Jenkinson, James L. Wilson, and Peter Jezzard
+        MRM, 2004
+        https://doi.org/10.1002/mrm.20194
+    2.  "Application of a Fourier-Based Method for Rapid Calculation of
+         Field Inhomogeneity Due to Spatial Variation of Magnetic Susceptibility"
+        Jose P. Marques, and Richard Bowtell
+        CMR B, 2005
+        https://doi.org/10.1002/cmr.b.20034
 
     """
-    ds = torch.as_tensor(ds)
-    backend = dict(dtype=ds.dtype, device=ds.device)
-    if ds.dtype is torch.bool:
+    chi = torch.as_tensor(chi)
+    backend = dict(dtype=chi.dtype, device=chi.device)
+    if chi.dtype is torch.bool:
         backend['dtype'] = torch.get_default_dtype()
 
-    ndim = ndim or ds.ndim
-    shape = ds.shape[-ndim:]
-    zaxis = zaxis - ds.ndim if zaxis >= 0 else zaxis
-    # ^ number from end so that we can apply to vx
+    ndim = ndim or chi.ndim
+    shape = chi.shape[-ndim:]
     vx = make_vector(vx, ndim)
+    if isinstance(zaxis, int):
+        zaxis = zaxis - chi.ndim if zaxis >= 0 else zaxis
+        # ^ number from end so that we can apply to vx
 
-    if ds.dtype is torch.bool:
-        ds = ds.to(**backend)
+    # Compute susceptibility difference
+    if delta is False:
+        chi1 = chi - chi0
+    elif delta is not True:
+        chi1 = chi * delta
     else:
-        s1 = ds.abs().max()
-        ds = ds / s1
-    s1 = s1 * 1e-6
-    s0 = s0 * 1e-6
+        chi1 = chi
 
-    # Analytical implementation following Jenkinson et al.
+    # Compute convolution kernel (in Fourier domain)
+    mode = mode[:1].lower()
+    greens = {
+        'j': greens_jenkinson,
+        'm': greens_marques,
+    }[mode]
     g = greens(shape, zaxis, voxel_size=vx, **backend)
-    f = greens_apply(ds, g)
 
-    # apply rest of the equation
-    out = ds * ((1. + s0) / (3. + s0))
-    out -= f
-    out *= s1 / (1 + s0)
+    # and apply it to the susceptibility map
+    f = greens_apply(chi1, g)
 
+    # Apply rest of the equation
+    if mode == 'j':
+        # δB = B0 * (δχ / (3 + χ0) - (G" * δχ) / (1 + χ0)) [Jenkinson.13]
+        # where G is the Green function of the (negative) Laplacian
+        #    -> G(x) = 1 / (4 * π * |x|)
+        out = chi1 * ((1. + chi0) / (3. + chi0))
+        out = sub_(out, f)
+        out = mul_(out, 1. / (1. + chi0))
+        # NOTE
+        #   The DC component of G" is -2/3, so the average delta field
+        #   is B0 * average(δχ) * (1 / (3 + χ0) + 2 / (3 * (1 + χ0)))
+    elif mode == 'm':
+        # δB = B0 * (δχ / 3 - (Rz^2) * δχ) [Marques.6]
+        #   where Rz^2 is the (negative) squared Riesz transform
+        #      -> Rz^2 = (∂z^2/∇^2)
+        out = chi1 / 3.
+        out = sub_(out, f)
+        # NOTE:
+        #   The kernel is ill-defined at the center of k-space.
+        #   Marques and Bowtell suggest to ensure that the average
+        #   delta field is - B0 * χ0 / 3, which is the theoretical
+        #   value for an infinite, homogeneous object with magnetic
+        #   susceptibility χ0, when the Lorentz correction is included
+        #   (i.e., B = (1 + χ0 / 3) B0).
+        #
+        # We therefore ensure that: average(δB) = - B0 * χ0 / 3
+        out = sub_(out, out.mean() + chi0 / 3.)
+
+    out = mul_(out, 1e-6)  # account for ppm
     return out
 
 
-def greens(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
+def greens_jenkinson(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
     """Semi-analytical second derivative of the Greens kernel.
 
     This function implements exactly the solution from Jenkinson et al.
@@ -331,9 +405,11 @@ def greens(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
             yaxis[1].neg_()
 
     # make zero-centered meshgrid
+    # center = [math.ceil((s-1) / 2) for s in shape]  # matches ifftshift
+    center = [(s-1) / 2 for s in shape]
     g0 = identity_grid(shape, dtype=dtype, device=device)
-    for g1, s in zip(g0.unbind(-1), shape):
-        g1 -= (s-1) / 2
+    for g1, c in zip(g0.unbind(-1), center):
+        g1 -= c
 
     def shift_and_scale_grid(grid, shift):
         return mul_(grid + make_vector(shift).to(grid), voxel_size.to(grid))
@@ -342,9 +418,9 @@ def greens(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
     for shift in itertools.product([-0.5, 0.5], repeat=ndim):
         # Integrate across a voxel
         g1 = shift_and_scale_grid(g0, shift)
-        # Compute \int G" dx dy dz
-        # where G is the Green function of the 2D or 3D Laplacian and
-        # G" is the second derivative of G wrt z.
+        # Compute \int G" dx dy dz, where
+        # * G is the Green function of the Laplacian, and
+        # * G" is the second derivative of G wrt z.
 
         if isinstance(zaxis, int):
             z = g1[..., zaxis]
@@ -367,11 +443,130 @@ def greens(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
         else:
             g += g1
 
+    # divide by 4*pi
     g = div_(g, (2 ** (ndim-1)) * math.pi)
-    g = fft.ifftshift(g, dims)  # move center voxel to first voxel
+
+    # move center voxel to first voxel
+    g = fft.ifftshift(g, dims)
 
     # fourier transform
     g = fft.fftn(g, dim=dims).real
+    return g
+
+
+greens = greens_jenkinson  # backward compatibility
+
+
+def greens_marques(shape, zaxis=-1, voxel_size=1, dtype=None, device=None):
+    """Greens kernel according to Marques and Bowtell (2005)
+
+    The center of the kernel is ill-defined and set to zero. The DC
+    component of the convolved image will be set to s0/3.
+
+    The returned tensor has already been Fourier transformed and can
+    be cached if multiple field simulations with the same lattice size
+    must be performed in a row.
+
+    Parameters
+    ----------
+    shape : sequence of int
+        Lattice shape
+    zaxis : int | sequence[float], default=-1
+        Direction of the main magnetic field.
+        If a vector or floats, it is unit vector that encodes the direction
+        of the main magnetic field in the "scaled voxel" coordinate systems.
+        If an int, the main magnetic field is assumed to be aligned
+        with one of the dimensions of the voxel grid, and `zaxis` is the
+        index of this dimension. I.e., `0` is equivalent to `[1, 0, 0]`.
+    voxel_size : [sequence of] int
+        Voxel size
+    dtype : torch.dtype, optional
+    device : torch.device, optional
+
+    Returns
+    -------
+    kernel : (*shape) tensor
+        Fourier transform of the (second derivatives of the) Greens kernel.
+
+    """
+    def dot(a, b):
+        return a.unsqueeze(-2).matmul(b.unsqueeze(-1)).squeeze(-1).squeeze(-1)
+
+    ndim = len(list(shape))
+    dims = list(range(-ndim, 0))
+    dtype = dtype or torch.get_default_dtype()
+    voxel_size = make_vector(voxel_size, ndim, dtype=dtype, device=device)
+
+    if ndim not in (2, 3):
+        raise ValueError('Invalid ndim', ndim)
+
+    if isinstance(zaxis, int):
+
+        zaxis = -ndim + zaxis if zaxis >= 0 else zaxis  # use negative indexing
+
+        if zaxis not in range(-ndim, 0):
+            raise ValueError('Invalid zaxis', zaxis)
+
+        if ndim == 3:
+            yaxis, xaxis = ([-2, -3] if zaxis == -1 else
+                            [-1, -3] if zaxis == -2 else
+                            [-1, -2])
+        elif ndim == 2:
+            yaxis = -2 if zaxis == -1 else -1
+        else:
+            raise NotImplementedError
+
+    else:
+        zaxis = make_vector(zaxis, dtype=dtype, device=device)
+        zaxis = zaxis / zaxis.norm()  # ensure unit vector
+
+        if len(zaxis) not in (2, 3):
+            raise ValueError('Invalid zaxis', zaxis)
+
+        if ndim == 3:
+            yaxis, xaxis = zaxis.clone(), zaxis.clone()
+            yaxis[:2] = yaxis[:2].flip(0)
+            yaxis[1].neg_()
+            yaxis[2].zero_()
+            xaxis[-2:] = xaxis[-2:].flip(0)
+            xaxis[2].neg_()
+            xaxis[0].zero_()
+        else:
+            yaxis = zaxis.flip(0)
+            yaxis[1].neg_()
+
+    # make zero-centered meshgrid
+    center = [math.ceil((s-1) / 2) for s in shape]  # matches ifftshift
+    g0 = identity_grid(shape, dtype=dtype, device=device)
+    for g1, c in zip(g0.unbind(-1), center):
+        g1 -= c
+
+    # scale by voxel size
+    g0 = mul_(g0, voxel_size)
+
+    # compute kernel
+    if isinstance(zaxis, int):
+        g0 = square_(g0)
+        z = g0[..., zaxis]
+        y = g0[..., yaxis]
+        r = add_(y, z)
+        if ndim == 3:
+            x = g0[..., xaxis]
+            r = add_(r, x)
+    else:
+        z = square_(dot(g0, zaxis))
+        y = square_(dot(g0, yaxis))
+        r = add_(y, z)
+        if ndim == 3:
+            x = square_(dot(g0, xaxis))
+            r = add_(r, x)
+
+    g = div_(z, r)
+    g[tuple(center)] = 0
+
+    # move center voxel to first voxel
+    g = fft.ifftshift(g, dims)
+
     return g
 
 
