@@ -224,9 +224,7 @@ class Transform(nn.Module, ABC):
         """
         # We wrap positional and keywork arguments in special classes
         # to differentiate from inputs that are lists or dicts.
-        print(self.__class__, tuple(type(aa) for aa in a), {k: type(v) for k, v in k.items()})
         x = args = Arguments(*a, **k)
-        print("->", type(x))
 
         if not args:
             # If no input arguments, return None.
