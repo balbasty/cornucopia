@@ -595,7 +595,7 @@ def greens_apply(mom, greens):
     mom = fft.fftn(mom, dim=dims)
 
     # voxel wise multiplication
-    mom *= greens
+    mom = mul_(mom, greens)
 
     # inverse fourier transform
     mom = fft.ifftn(mom, dim=dims).real
