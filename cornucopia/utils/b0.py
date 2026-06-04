@@ -310,7 +310,6 @@ def chi_to_fieldmap(
         # We therefore ensure that: average(δB) = - B0 * χ0 / 3
         mean = out.sum().div_(out.numel())  # weird fix for pytorch 2.0
         out = sub_(out, mean + chi0 / 3.)
-        # out = out - (out.mean() + chi0 / 3.)
 
     out = mul_(out, 1e-6)  # account for ppm
     return out
