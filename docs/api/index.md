@@ -88,12 +88,12 @@ We define aliases for these meta-transforms under `cc.ctx`:
         options:
             heading_level: 3
 
-??? quote "<code>[cc.ctx.exclude](cts/#cornucopia.ctx.exclude) is [cc.RandomizedTransform](special/#cornucopia.special.RandomizedTransform)</code>"
+??? quote "<code>[cc.ctx.exclude](cts/#cornucopia.ctx.exclude) is [cc.ExcludeKeysTransform](special/#cornucopia.special.RandomizedTransform)</code>"
     ::: cornucopia.ctx.exclude
         options:
             heading_level: 3
 
-??? quote "<code>[cc.ctx.consume](cts/#cornucopia.ctx.consume) is [cc.ExcludeKeysTransform](special/#cornucopia.special.ExcludeKeysTransform)</code>"
+??? quote "<code>[cc.ctx.consume](cts/#cornucopia.ctx.consume) is [cc.ConsumeKeysTransform](special/#cornucopia.special.ExcludeKeysTransform)</code>"
     ::: cornucopia.ctx.consume
         options:
             heading_level: 3
@@ -641,6 +641,6 @@ We define aliases for these meta-transforms under `cc.ctx`:
             heading_level: 3
 
 ??? quote "<code>[cc.SynthFromLabelTransform](intensity/#cornucopia.synth.SynthFromLabelTransform)(...)</code> <br/>Synthesize an MRI from an existing label map."
-    ::: cornucopia.synth.IntensityTransform
+    ::: cornucopia.synth.SynthFromLabelTransform
         options:
             heading_level: 3
