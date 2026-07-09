@@ -240,25 +240,28 @@ This is done using the `cc.MappedTransform` meta-transform (or the
 `cc.ctx.map` utility function):
 
 ```python
-# using positionals
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
-trf = cc.SequentialTranform([geom, cc.map(noise, None)])
+
+# using positionals
+trf = cc.SequentialTranform([
+    geom,                       # apply `geom` to all tensors
+    cc.ctx.map(noise, None)     # apply `noise` to the first tensor only
+])
 img, lab = trf(img, lab)
 
 # using keywords
-geom = cc.RandomElasticTransform()
-noise = cc.GaussianNoiseTransform()
-trf = cc.SequentialTranform([geom, cc.map(image=noise)])
+trf = cc.SequentialTranform([
+    geom,                       # apply `geom` to all tensors
+    cc.ctx.map(image=noise)     # apply `noise` to the `image` key.
+])
 img, lab = trf(image=img, label=lab)
 
 # using dictionaries
 dat = [dict(image=img1, label=lab1), dict(image=img2, label=lab2)]
-geom = cc.RandomElasticTransform()
-noise = cc.GaussianNoiseTransform()
 trf = cc.SequentialTranform([
     geom,
-    cc.map(image=noise, nested=True)  # !! must be `nested`
+    cc.ctx.map(image=noise, nested=True)  # !! must be `nested`
 ])
 dat = trf(dat)
 ```
@@ -269,11 +272,12 @@ Alternatively, a transform can be applied selectively to a set of keys
 ```python
 geom = cc.RandomElasticTransform()
 noise = cc.GaussianNoiseTransform()
+
+# Only apply `noise` to the `image` key
 trf = cc.SequentialTranform([geom, cc.ctx.include(noise, "image")])
 img, lab = trf(image=img, label=lab)
 
-geom = cc.RandomElasticTransform()
-noise = cc.GaussianNoiseTransform()
+# Apply `noise` to all tensors _except_ the `label` key.
 trf = cc.SequentialTranform([geom, cc.ctx.exclude(noise, "label")])
 img, lab = trf(image=img, label=lab)
 ```
