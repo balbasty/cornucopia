@@ -28,11 +28,11 @@ Absolute MR susceptibility values.
     the `chi_to_fieldmap` function takes *delta* susceptibility values, with
     respect to the air susceptibility. The susceptibility of the air should
     therefore be subtracted from these values before being passed to
-    `mrfield`.
+    `chi_to_fieldmap`.
 
 !!! note
     All values are expressed in ppm (parts per million).
-    They get multiplied by 1e-6 in `mrfield`
+    They get multiplied by 1e-6 in `chi_to_fieldmap`
 
 References
 ----------
