@@ -32,7 +32,10 @@ from torch import Tensor
 
 # internal
 from .base import FinalTransform, NonFinalTransform, Transform
-from .baseutils import Arguments, NoArguments, Returned, nested_get, prepare_output, return_requires, returns_find, returns_update
+from .baseutils import (
+    Arguments, NoArguments, Returned,
+    nested_get, prepare_output, return_requires, returns_find, returns_update
+)
 from .labels import GaussianMixtureFinalTransform, GaussianMixtureTransform
 from .intensity import (
     RandomMulFieldTransform, AddValueTransform, MulValueTransform,
@@ -52,7 +55,9 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
     A RandomGaussianMixtureTransform tailored to susceptibility maps.
 
     This transform returns a delta susceptibility map (with respect to
-    air), in ppm.
+    air), in ppm. That is, the susceptibility value in each voxel is the
+    susceptibility of the tissue in that voxel minus the susceptibility
+    of air (which is 0.4 ppm).
     """
 
     Next = GaussianMixtureTransform
@@ -63,9 +68,9 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
 
     def __init__(
         self,
-        mu_tissue: cct.SamplerOrBound[float] = Uniform(9, 10),
+        mu_tissue: cct.SamplerOrBound[float] = Uniform(-10, -9),
         sigma_tissue: cct.SamplerOrBound[float] = 0.01,
-        mu_bone: cct.SamplerOrBound[float] = Uniform(12, 13),
+        mu_bone: cct.SamplerOrBound[float] = Uniform(-13, -12),
         sigma_bone: cct.SamplerOrBound[float] = 0.1,
         fwhm: cct.SamplerOrBound[float] = 2,
         label_air: cct.NumberOrSequence[int] = 0,
@@ -79,17 +84,15 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
         Parameters
         ----------
         mu_tissue : Sampler | float
-            Distribution of negative susceptibility offsets (in ppm)
+            Distribution of susceptibility offsets (in ppm)
             of soft tissues with respect to air.
-            Will be negated (air susceptibility is larger than all tissues).
             If float: upper bound.
         sigma_tissue : Sampler | float
             Standard deviation of susceptibility offsets, within class.
-            If float: uper bound.
+            If float: upper bound.
         mu_bone : Sampler | float
-            Distribution of negative susceptibility offsets (in ppm)
+            Distribution of susceptibility offsets (in ppm)
             of hard tissues with respect to air.
-            Will be negated (air susceptibility is larger than all tissues).
             If float: upper bound.
         sigma_bone: Sampler | float
             Standard deviation of susceptibility offsets, within class.
@@ -177,9 +180,6 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
             for i in range(n):
                 fwhm[i] = self.fwhm
 
-       # Negate
-        mu = [-v for v in mu]
-
         return GaussianMixtureTransform(
             mu, sigma, fwhm, dtype=self.dtype, **self.get_prm()
         ).unroll(x, max_depth-1)
@@ -187,58 +187,104 @@ class RandomSusceptibilityMixtureTransform(NonFinalTransform):
 
 class SusceptibilityToFieldmapTransform(FinalTransform):
     """
-    Convert a susceptibiity map (in ppm) into a field map (in Hz)
+    Convert a delta susceptibiity map (in ppm) into a field map (in Hz).
+
+    !!! note
+        The input should be a delta susceptibility map with respect to
+        air, or a tissue mask, in ppm.
+
+    !!! tip
+        If the input is a binary mask, the delta susceptibility value in
+        foreground voxels is set to `delta`.
+
+    ??? reference
+        1.  "Perturbation Method for Magnetic Field Calculations of
+            Nonconductive Objects."
+            Mark Jenkinson, James L. Wilson, and Peter Jezzard.
+            MRM, 2004.
+            https://doi.org/10.1002/mrm.20194
+        2.  "Application of a Fourier-Based Method for Rapid Calculation of
+            Field Inhomogeneity Due to Spatial Variation of Magnetic Susceptibility."
+            Jose P. Marques, and Richard Bowtell.
+            CMR B, 2005.
+            https://doi.org/10.1002/cmr.b.20034
     """
 
     def __init__(
         self,
         axis: tx.Union[int, cct.VectorLike[float]] = -1,
-        field_strength: float = 3,
+        field_strength: tx.Optional[float] = 3,
         larmor: float = 42.576E6,
-        s0: float = 0.4,
-        s1: float = -9.5,
+        chi0: float = 0.4,
+        delta: float = -9.5,
         voxel_size: float = 1,
         mask_air: tx.Union[bool, tx.Literal['fill']] = False,
+        mode: tx.Literal['jenkinson', 'marques'] = 'marques',
         **kwargs
      ) -> None:
         """
 
         Parameters
         ----------
+
         axis : int | sequence[float]
             Direction of the main magnetic field.
-            - If a vector or floats, it is unit vector that encodes the
+
+            - If a vector or floats, it is a unit vector that encodes the
               direction of the main magnetic field in the "scaled voxel"
               coordinate systems.
             - If an int, the main magnetic field is assumed to be aligned
               with one of the dimensions of the voxel grid, and `zaxis` is
               the index of this dimension.
-            I.e., `0` is equivalent to `[1, 0, 0]`.
-        field_strength : float
+              I.e., `0` is equivalent to `[1, 0, 0]`.
+
+        field_strength : float | None
             Strength of the main magnetic field, in Tesla.
-            If None, return a fieldmap in ppm.
+            If `None`, return a fieldmap in ppm.
+
         larmor : float
             Larmor frequency (default: Larmor frequency of water)
-        s0 : float, default=0.4
+
+        chi0 : float, default=0.4
             Susceptibility of air (ppm)
-        s1 : float, default=-9.5
-            Susceptibility of tissue minus susceptiblity of air (ppm)
-            (only used if `ds` is a boolean mask)
+
+            !!! changedin "![v0.6](https://img.shields.io/badge/v0.6-yellow) \
+                    Parameter `s0` renamed to `chi0`"
+
+        delta : float, default=-9.5
+            Delta susceptibility of tissue with respect to air (ppm)
+            (only used if the input tensor is a boolean mask).
+
+            !!! changedin "![v0.6](https://img.shields.io/badge/v0.6-yellow) \
+                    Parameter `s1` renamed to `delta`"
+
         voxel_size : [list of] float
-            Voxel size
-        mask_air : bool
-            Mask air (where delta susceptibility == 0) from
-            resulting fieldmap.
+            Voxel size.
+
+        mask_air : bool | {'fill'}
+            Mask air (where delta susceptibility == 0) from the resulting
+            fieldmap. If `'fill'`, the values in air are replaced by
+            interpolated foreground values. This can help when applying
+            a fieldmap-based displacement map.
+
+        mode : {'jenkinson', 'marques'}
+            Method to compute the fieldmap.
+
+            !!! addedin "![v0.6](https://img.shields.io/badge/v0.6-green) \
+                    New parameter `mode` added with default value `'marques'`"
+                Before this, the `'jenkinson'` method was used by default,
+                and the `'marques'` method was not available.
 
         """
         super().__init__(**kwargs)
         self.axis = axis
         self.field_strength = field_strength
         self.larmor = larmor
-        self.s0 = s0
-        self.s1 = s1
+        self.chi0 = chi0
+        self.delta = delta
         self.mask_air = mask_air
         self.voxel_size = voxel_size
+        self.mode = mode
 
     def _xform(self, x: Tensor) -> Returned:
         ndim = x.ndim - 1
@@ -246,8 +292,15 @@ class SusceptibilityToFieldmapTransform(FinalTransform):
         axis = self.axis
         if isinstance(axis, int):
             axis = 1 + ((x.ndim - 1 + axis) if axis < 0 else axis)
-        field = b0.chi_to_fieldmap(x, zaxis=axis, ndim=x.ndim-1,
-                                   s0=self.s0, s1=self.s1, vx=self.voxel_size)
+
+        delta = self.delta
+        if x.dtype.is_floating_point:
+            delta = True
+
+        field = b0.chi_to_fieldmap(
+            x, zaxis=axis, ndim=x.ndim-1, vx=self.voxel_size,
+            delta=delta, chi0=self.chi0, mode=self.mode,
+        )
 
         if self.mask_air:
             field.masked_fill_(x == 0, 0)
@@ -283,10 +336,10 @@ class ShimTransform(FinalTransform):
         """
         Parameters
         ----------
-        linear : (3|1,) tensor | [list of] float
-            Linear components (3D: [XY, XZ, YX], 2D: [XY])
-        quadratic : (2|1,) tensor | [list of] float
-            Quadratic components (3D: [XXYY, XXZZ], 2D: [XXYY])
+        linear : (3|2,) tensor | [list of] float
+            Linear components: (X, Y, [Z,])
+        quadratic : (5|2,) tensor | [list of] float
+            Quadratic components: (XY, [XZ, YZ,] XX-YY, [XX-ZZ,])
         isocenter : (3|2,) tensor | [list of] float
             Coordinates of the isocenter, in voxels
 
@@ -508,7 +561,7 @@ class HertzToVoxelShiftTransform(FinalTransform):
             pixel is much larger, and displacements are only meaningful
             in extremely high-resolution scans.
 
-            !!! changedin "![v0.4](https://img.shields.io/badge/v0.4-yellow) \
+            !!! changedin "![v0.5](https://img.shields.io/badge/v0.5-yellow) \
                         Default  changed from `140` to `30`"
 
         """
